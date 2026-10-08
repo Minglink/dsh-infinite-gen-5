@@ -54,6 +54,7 @@ def m_semantics(params):
     import ida_ua
     import ida_nalt
     import ida_name
+    import ida_segment
     import idautils
     limit = max(1, min(int(params.get('limit') or 500), 2000))
     offset = max(0, int(params.get('offset') or 0))
@@ -80,7 +81,14 @@ def m_semantics(params):
             symbol = ida_name.get_name(address)
             if symbol and not symbol.startswith(('sub_', 'loc_', 'off_', 'unk_', 'byte_', 'word_', 'dword_', 'qword_')):
                 return 'symbol:' + symbol
-            return 'mapped' if ida_bytes.is_mapped(address) else hex(address)
+            if ida_bytes.is_mapped(address):
+                # Preserve anonymous reference identity while tolerating image rebases.
+                # Collapsing every unknown callee/data address to "mapped" hid retargeted calls.
+                segment = ida_segment.getseg(address)
+                if segment is not None:
+                    return 'mapped:' + ida_segment.get_segm_name(segment) + '+' + hex(address - segment.start_ea)
+                return 'mapped:' + hex(address)
+            return hex(address)
         for block in flow:
             block_tokens = []
             block_values = []

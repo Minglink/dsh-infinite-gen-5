@@ -108,10 +108,10 @@ export function installWorkflow(ctx, { cfg, mgr, definitions, formatError = (err
     return snapshot();
   }
 
-  function selectedTarget(input) {
+  function selectedTarget(input, engine) {
     const explicit = pathInput(input);
     if (explicit) return explicit;
-    const sessions = [...mgr.sessions.values()].filter((session) => mgr.alive(session));
+    const sessions = [...mgr.sessions.values()].filter((session) => mgr.alive(session) && session.engine !== 'x64dbg' && (!engine || session.engine === engine));
     if (sessions.length !== 1) throw new Error(sessions.length ? '当前有多个目标，请在 export 后指定路径' : '当前没有打开的目标');
     return sessions[0].target;
   }
@@ -119,7 +119,7 @@ export function installWorkflow(ctx, { cfg, mgr, definitions, formatError = (err
   async function readCommandTool(name, args, invocation) {
     // Only these read operations may bypass model execution; no write tool is
     // reachable from this command. Writes remain on the host approval pipeline.
-    if (!['ig5_status', 'ig5_open', 'ig5_export_diff'].includes(name)) throw new Error('Command only supports IG5 read operations');
+    if (!['ig5_status', 'ig5_open', 'ig5_export_diff', 'ig5_profile'].includes(name)) throw new Error('Command only supports IG5 read operations');
     if (invocation.signal?.aborted) throw new Error('IG5 命令已取消');
     const definition = catalog.get(name);
     if (!definition) throw new Error(`IG5 tool is unavailable: ${name}`);
@@ -128,8 +128,8 @@ export function installWorkflow(ctx, { cfg, mgr, definitions, formatError = (err
 
   const command = {
     name: 'ig5',
-    description: 'Reverse 工作流：状态、打开样本、导出补丁副本、切换 Core8/Full 工具面。',
-    input: { hint: 'status | open <path> | export [path] | toolset [core|full]' },
+    description: '统一逆向工作流：引擎自检信息、状态、打开样本、导出补丁副本、切换 Core8/Full 工具面。',
+    input: { hint: 'status | engines | open [--engine reverse|ghidra] <path> | export [--engine reverse|ghidra] [path] | toolset [core|full]' },
     async handler(invocation) {
       try {
         if (disposed) throw new Error('IG5 workflow has been disposed');
@@ -137,15 +137,19 @@ export function installWorkflow(ctx, { cfg, mgr, definitions, formatError = (err
         const match = /^\s*(\S+)?(?:\s+([\s\S]*))?$/.exec(invocation.rawInput || '');
         if (!match) throw new Error('用法：/ig5 status|open|export|toolset');
         const action = (match[1] || 'status').toLowerCase();
-        const input = (match[2] || '').trim();
+        let input = (match[2] || '').trim();
+        let engine;
+        const selection = /^--engine\s+(reverse|ghidra)(?:\s+|$)/.exec(input);
+        if (selection) { engine = selection[1]; input = input.slice(selection[0].length).trim(); }
         let result;
         if (action === 'status' && !input) result = await readCommandTool('ig5_status', {}, invocation);
+        else if (action === 'engines' && !input) result = await readCommandTool('ig5_profile', {}, invocation);
         else if (action === 'open') {
           const target = pathInput(input);
           if (!target) throw new Error('用法：/ig5 open <样本完整路径>');
-          result = await readCommandTool('ig5_open', { path: target }, invocation);
+          result = await readCommandTool('ig5_open', { path: target, ...(engine ? { engine } : {}) }, invocation);
         } else if (action === 'export') {
-          result = await readCommandTool('ig5_export_diff', { target: selectedTarget(input) }, invocation);
+          result = await readCommandTool('ig5_export_diff', { target: selectedTarget(input, engine), ...(engine ? { engine } : {}) }, invocation);
         } else if (action === 'toolset') {
           result = input ? setToolset(input.toLowerCase()) : snapshot();
         } else throw new Error('用法：/ig5 status | open <path> | export [path] | toolset [core|full]');

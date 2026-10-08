@@ -1,0 +1,43 @@
+IG5 x64dbg portable runtime
+==========================
+
+The IG5 adapter and IG5 Native Bridge are project code. The x64dbg runtime,
+embedded Python, and runtime libraries retain their upstream licenses. The
+plugin's license does not replace those licenses.
+
+Pinned runtime:
+  x64dbg snapshot 2026.05.27
+  https://github.com/x64dbg/x64dbg/releases/tag/2026.05.27
+  source commit 9c8ca1cae0b6d56cc44f31fddcb10e3b02ffbb87
+  https://github.com/x64dbg/x64dbg/tree/9c8ca1cae0b6d56cc44f31fddcb10e3b02ffbb87
+  source archive:
+  https://github.com/x64dbg/x64dbg/archive/9c8ca1cae0b6d56cc44f31fddcb10e3b02ffbb87.zip
+  build instructions:
+  https://github.com/x64dbg/x64dbg/blob/9c8ca1cae0b6d56cc44f31fddcb10e3b02ffbb87/README.md
+
+x64dbg-LICENSE.txt includes the upstream GPLv3 license and its plugin exception.
+x64dbg-dependencies.md is upstream's dependency license inventory. Separate
+upstream dependency license texts and the URLs used to retrieve them accompany
+this notice (license-sources.json). Dependencies have their own source projects;
+those license texts do not establish the exact revisions used in every upstream
+prebuilt DLL. Before publishing a redistributed runtime, preserve all upstream
+notices and ensure the corresponding source and component-specific obligations
+for the particular distributed binaries are satisfied. The setup script obtains
+the official snapshot directly and verifies its fixed SHA-256.
+
+Embedded CPython 3.12.10 is downloaded from python.org. Its complete LICENSE.txt
+is copied to Python-LICENSE.txt at setup; that text includes Python's bundled
+component notices. Source:
+  https://www.python.org/downloads/release/python-31210/
+  https://www.python.org/ftp/python/3.12.10/Python-3.12.10.tar.xz
+
+The default native transport uses only Python's standard library. No automate,
+ZeroMQ, pip client dependencies, compiler, Zig, or development downloads belong
+in the portable distribution. Automate was investigated separately and failed
+locally with a native ZeroMQ assertion; it is not enabled by setup.
+
+Portable runtime files: runtime.json, python/, snapshot/, licenses/ and
+downloads-manifest.json. Development-only native-build/, toolchain/, clientdeps/,
+downloads/ and sessions/ can be omitted. MSVC is needed only to rebuild the IG5
+bridge; users receive the hash-checked dp32/dp64 binaries. The complete IG5 bridge
+source and build script accompany the plugin in adapters/x64dbg/.

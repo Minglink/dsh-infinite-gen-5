@@ -1,11 +1,12 @@
-import { compareSemantics } from './semantic_diff.js';
+import { compareSemanticsAsync } from './semantic_diff_async.js';
 
 export function defineAdvancedTools(mgr, cfg, render) {
   const targetProperty = { type: 'string', description: 'Opened target path; omit only when one active target is selected' };
   const ea = { type: 'string', description: 'Address, for example 0x140001000' };
   const name = { type: 'string', description: 'Exact function or type name' };
   function session(args) {
-    const live = [...mgr.sessions.values()].filter((value) => mgr.alive(value));
+    const engine = mgr.scope?.getStore()?.engine;
+    const live = [...mgr.sessions.values()].filter((value) => mgr.alive(value) && value.engine !== 'x64dbg' && (!engine || !value.engine || value.engine === engine));
     if (!args.target && live.length !== 1) throw new Error('Specify target when there are zero or multiple active sessions');
     const selected = args.target ? mgr.get(args.target) : live[0];
     if (!mgr.alive(selected)) throw new Error('Target is not open; call ig5_open first');
@@ -51,7 +52,7 @@ export function defineAdvancedTools(mgr, cfg, render) {
           mgr.rpc(session({ target: args.left }), 'semantics', params, cfg.requestTimeoutMs),
           mgr.rpc(session({ target: args.right }), 'semantics', params, cfg.requestTimeoutMs),
         ]);
-        return { left: args.left, right: args.right, ...compareSemantics(left, right, args) };
+        return { left: args.left, right: args.right, ...await compareSemanticsAsync(left, right, args, mgr.scope?.getStore()?.signal) };
       },
     },
     rpcTool('ig5_emulate', 'emulate', 'Isolated x86/x64 function CPU emulation using copied target memory and a synthetic stack. Provide integer arguments, registers and memory buffers; capture return values and memory. No native process or OS/import emulation. Approval-gated; bounded time/instruction/memory budgets.',

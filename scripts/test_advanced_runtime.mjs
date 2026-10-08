@@ -91,6 +91,27 @@ try {
   const same = diff.matches.find((item) => item.old.name === 'ig5_fixture_add');
   assert.ok(same && same.changed === false);
   assert.equal(diff.summary.incomplete, false);
+  // Anonymous call targets used to normalize to the same literal "mapped".
+  // Build a caller outside the export table and retarget it from return-17 to return-0.
+  for (let index = 0; index < targets.length; index++) {
+    const callee = index === 0 ? 0x1100 : 0x12c0;
+    const call = Buffer.alloc(6); call[0] = 0xe8; call.writeInt32LE(callee - 0x1385, 1); call[5] = 0xc3;
+    await tools.get('ig5_run_idapython').execute({ target: targets[index], code: [
+      'import ida_bytes, ida_funcs, ida_name, ida_ua',
+      `ida_bytes.patch_bytes(0x140001380, bytes.fromhex('${call.toString('hex')}'))`,
+      'ida_bytes.del_items(0x140001380, 0, 6)',
+      'ida_ua.create_insn(0x140001380)',
+      'ida_ua.create_insn(0x140001385)',
+      'ida_funcs.add_func(0x140001380, 0x140001386)',
+      "ida_name.set_name(0x140001380, 'IG5AnonymousCaller', ida_name.SN_NOWARN)",
+      "ida_name.set_name(0x140001100, '', ida_name.SN_NOWARN)",
+      "ida_name.set_name(0x1400012c0, '', ida_name.SN_NOWARN)",
+    ].join('\n') }, {});
+  }
+  const anonymous = await call('ig5_bindiff', { left: targets[0], right: targets[1], threshold: 0.4, limit: 100 });
+  const retargeted = anonymous.matches.find((item) => item.old.name === 'IG5AnonymousCaller');
+  assert.ok(retargeted?.changed, 'anonymous call retargeting must not be reported as unchanged');
+  assert.ok(retargeted.changedBlocks.old.length && retargeted.changedBlocks.new.length);
   await assert.rejects(call('ig5_bindiff', { left: targets[0], right: targets[0] }), /different target/);
   console.log('[disasm/bindiff] exact instruction rows; unchanged function and constant/CFG changes across two paths verified');
 

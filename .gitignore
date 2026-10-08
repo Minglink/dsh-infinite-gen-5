@@ -5,3 +5,5 @@ node_modules/
 *.log
 .DS_Store
 Thumbs.db
+runtimes/
+third_party/

@@ -1,0 +1,66 @@
+IG5 own code: Creative Commons Attribution-NonCommercial-ShareAlike 4.0
+International (CC-BY-NC-SA-4.0). See LICENSE.
+
+The above applies to IG5's own code and documentation. Third-party code,
+binaries, dependencies, data and runtime distributions retain their upstream
+licenses and copyright notices. IG5's noncommercial condition does not replace
+or add conditions to their upstream licenses.
+
+Ghidra: https://github.com/NationalSecurityAgency/ghidra
+Runtime retains LICENSE, NOTICE and component licenses from the official release.
+Eclipse Temurin/OpenJDK: https://adoptium.net/ -- runtime retains legal/ and notices.
+Python: https://www.python.org/ -- runtime retains LICENSE.txt.
+JPype: https://github.com/jpype-project/jpype -- wheel metadata/licenses retained.
+The bundled python/pylib/org.jpype.jar is a modified JPype 1.5.2 support JAR,
+not an unmodified upstream release. Original JAR/source, modified source,
+unicode-bootstrap.patch, Apache-2.0 LICENSE, UPSTREAM-NOTICE and modification
+NOTICE are retained in adapters/ghidra/jpype-patch/. The upstream source is
+pinned to https://raw.githubusercontent.com/jpype-project/jpype/v1.5.2/native/java/org/jpype/JPypeContext.java.
+The original support JAR from the pinned official wheel has SHA-256
+a8c993bccb81392102fca126d4d716605cbda2c6df2846d42c92dc3672bfd4f2.
+The patched JAR has SHA-256
+2d5b87593c100e1e5d6dd8cd69cb498b10439676d3e4d0058d0abf6c73f81daf.
+The IG5-specific bootstrap permits one fixed native extension filename and
+resolves it through Java's Unicode working directory. Without that property,
+upstream path handling is retained. The native extension is not rebuilt.
+scripts/patch_ghidra_jpype.ps1 uses the bundled JDK javac --release 8 to replace
+only JPypeContext and its nested class entries in the original JAR. Rebuild
+source/JAR/patch hashes and origins are recorded in runtime.json.jpypeBootstrap
+and licenses/ig5-jpype-bootstrap/provenance.json; seal_runtime_bundle.ps1 updates
+the complete runtime inventory afterwards. This modified upstream component
+retains its upstream license; IG5's NC condition does not replace it. Frozen
+third_party/sources snapshots and their original hashes are not modified.
+x64dbg: https://github.com/x64dbg/x64dbg -- runtime retains core/dependency licenses.
+IG5 bridge source/build inputs are in adapters/x64dbg/; the SDK's plugin exception
+is part of the upstream x64dbg license. The debugger remains a separate process.
+Unicorn: worker/vendor/NOTICE.txt, package metadata and licenses/ contain the
+upstream wheel provenance and GPL/BSD/component-specific license texts.
+
+The complete local IG5 distribution includes runnable packs under
+runtimes/ghidra and runtimes/x64dbg. Default installation verifies and copies
+these packs offline. Setup scripts are maintainer rebuild tools, not user
+prerequisites. Runtime manifests record pinned upstream URLs, hashes and notices.
+The current remote repository has not published these new bundled assets.
+
+Preserved source snapshots are under third_party/sources/:
+  ghidra-master: desktop archive, 12.3 DEV, exact commit unavailable.
+  x64dbg-development: desktop archive, exact commit/gitlinks unavailable;
+    empty modules explicitly supplemented from the pinned runtime source tree.
+  x64dbg-runtime: official commit 9c8ca1cae0b6d56cc44f31fddcb10e3b02ffbb87
+    with recursively pinned submodules.
+manifest.json and provenance/ retain source origins, official tree proofs,
+archive and per-file SHA-256, materialized symlink records and known omissions.
+Ghidra LICENSE/NOTICE/licenses and GPL/licenses, x64dbg LICENSE/docs/licenses.md,
+and all included submodule notices are preserved. Ghidra's desktop 12.3 DEV
+snapshot is not asserted to be the corresponding source of runtime 12.1.4.
+The official prebuilt debugger/runtime distributions are not claimed to have
+been rebuilt from these desktop archives. Source snapshots do not establish a
+complete offline build toolchain or exact corresponding sources for every
+transitive prebuilt dependency; retain component-specific source obligations
+and verify them for any redistributed binaries. No general license
+compatibility conclusion is asserted here.
+
+Reverse is an optional external commercial engine, not an IG5-developed or
+bundled engine. IG5 uses only the user's existing locally licensed installation;
+neither its binaries nor a license are included. DeepSeek Harness is separately
+installed and is not bundled either.

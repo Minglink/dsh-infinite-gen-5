@@ -1,0 +1,21 @@
+--- a/native/java/org/jpype/JPypeContext.java
++++ b/native/java/org/jpype/JPypeContext.java
+@@ -102,6 +102,18 @@
+     {
+       if (nativeLib != null)
+       {
++        // IG5-only bootstrap: the pinned Windows native module reports an ANSI
++        // path, which is not necessarily valid UTF-8. Resolve its fixed filename
++        // from Java's Unicode working directory instead. No arbitrary path is
++        // accepted and all upstream behavior remains the default.
++        String bootstrapNative = System.getProperty("ig5.jpype.native_filename");
++        if (bootstrapNative != null)
++        {
++          if (!"_jpype.cp312-win_amd64.pyd".equals(bootstrapNative))
++            throw new IllegalArgumentException("Unsupported IG5 JPype native filename");
++          nativeLib = Paths.get(System.getProperty("user.dir"), bootstrapNative)
++                  .toRealPath().toString();
++        }
+         System.load(nativeLib);
+       }
+       INSTANCE.context = context;

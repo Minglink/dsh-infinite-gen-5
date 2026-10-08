@@ -168,3 +168,112 @@ test('audit renderer filters targets, escapes malicious text, paginates and refr
   button(h.tree, '下一页').props.onClick(); h.render(); await settle(); h.render(); assert.ok(urls.some(url => url.includes('offset=20')));
   const before = urls.length; button(h.tree, '刷新记录').props.onClick(); h.render(); await settle(); assert.ok(urls.length > before); h.unmount();
 });
+
+test('same target in different engines has a distinct selection and explicit draft engine', () => {
+  const reverse = { key: 'same', target: 'C:/a.exe', engine: 'reverse' }, ghidra = { ...reverse, engine: 'ghidra' };
+  assert.notEqual(ui.sessionIdentity(reverse), ui.sessionIdentity(ghidra));
+  const draft = ui.buildStructDraft('C:/a.exe', 'struct A { int x; };', 'ghidra');
+  assert.equal(JSON.parse(draft.slice(draft.indexOf('{'))).engine, 'ghidra');
+  assert.equal(ui.parseWorkbenchFocus(JSON.stringify({ v: 1, target: 'a.exe', engine: 'ghidra', ea: '0xfffff80000000001' })).ea, '0xfffff80000000001');
+  assert.equal(ui.parseWorkbenchFocus(JSON.stringify({ v: 1, target: 'a.exe', engine: 'x64dbg', ea: '0x1' })), null);
+  assert.equal(ui.parseWorkbenchFocus(JSON.stringify({ v: 1, target: 'a.exe', engine: 'reverse', ea: 9007199254740992 })), null);
+});
+
+test('switching only engine invalidates pending function reads at the same target', async () => {
+  const pending = [];
+  request = url => {
+    const q = new URL(url, 'http://test').searchParams, engine = q.get('engine'), type = q.get('type');
+    assert.ok(['reverse', 'ghidra'].includes(engine));
+    if (type === 'funcs') return Promise.resolve(response({ funcs: [{ ea: '0x1000', name: `${engine}-main`, size: 4 }], total: 1 }));
+    const d = deferred(); pending.push({ d, type, engine }); return d.promise;
+  };
+  const h = harness(ui.FunctionsView, { target: 'same.exe', engine: 'reverse' }); h.render(); await settle(); h.render(); row(h.tree, 'reverse-main').props.onClick();
+  h.render({ target: 'same.exe', engine: 'ghidra' }); await settle(); h.render(); row(h.tree, 'ghidra-main').props.onClick();
+  for (const engine of ['ghidra', 'reverse']) for (const item of pending.filter(x => x.engine === engine)) item.d.resolve(response(item.type === 'decompile' ? { ea: '0x1000', name: engine, code: `${engine}-CODE` } : item.type === 'cfg' ? { blocks: [], edges: [] } : item.type === 'slice' ? { variables: [] } : { rows: [] }));
+  await settle(); h.render(); assert.match(text(h.tree), /ghidra-CODE/); assert.ok(!text(h.tree).includes('reverse-CODE')); h.unmount();
+});
+
+test('workbench excludes dynamic sessions and validates native focus artifact identity', async () => {
+  const sessions = [
+    { key: 'r', target: 'same.exe', engine: 'reverse', alive: true, projectId: 'p', artifactId: 'a', dbRevision: 2 },
+    { key: 'g', target: 'same.exe', engine: 'ghidra', alive: true, projectId: 'p', artifactId: 'a', dbRevision: 3 },
+    { key: 'x', target: 'same.exe', engine: 'x64dbg', alive: true },
+  ];
+  request = () => Promise.resolve({ ok: true, json: async () => ({ sessions, jobs: [] }) });
+  let acknowledgements = 0;
+  const focus = { v: 1, target: 'same.exe', engine: 'ghidra', artifactId: 'a', projectId: 'p', ea: '0x1000' };
+  const props = { viewRequest: { view: 'ig5', focus: JSON.stringify(focus) }, completeViewRequest: () => acknowledgements++ };
+  const h = harness(ui.Workbench, props); h.render(); await settle(); h.render(); h.render();
+  const overview = nodes(h.tree, node => node.type === ui.OverviewCard)[0];
+  assert.equal(overview.props.sessions.length, 2); assert.equal(overview.props.currentSession.engine, 'ghidra');
+  assert.equal(nodes(h.tree, node => node.type === ui.FunctionsView)[0].props.focus.ea, '0x1000'); assert.equal(acknowledgements, 1);
+  h.render({ ...props, viewRequest: { view: 'ig5', focus: JSON.stringify({ ...focus, artifactId: 'replaced' }) } }); h.render();
+  assert.match(text(h.tree), /身份不匹配/); h.unmount();
+});
+
+test('function navigation calls the host openView contract with a target-owned focus', async () => {
+  request = () => Promise.resolve({ ok: true, json: async () => ({ sessions: [{ key: 'g', target: 'same.exe', engine: 'ghidra', alive: true, artifactId: 'a' }], jobs: [] }) });
+  const calls = [], h = harness(ui.Workbench, { openView: (...args) => calls.push(args) }); h.render(); await settle(); h.render();
+  nodes(h.tree, node => node.type === ui.FunctionsView)[0].props.onNavigate({ ea: '0x1000', name: 'main' });
+  assert.equal(calls.length, 1); assert.equal(calls[0][0], 'ig5');
+  const focus = JSON.parse(calls[0][1]); assert.equal(focus.engine, 'ghidra'); assert.equal(focus.target, 'same.exe'); assert.equal(focus.artifactId, 'a'); h.unmount();
+});
+
+test('runtime view reads cached debug_state only and escapes register values', async () => {
+  const urls = [];
+  request = (url, options) => { urls.push(url); assert.equal(options, undefined); return Promise.resolve(response({ state: 'paused', runId: 'run_A', stopSeq: 3, regs: { rax: '<script>unsafe</script>' } })); };
+  const h = harness(ui.RuntimeView, { sessions: [{ key: 'x', target: 'a.exe', engine: 'x64dbg' }], refresh: 1 }); h.render(); await settle(); h.render();
+  assert.match(text(h.tree), /run_A/); assert.match(text(h.tree), /只读缓存/); assert.ok(markup(h.tree).includes('&lt;script&gt;')); assert.ok(!markup(h.tree).includes('<script>'));
+  assert.ok(urls.every(url => { const q = new URL(url, 'http://test').searchParams; return q.get('type') === 'debug_state' && q.get('engine') === 'x64dbg'; })); h.unmount();
+});
+
+test('Ghidra IR selection requests explicit level and keeps source distinct', async () => {
+  const urls = [];
+  request = url => { urls.push(url); return Promise.resolve(response({ kind: 'pcode', operations: ['COPY r0, 1'] })); };
+  const h = harness(ui.IrView, { target: 'a.exe', engine: 'ghidra', ea: '0x1000' }); h.render(); await settle(); h.render();
+  nodes(h.tree, node => node.type === 'select')[0].props.onChange({ target: { value: 'raw' } }); h.render(); await settle(); h.render();
+  assert.ok(urls.some(url => { const q = new URL(url, 'http://test').searchParams; return q.get('type') === 'ir' && q.get('engine') === 'ghidra' && q.get('level') === 'raw' && q.get('limit') === '120'; }));
+  assert.match(text(h.tree), /不对应 Reverse/); assert.match(text(h.tree), /COPY r0/); h.unmount();
+});
+
+test('audit view includes only selected engine at the same target', async () => {
+  request = url => { assert.equal(new URL(url, 'http://test').searchParams.get('engine'), 'ghidra'); return Promise.resolve(response({ rows: [{ tool: 'ghidra-note', args: { target: 'a.exe', engine: 'ghidra' } }, { tool: 'ig5_sync', args: { target: 'a.exe' }, detail: { destination: { engine: 'ghidra' }, note: 'sync destination evidence' } }, { tool: 'reverse-note', args: { target: 'a.exe' } }], total: 1 })); };
+  const h = harness(ui.PatchesView, { target: 'a.exe', engine: 'ghidra' }); h.render(); await settle(); h.render();
+  assert.match(text(h.tree), /ghidra-note/); assert.match(text(h.tree), /sync destination evidence/); assert.ok(!text(h.tree).includes('reverse-note')); h.unmount();
+});
+
+test('overview preserves partial analysis status instead of presenting completion', () => {
+  const h = harness(ui.OverviewCard, { currentSession: { target: 'a.exe', engine: 'ghidra', partial: true, n_funcs: 17 }, sessions: [], runningCount: 0 });
+  h.render(); assert.match(text(h.tree), /部分分析结果/); assert.ok(!text(h.tree).includes('分析会话就绪'));
+  assert.ok(nodes(h.tree, node => node.props?.className === 'ig5-chip warn').length); h.unmount();
+});
+
+test('runtime target switch never labels the previous target snapshot as the new target', async () => {
+  const a = { key: 'a', target: 'A.exe', engine: 'x64dbg', artifactId: 'artifact-A' };
+  const b = { key: 'b', target: 'B.exe', engine: 'x64dbg', artifactId: 'artifact-B' };
+  const oldRefresh = deferred(), nextTarget = deferred(); let aReads = 0;
+  request = url => new URL(url, 'http://test').searchParams.get('target') === 'A.exe'
+    ? (++aReads === 1 ? Promise.resolve(response({ state: 'paused', runId: 'run-A', regs: { rip: '0xAAA' } })) : oldRefresh.promise)
+    : nextTarget.promise;
+  const h = harness(ui.RuntimeView, { sessions: [a, b], refresh: 1 }); h.render(); await settle(); h.render();
+  assert.match(text(h.tree), /run-A/);
+  h.render({ sessions: [a, b], refresh: 2 });
+  nodes(h.tree, node => node.type === 'select')[0].props.onChange({ target: { value: ui.sessionIdentity(b) } });
+  h.render(); h.render();
+  assert.match(text(h.tree), /B.exe/); assert.ok(!text(h.tree).includes('run-A')); assert.ok(!text(h.tree).includes('0xAAA'));
+  oldRefresh.resolve(response({ state: 'paused', runId: 'late-A', regs: { rip: '0xAAA' } })); await settle(); h.render();
+  assert.ok(!text(h.tree).includes('late-A'));
+  nextTarget.resolve(response({ state: 'paused', runId: 'run-B', regs: { rip: '0xBBB' } })); await settle(); h.render();
+  assert.match(text(h.tree), /run-B/); assert.ok(!text(h.tree).includes('0xAAA')); h.unmount();
+});
+
+test('runtime replacement at the same path hides the old artifact snapshot', async () => {
+  const session = { key: 'same', target: 'same.exe', engine: 'x64dbg', artifactId: 'old', attachmentId: 'old-attachment' };
+  const next = deferred(); let reads = 0;
+  request = () => ++reads === 1 ? Promise.resolve(response({ runId: 'old-run', regs: { rip: '0xAAA' } })) : next.promise;
+  const h = harness(ui.RuntimeView, { sessions: [session], refresh: 1 }); h.render(); await settle(); h.render();
+  assert.match(text(h.tree), /old-run/);
+  h.render({ sessions: [{ ...session, artifactId: 'new', attachmentId: 'new-attachment' }], refresh: 1 }); h.render();
+  assert.ok(!text(h.tree).includes('old-run')); assert.ok(!text(h.tree).includes('0xAAA'));
+  next.resolve(response({ runId: 'new-run' })); await settle(); h.render(); assert.match(text(h.tree), /new-run/); h.unmount();
+});

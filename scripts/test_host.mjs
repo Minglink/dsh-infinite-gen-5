@@ -3,6 +3,8 @@
 import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
+import os from 'node:os';
+import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -10,7 +12,11 @@ const pluginRoot = path.resolve(here, '..');
 const mod = await import(pathToFileURL(path.join(pluginRoot, 'index.js')).href);
 
 const IDA_DIR = process.env.IG5_IDA_DIR || 'C:\\Users\\Administrator\\Desktop\\IDA Professional 9.2';
-const TARGET = process.argv[2] || path.join(pluginRoot, '..', '_research', 'fixtures', 'notepad.exe');
+const input = process.argv[2] || path.join(pluginRoot, '..', '_research', 'fixtures', 'notepad.exe');
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ig5-host-'));
+const TARGET = path.join(scratch, path.basename(input));
+fs.copyFileSync(input, TARGET);
+const artifactDir = path.join(scratch, 'artifacts');
 
 const tools = new Map();
 const effects = [];
@@ -74,7 +80,8 @@ const ctx = {
   },
 };
 
-mod.apply(ctx, { idaDir: IDA_DIR, toolset: 'full' });
+try {
+mod.apply(ctx, { idaDir: IDA_DIR, toolset: 'full', artifactDir });
 console.log('[registered]', [...tools.keys()].join(', '));
 console.log('[routes]', [...routes.keys()].join(', '));
 
@@ -205,7 +212,7 @@ for (let i = 0; i < 6 && undone.kind !== 'bytes'; i++) {
 console.log('  rolled back to kind =', undone.kind, 'restored =', undone.restored);
 const by2 = await call('ig5_bytes', { target: TARGET, ea: rn.ea, size: 4 });
 console.log('  bytes after undo =', by2.hex, '(应还原为补丁前 4c8bdc..)');
-const auditFile = path.join(process.env.USERPROFILE, '.dsh', 'ig5', 'artifacts', 'approvals.jsonl');
+const auditFile = path.join(artifactDir, 'approvals.jsonl');
 // mock 直调 execute 绕过了注册表派发，这里直接驱动 post-execute 监听器验证留痕
 const postList = ctx.listeners.get('tools/post-execute') || [];
 if (postList.length !== 1) throw new Error('expected exactly one post-execute listener');
@@ -218,6 +225,11 @@ console.log('  audit log exists =', fs.existsSync(auditFile), '| decision =', po
 
 await call('ig5_close', { target: TARGET });
 
-for (const d of effects) d();
 console.log('\n== HOST SURFACE + BACKGROUND JOBS OK ==');
-process.exit(0);
+assert.deepEqual(fs.readFileSync(TARGET), fs.readFileSync(input));
+} finally {
+  for (const d of effects.reverse()) await d();
+  assert.equal(path.dirname(path.resolve(scratch)), path.resolve(os.tmpdir()));
+  assert.ok(path.basename(scratch).startsWith('ig5-host-'));
+  await fs.promises.rm(scratch, { recursive: true, force: true, maxRetries: 30, retryDelay: 100 });
+}

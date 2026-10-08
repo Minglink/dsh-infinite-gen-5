@@ -1,25 +1,42 @@
-# 无限五代维护约定（v0.9.0）
+# 无限五代维护约定（v1.0.0）
 
 - 源码只在 `C:\Users\Administrator\Desktop\无限五代\dsh-infinite-gen-5` 修改。
 - 运行副本为 `C:\Users\Administrator\.dsh\plugins\dsh-infinite-gen-5`，不得直接改运行副本。
 - 每次调整后依次执行全部项目 JavaScript 语法检查、全部项目 Python 编译检查、回归烟测、Robocopy 镜像同步、重载宿主、本次启动日志检查。使用与宿主一致的 Python；完整命令与 npm 回归范围见 README。
 - 使用 PowerShell；后台启动宿主或助手进程时指定隐藏窗口。Robocopy `/MIR` 前核实源码与目的目录的绝对路径，退出码 0–7 可接受。
-- 对外界面、工具说明、诊断响应及错误消息统一使用 Reverse 引擎称谓，不泄露商业引擎版本或带版本的安装路径。内部配置/API 标识保留兼容。
+- 对外界面、工具说明、诊断响应及错误消息商业引擎统一使用 Reverse 称谓，开源来源明确标 Ghidra/x64dbg，不泄露商业引擎版本或带版本的安装路径。内部配置/API 标识保留兼容。
 - Function Calling Schema 的必填项必须写在父级 `required: [...]` 数组，不能在 property 中写 `required: true`。
-- 完整目录为 34 工具：21 只读、11 审批、2 生命周期/配置。11 个审批工具必须经过 `installApprovalGate`，包含 `ig5_switch_repair` 与 `ig5_emulate`；不得通过脚本、HTTP 或直接 Worker RPC 给产品用户建立写入旁路。
-- 默认 Core 8 为 `doctor/open/status/funcs/strings/decompile/close/profile`（均带 `ig5_` 前缀）。需要高级能力时先调用 `ig5_profile toolset=full`；`toolset=core` 恢复 8 个入口，不传参数只查询。保留用户 `/ig5 toolset full|core` 入口；真实回归已覆盖 full→core8（注销写工具）→full34。切换作用域是插件实例，影响其所有会话，不持久化、不按会话隔离。重载使用 `config.toolset`；此操作仅配置工具面，不授予样本执行权限或改变审批要求。
+- 完整目录为 36 工具：22 只读、12 审批、2 生命周期/配置。12 个审批工具必须经过 `installApprovalGate`，包含 `ig5_switch_repair`、`ig5_emulate` 与 `ig5_sync`；不得通过脚本、HTTP 或直接 Worker RPC 给产品用户建立写入旁路。
+- 默认 Core 8 为 `doctor/open/status/funcs/strings/decompile/close/profile`（均带 `ig5_` 前缀）。需要高级能力时先调用 `ig5_profile toolset=full`；`toolset=core` 恢复 8 个入口，不传参数只查询。保留用户 `/ig5 toolset full|core` 入口；真实回归已覆盖 full→core8（注销写工具）→full36。切换作用域是插件实例，影响其所有会话，不持久化、不按会话隔离。重载使用 `config.toolset`；此操作仅配置工具面，不授予样本执行权限或改变审批要求。
 - 五个原生技能与 `/ig5` commands 已实现，由 `workflow.js` 随服务可用注册并在卸载时清理；修改注册代码必须验证 Core/Full 切换、注册失败回滚与生命周期。
 - 工作台 `/ig5-data` 仅允许显式只读类型，结构体仅允许 `list/get`；结构体编辑只生成可编辑 composer 草稿，插入后仍由用户发送并通过宿主审批。不得自动 submit 或覆盖现有草稿；无原生接口时保留复制入口。
 - `ig5_struct` 参数名是 `action`，调试参数名是 `op`。
 - 类型系统使用 `ida_typeinf.tinfo_t`、`udt_type_data_t`；Local Types 数量使用 `get_ordinal_limit/get_ordinal_count`；空地址使用 `ida_idaapi.BADADDR`；导入回调参数为 `(ea, name, ordinal)`。
 - 回滚依赖项目自建 `_op_journal`，不能假设无头引擎自动记录 Undo。switch repair 默认 preview，`apply=true` 需审批且不在该 Undo 范围内，必须明确说明。
 - `expected` 是可选参数；提供时必须前置比较并在不匹配时拒绝，补丁工作流应优先显式提供。必须拒绝未加载区域；导出应读取当前数据库状态、尊重已执行 Undo，不能盲目重放历史审批日志。
-- CFG SVG、焦点切片、结构体草稿与审计分页已完成 renderer 和真实浏览器 fixture 验证。异步读取须隔离函数/目标切换的旧响应；审计使用真实 `args/detail/ts/isError` 字段并按目标过滤；文本不得作为 HTML 注入。
+- CFG SVG、焦点切片、结构体草稿与审计分页已完成 renderer 和真实浏览器 fixture 验证。异步读取须隔离函数/目标/引擎/样本身份/修订切换的旧响应；审计使用真实 `args/detail/ts/isError` 字段并按目标与引擎过滤（sync 归属目的引擎）；文本不得作为 HTML 注入。
 - 开发回归使用样本副本并断言返回值，不将“调用未抛异常”视为功能通过。默认样本为上级 `_research\fixtures\notepad.exe` 文件。
 - 调试器 `load` 成功不代表运行态通过；成功响应必须依据实际事件与进程状态。真实调试烟测是显式运行的 `scripts/test_debug_runtime.mjs`。
 - 原生 win32 已在 notepad 副本通过 start→ASLR 断点→寄存器读写→step→注释回写/Undo→故意访问违规的结构化异常上下文→恢复→stop。Bochs 仍仅 load/bpt 成功，start 曾返回 `rc=0/no-task`，不能把原生后端证据外推为 Bochs 运行态通过；外部模拟器路径未确认不是已证实的唯一根因。
 - 微码原生 filter 管线、多级真实 IR、临时 IR optimize 与受限 `xor-self/sub-self` optinsn 规则已验证。隔离构造真实临时 MBA 时两种规则各命中 1 次，`mov #0`/源清空/目的保留及原生 optimize、verify、finally remove 通过，IDB 字节不变；自然夹具自定义规则仍 `rule_hits=0`，不得声称自然函数发生规则改写。未实现通用去平坦化。
 - MSVC64 继承及 Itanium class/SI/VMI 已验证生成 PE 夹具中的真实字节布局，不等于原生 Linux ELF 装载验证。调用解析要求显式 `table+offset`，不自动推导寄存器来源。
 - `ig5_bindiff` 使用多特征启发式、变更块、歧义和截断信息；`[rcx+4]`→`[rcx+8]` 已在生成 PE 夹具中验证 matched+changed/变更块，不得把评分当成语义等价证明或自动漏洞确认。
-- 仿真使用插件内 vendored Unicorn 2.1.4，仅 x86/x64，复制内存最多 64 MiB，无 OS/import/TLS 仿真；保留返回值、内存与超时/fault 结果，不改引擎 site-packages。依赖锁定见 `worker/requirements-emulation.txt`；分发时保留 `worker/vendor/NOTICE.txt` 和完整上游许可证，插件 MIT 不替代依赖许可证。
+- 仿真使用插件内 vendored Unicorn 2.1.4，仅 x86/x64，复制内存最多 64 MiB，无 OS/import/TLS 仿真；保留返回值、内存与超时/fault 结果，不改引擎 site-packages。依赖锁定见 `worker/requirements-emulation.txt`；分发时保留 `worker/vendor/NOTICE.txt` 和完整上游许可证，项目自身许可证不替代依赖许可证。
 - 日志与产物位于 `C:\Users\Administrator\.dsh\ig5\artifacts`；检查本次启动新增的 `ig5-diag.log` 记录。
+
+- v1.0.0 统一三引擎路由但不统一可写数据库。静态工具显式传 `engine=reverse|ghidra`，`ig5_ir` 读取真实 Ghidra raw/high p-code，Reverse 用 `ig5_microcode`，不得混同 IR 级别或能力。Ghidra-only（`reverse:false`）不要求商业安装；不支持的能力依据实际 capabilities 拒绝。
+- `source/project_store.js` 管理 SHA-256 artifact、可移动路径、engine attachment 与持久 dbRevision；不同 session 不暗中共享活跃 DB。成功变更后递增修订并清缓存，`expected_revision` 在执行队列内前置核验。稳定数据库复用保持历史修订，崩溃恢复不可猜测释放活跃 attachment。
+- 工程文件锁按 PID、OS 创建身份及 nonce 核验，完整 claim 原子发布；活锁、权限不明及未知 legacy 锁保持 fail-closed，不按年龄清理。释放与恢复使用同 nonce 非空 tombstone 防延迟恢复误移新锁，目录中仅保留极小 owner 元数据，当前不自动删除；仅可确认宿主及相关 worker 全部停止后维护清理。未知 `projects.lock` 必须核实无所有者再人工移走。锁竞争测试使用临时目录和真实子进程，不改用户工程。
+- 数据库排他与修订按物理文件身份识别硬链接及目录别名，兼容未创建路径；多条历史记录冲突必须明确拒绝，不能猜测合并修订。file/RVA 转换同时核对来源和目的唯一映射；保留十六进制/BigInt，不用 Number 中转 64 位地址。
+- `source/address_ref.js` 使用十六进制字符串/BigInt 保持 64 位地址精度；VA/RVA/file/runtime/stack/register 等空间不得混用。转换要求明确 imagebase/section/已加载模块映射，BSS/overlay 不假造文件偏移。动态地址核对 runId/moduleLoadEpoch/stopSeq，旧暂停上下文不能继续执行。
+- `ig5_sync` 仅在同 hash 的两个静态引擎数据库间显式复制所选 RVA 名称、行尾注释、有限字节。preview 和 apply 都经工具级审批；apply 必须核验 digest、hash、attachments、revisions 与前后值，并锁定两边队列；部分失败返回 applied/remaining、atomic=false，已尝试计划不可重放。不得宣传自动全量同步、类型同步或跨引擎原子 Undo。
+- x64dbg 使用自建 ig5-native SDK+NamedPipe bridge，不依赖 automate/ZeroMQ。headless 不等于不执行样本；load 不执行，start/continue/trace 必须有该目标运行授权及审批。公开工具链已验证 x64 中文路径 PE 的 ASLR/RVA 断点、regs/readmem/modules、step/setreg、受限 trace、结构化 AV、控制 owner/takeover、过期 run/stop 拒绝、只读缓存 HTTP 与 stop/dispose；x64/x86 已分别完成真实 headless 闭环，14 项 fake、管道 DACL、取消/超时/强杀清理验证通过；不能外推任意样本。
+- 工作台静态选择器必须隔离 session key/target/engine，排除 x64dbg 调试会话。原生 openView 焦点绑定 engine/target/artifact；运行态页仅读缓存，不能借 GET 启动调试器或执行 RPC。Ghidra p-code 结果应标来源及截断。
+- 运行态缓存 state 必须带 scope，并在 render 时核对 session/target/engine/artifact/attachment；目标切换立即隐藏旧快照，不能仅依赖 effect 清理或等下一次响应。
+- 完整发行包内置 `runtimes/ghidra` 与 `runtimes/x64dbg`，默认 install 离线校验并带入插件，不依赖另跑 setup 或外部 `.dsh/ig5/runtimes`。manifest 相对路径保持可移动，显式 runtime 配置覆盖仍受支持；不要修改商业安装、全局 Python 或 system PATH。默认优先可用的已授权本机 Reverse，否则随包 Ghidra，用户可显式 engine。Reverse 为外部商业引擎，只使用已有授权本机安装，不称内置自研、不随包附程序或许可；DSH 也不随包。
+- `third_party/sources/{ghidra-master,x64dbg-development,x64dbg-runtime}` 为保留原内容/许可的上游源码归档，来源、固定gitlinks、文件hash、链接materialize与已知缺件在 manifest.json。桌面 Ghidra 12.3 DEV 不等于随包12.1.4对应源码；development原修订未知，固定补充模块不得冒称原gitlinks。官方运行件加IG5 bridge不宣称整套由桌面checkout编译。源码存在不等于已暴露功能或已具备全离线重编工具链。保留全部上游许可，项目NC条款不覆盖第三方。
+- 安装/打包不能按目录basename把源码中的真实 projects/sessions/downloads 等目录误当运行缓存删掉；第三方逐文件清单应在复制后仍匹配。当前远端仓库未发布本轮自包含资产，禁止宣传现有GitHub下载已包含完整运行包。维护者setup属于联网资产重建，普通安装无需它；用户项目与缓存默认不分发。
+- Ghidra 默认 analysis_profile=interactive，仅跳过批量 Decompiler Parameter ID，函数反编译仍可用；full 显式选择。ig5_open analysis_timeout 为 1–600 秒。真实 notepad interactive 约 85 秒/853 函数、无超时、分析后 decompile 子进程数为 0，不作通用性能保证。分析预算到期须保留并传播 partial/analysis，作业、status 和工作台标明“部分分析结果”，不能把可读结果当作全分析完成。项目自有代码为 CC BY-NC-SA 4.0，第三方组件按各自许可保留通知，不受项目 NC 条款覆盖。
+- 引擎提交后若修订元数据持久化失败，必须捕获并返回明确错误、回收会话，不能让 stdout 事件异常终止宿主，也不能继续使用未更新的 dbRevision；此故障路径已回归。
+- Ghidra `partial/analysisComplete` 是全程序 profile 状态，`scopePartial/scopeComplete` 是当前范围；范围完成不能升级全程序完成或改其 profile。`committed` 表示内存事务，`saved` 表示确认原生保存；名称/注释/补丁每次保存，类型/结构体/分析为 session-only 原生 Undo，正常 close 保存，后续 save 可使原生 Undo 失效。强杀/硬超时可能丢失未保存修改；检查 recovery/unsavedChanges/durableRevision，不自动重放。
+- Ghidra `partial_commit`/`recoveryRequired` 错误不可被压成普通失败或暗示回滚；保留 committed/saved/stage/journalId/revision/durableRevision 等证据。原生数据库与 intent/sidecar/审计不是跨文件原子事务。sync remaining 为未确认项，失败项也可能已提交，必须检查 failed 证据并恢复目的数据库后重新 preview，不能盲目重试。

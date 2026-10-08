@@ -9,7 +9,7 @@ The Python package metadata identifies the bindings as BSD licensed; the
 Unicorn native engine identifies its license as GPLv2. Upstream COPYING,
 COPYING.LGPL2, COPYING_GLIB and qemu/LICENSE are included in licenses/.
 These components retain their upstream licenses and copyright notices;
-the plugin's MIT license does not replace them. See upstream source files
+the license of IG5's own code does not replace them. See upstream source files
 for component-specific notices and build scripts.
 
 This dependency is loaded from the plugin's worker/vendor directory.

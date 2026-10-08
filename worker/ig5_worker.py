@@ -100,6 +100,7 @@ def _collect_info(functions=None) -> dict:
     import ida_ida
     import ida_entry
     import ida_funcs
+    import ida_nalt
     import idautils
 
     segs = []
@@ -128,7 +129,8 @@ def _collect_info(functions=None) -> dict:
         proc = proc.decode(errors="replace") if isinstance(proc, bytes) else str(proc)
     except Exception:
         proc = None
-    return {"segments": segs, "n_funcs": n_funcs, "entries": entries, "bits": bits, "proc": proc}
+    return {"segments": segs, "n_funcs": n_funcs, "entries": entries, "bits": bits, "proc": proc,
+            "imageBase": hex(ida_nalt.get_imagebase())}
 
 
 def _segment_ranges():
@@ -252,6 +254,8 @@ def m_open(params: dict) -> dict:
     info["target"] = path
     info["elapsedMs"] = int((time.time() - _t0) * 1000)
     info["reusedIdb"] = not fresh
+    import ida_loader
+    info["databasePath"] = ida_loader.get_path(ida_loader.PATH_TYPE_IDB)
     emit_progress({"stage": "done", "pct": 100, "functions": info["n_funcs"]})
     return info
 
@@ -420,6 +424,29 @@ def m_bytes(params: dict) -> dict:
     return {"ea": hex(ea), "size": len(data), "hex": data.hex()}
 
 
+def m_inspect(params: dict) -> dict:
+    """Exact-address evidence for reviewed, revision-checked cross-engine plans."""
+    import ida_bytes
+    import ida_name
+    import ida_loader
+    ea = _resolve_ea(params)
+    size = max(1, min(int(params.get('size') or 1), 4096))
+    if any(not ida_bytes.is_loaded(ea + i) for i in range(size)):
+        raise ValueError('inspect range is not fully loaded')
+    data = ida_bytes.get_bytes(ea, size) or b''
+    return {'ea': hex(ea), 'name': ida_name.get_name(ea) or '',
+            'comment': ida_bytes.get_cmt(ea, False) or '', 'hex': data.hex(),
+            'size': len(data), 'fileOffset': int(ida_loader.get_fileregion_offset(ea))}
+
+
+def m_close(params: dict) -> dict:
+    global _open
+    if _open:
+        _idapro.close_database(True)
+        _open = False
+    return {'ok': True, 'closed': True}
+
+
 def m_search(params: dict) -> dict:
     """字节特征码搜索（支持 ?? 通配）：ida_bytes.find_bytes + mask。"""
     import ida_bytes
@@ -503,11 +530,9 @@ def m_listing(params: dict) -> dict:
             if total > offset and len(rows) < limit:
                 rows.append({"module": mod_name,
                              "ea": hex(ea), "name": name or f"#{ordinal}", "ordinal": int(ordinal)})
-            return 0 if len(rows) < limit else 1  # 非 0 = 停止枚举
+            return True  # Continue counting all imports, including rows outside this page.
 
         for mi in range(qty):
-            if len(rows) >= limit:
-                break
             mod_name = ida_nalt.get_import_module_name(mi) or f"#{mi}"
             ida_nalt.enum_import_names(mi, cb)
     elif kind == "exports":
@@ -655,7 +680,7 @@ def m_scan(params: dict) -> dict:
 
         def cb(ea, name, ordinal):  # 原型：callback(ea, name, ordinal)
             names.append((cur_mod[0], name or f"#{ordinal}"))
-            return 0
+            return True
 
         for mi in range(ida_nalt.get_import_module_qty()):
             cur_mod[0] = ida_nalt.get_import_module_name(mi) or f"#{mi}"
@@ -1421,6 +1446,8 @@ METHODS = {
     "comment": m_comment,
     "xrefs": m_xrefs,
     "bytes": m_bytes,
+    "inspect": m_inspect,
+    "close": m_close,
     "search": m_search,
     "listing": m_listing,
     "undo": m_undo,
@@ -1452,7 +1479,7 @@ for _method in ('disasm', 'semantics', 'emulate'):
 
 def serve() -> None:
     global _progress_rid
-    out({"ig5": "ready", "pid": os.getpid()})
+    out({"ig5": "ready", "pid": os.getpid(), "engine": "Reverse", "capabilities": list(METHODS)})
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -1470,7 +1497,16 @@ def serve() -> None:
             continue
         _progress_rid = rid
         try:
-            out({"id": rid, "result": fn(params)})
+            result = fn(params)
+            mutating = method in ('rename', 'patch', 'comment', 'analyze', 'set_type', 'idapython')
+            mutating |= method == 'undo' and params.get('action') != 'list'
+            mutating |= method == 'struct' and params.get('action') not in ('list', 'get')
+            mutating |= method == 'switch_repair' and params.get('apply') is True
+            if mutating and _open:
+                import ida_loader
+                if not ida_loader.save_database(None, 0):
+                    raise RuntimeError('database mutation completed but save failed; inspect current state before retrying')
+            out({"id": rid, "result": result})
         except Exception:
             out({"id": rid, "error": traceback.format_exc(limit=4)})
         finally:
@@ -1492,7 +1528,11 @@ def main() -> None:
         _t0 = time.time()
         out({"id": 1, "result": m_open({"path": args.selftest, "auto": True})})
         return
-    serve()
+    try:
+        serve()
+    finally:
+        if _open:
+            m_close({})
 
 
 if __name__ == "__main__":

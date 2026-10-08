@@ -1,111 +1,133 @@
-<#
-  dsh-infinite-gen-5 · 无限五代（IG5）小样一键安装
-  只改动：~\.dsh\plugins\dsh-infinite-gen-5 与各 profile 的 package.json（自动备份）。
-  幂等：重复运行安全。安装后完全重启 DeepSeek Harness 生效。
+﻿<#
+  IG5 self-contained installer. No downloads, setup scripts or PATH changes.
+  Validate the complete runtime before changing the plugin or profile files.
 #>
 [CmdletBinding()]
-param()
-
+param(
+    [string]$RuntimeSource,
+    [string]$DshRoot = (Join-Path $env:USERPROFILE '.dsh')
+)
 $ErrorActionPreference = 'Stop'
-$pluginName  = 'dsh-infinite-gen-5'
-$pluginLabel = '无限五代（IG5）'
-$pluginVersion = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version
-$legacyGens  = @('dsh-infinite-gen-1', 'dsh-infinite-gen-2')
+. (Join-Path $PSScriptRoot 'scripts\runtime_pack.ps1')
+$pluginName = 'dsh-infinite-gen-5'
+$srcDir = Get-IG5FullPath $PSScriptRoot
+$dshRootPath = Get-IG5FullPath $DshRoot
+$pluginsDir = Join-Path $dshRootPath 'plugins'
+$destDir = Join-Path $pluginsDir $pluginName
+$package = Get-Content -LiteralPath (Join-Path $srcDir 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$pluginVersion = [string]$package.version
+$legacyGens = @('dsh-infinite-gen-1', 'dsh-infinite-gen-2')
+$utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
-function Write-Step { param([string]$m) Write-Host "`n==> $m" -ForegroundColor Cyan }
-function Write-Ok   { param([string]$m) Write-Host "    [OK] $m" -ForegroundColor Green }
-function Write-Warn { param([string]$m) Write-Host "    [!] $m" -ForegroundColor Yellow }
-function Write-Err  { param([string]$m) Write-Host "    [X] $m" -ForegroundColor Red }
-
-$dshRoot    = Join-Path $env:USERPROFILE '.dsh'
-$pluginsDir = Join-Path $dshRoot 'plugins'
-$destDir    = Join-Path $pluginsDir $pluginName
-$srcDir     = $PSScriptRoot
-
-Write-Host "`n====================" -ForegroundColor Cyan
-Write-Host "  $pluginLabel v$pluginVersion 安装" -ForegroundColor Cyan
-Write-Host "====================" -ForegroundColor Cyan
-
-# [1] profile 探测
-Write-Step '检查环境'
-$profilesRoot = Join-Path $dshRoot 'profiles'
-if (-not (Test-Path $profilesRoot)) { Write-Err "未找到 $profilesRoot"; exit 1 }
-$profileDirs = @(Get-ChildItem -LiteralPath $profilesRoot -Directory -Force -ErrorAction SilentlyContinue |
-    Where-Object { Test-Path (Join-Path $_.FullName 'package.json') } |
-    ForEach-Object { $_.FullName })
-if ($profileDirs.Count -eq 0) { Write-Err '没有含 package.json 的 profile'; exit 1 }
-foreach ($p in $profileDirs) { Write-Ok "profile: $p" }
-
-# [2] 复制插件
-Write-Step '复制插件文件'
-if (-not (Test-Path $pluginsDir)) { New-Item -ItemType Directory -Path $pluginsDir -Force | Out-Null }
-if (Test-Path $destDir) {
-    if ((Get-Item $destDir).LinkType -eq 'Junction') { cmd.exe /c "rmdir `"$destDir`"" | Out-Null }
-    else { Remove-Item -LiteralPath $destDir -Recurse -Force }
+function Assert-Child {
+    param([string]$Candidate, [string]$Root)
+    $absolute = Get-IG5FullPath $Candidate
+    $boundary = (Get-IG5FullPath $Root) + [IO.Path]::DirectorySeparatorChar
+    if (-not $absolute.StartsWith($boundary, [StringComparison]::OrdinalIgnoreCase)) { throw "路径超出预期目录: $absolute" }
+    return $absolute
 }
-robocopy $srcDir $destDir /E /NFL /NDL /NJH /NJS /NC /NS /XD .git __pycache__ | Out-Null
-if ($LASTEXITCODE -ge 8) { Write-Err "复制失败（robocopy $LASTEXITCODE）"; exit 1 }
-Write-Ok "插件已就位：$destDir"
-
-# [3] 写入各 profile
-foreach ($pDir in $profileDirs) {
-    $pName = Split-Path $pDir -Leaf
-    Write-Step "配置 profile: $pName"
-    $pkgPath = Join-Path $pDir 'package.json'
-    $bak = "$pkgPath.bak-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
-    Copy-Item -LiteralPath $pkgPath -Destination $bak -Force
-    Write-Ok "已备份 package.json"
-
-    $pkg = Get-Content -LiteralPath $pkgPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    if (-not $pkg.dependencies) { $pkg | Add-Member -NotePropertyName 'dependencies' -NotePropertyValue @{} }
-    foreach ($old in $legacyGens) {
-        if ($pkg.dependencies.PSObject.Properties.Name -contains $old) {
-            $pkg.dependencies.PSObject.Properties.Remove($old)
-        }
-    }
-    if ($pkg.dependencies.PSObject.Properties.Name -notcontains $pluginName) {
-        $pkg.dependencies | Add-Member -NotePropertyName $pluginName -NotePropertyValue "file:../../plugins/$pluginName" -Force
-    }
-    if ($pkg.dsh -and $pkg.dsh.profile -and $pkg.dsh.profile.bundles) {
-        $bundles = @($pkg.dsh.profile.bundles)
-        foreach ($old in ($legacyGens + @($pluginName))) { $bundles = @($bundles | Where-Object { $_ -ne $old }) }
-        $bundles = @($bundles) + $pluginName
-        $pkg.dsh.profile.bundles = $bundles
-        Write-Ok "bundles 已添加 $pluginName"
-    }
-    $json = $pkg | ConvertTo-Json -Depth 10
-    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($pkgPath, $json + [Environment]::NewLine, $utf8NoBom)
-    Write-Ok "package.json 已更新（依赖 file:../../plugins/$pluginName）"
-
-    # [4] node_modules Junction 直链（免 pnpm，即改即生效）
-    $nmDir  = Join-Path $pDir 'node_modules'
-    $nmEntry = Join-Path $nmDir $pluginName
-    if (-not (Test-Path $nmDir)) { New-Item -ItemType Directory -Path $nmDir -Force | Out-Null }
-    if (Test-Path $nmEntry) {
-        try {
-            if ((Get-Item $nmEntry).LinkType -eq 'Junction') { cmd.exe /c "rmdir `"$nmEntry`"" 2>$null | Out-Null }
-            else { Remove-Item -LiteralPath $nmEntry -Recurse -Force -ErrorAction SilentlyContinue }
-        } catch { }
-    }
-    cmd.exe /c "mklink /J `"$nmEntry`" `"$destDir`"" 2>$null | Out-Null
-    if (Test-Path $nmEntry) { Write-Ok "node_modules Junction 就绪：$nmEntry" }
-    else { Write-Warn 'Junction 创建失败（可手动复制插件目录到 node_modules）' }
-
-    # [5] 清理旧版残留
-    foreach ($old in $legacyGens) {
-        $oldNm = Join-Path $nmDir $old
-        if (Test-Path $oldNm) { Remove-Item -LiteralPath $oldNm -Recurse -Force -ErrorAction SilentlyContinue }
-        $oldPlug = Join-Path $pluginsDir $old
-        if (Test-Path $oldPlug) { Remove-Item -LiteralPath $oldPlug -Recurse -Force -ErrorAction SilentlyContinue }
+function Remove-Staging {
+    param([string]$Path)
+    $safe = Assert-Child $Path $pluginsDir
+    if (Test-Path -LiteralPath $safe) {
+        if ((Get-Item -LiteralPath $safe).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "暂存目录不能为链接: $safe" }
+        Remove-IG5Tree $safe
     }
 }
 
-Write-Step '安装完成'
-Write-Host ''
-Write-Host '  ✔ 无限五代（IG5）已安装。' -ForegroundColor Green
-Write-Host '  下一步：完全退出并重启 DeepSeek Harness（桌面版重新打开 / Web 版重启进程+刷新页面）。' -ForegroundColor White
-Write-Host "  验证 1：输入框上方出现状态条「无限五代 $pluginVersion · Reverse」。" -ForegroundColor Yellow
-Write-Host '  验证 2：右栏 → 添加 tab → 「IG5 逆向工作台」。' -ForegroundColor Yellow
-Write-Host '  验证 3：新会话对模型说「用 ig5_doctor 检查引擎，然后 ig5_open 打开 C:\Windows\System32\notepad.exe」。' -ForegroundColor Yellow
-Write-Host ''
+Write-Host "`n无限五代（IG5）v$pluginVersion · 自包含安装" -ForegroundColor Cyan
+$runtimeInput = if ($RuntimeSource) { Get-IG5FullPath $RuntimeSource } else { Join-Path $srcDir 'runtimes' }
+# Every source and profile check here is read-only. A missing/corrupt pack cannot leave a partial install.
+Assert-IG5PluginSource $srcDir
+$validated = Assert-IG5RuntimePack $runtimeInput
+if ($validated.Manifest.pluginVersion -and [string]$validated.Manifest.pluginVersion -ne $pluginVersion) { throw "运行包版本与插件不符: $($validated.Manifest.pluginVersion) / $pluginVersion" }
+$profilesRoot = Join-Path $dshRootPath 'profiles'
+if (-not (Test-Path -LiteralPath $profilesRoot -PathType Container)) { throw "未找到 DSH profiles: $profilesRoot" }
+$profileDirs = @(Get-ChildItem -LiteralPath $profilesRoot -Directory -Force | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'package.json') -PathType Leaf })
+if (-not $profileDirs.Count) { throw '没有含 package.json 的 DSH profile' }
+$plans = @()
+foreach ($profile in $profileDirs) {
+    if ($profile.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "profile 目录不能为链接: $($profile.FullName)" }
+    $pkgPath = Join-Path $profile.FullName 'package.json'
+    if ([IO.File]::GetAttributes((ConvertTo-IG5IOPath $pkgPath)) -band [IO.FileAttributes]::ReparsePoint) { throw "profile package.json 不能为链接: $pkgPath" }
+    $original = [IO.File]::ReadAllText($pkgPath)
+    $pkg = $original | ConvertFrom-Json
+    if (-not $pkg.dependencies) { $pkg | Add-Member -NotePropertyName dependencies -NotePropertyValue ([pscustomobject]@{}) -Force }
+    foreach ($old in $legacyGens) { $pkg.dependencies.PSObject.Properties.Remove($old) }
+    $pkg.dependencies | Add-Member -NotePropertyName $pluginName -NotePropertyValue "file:../../plugins/$pluginName" -Force
+    if ($pkg.dsh -and $pkg.dsh.profile -and $null -ne $pkg.dsh.profile.bundles) {
+        $pkg.dsh.profile.bundles = @(@($pkg.dsh.profile.bundles) | Where-Object { $_ -notin ($legacyGens + @($pluginName)) }) + @($pluginName)
+    }
+    $plans += [pscustomobject]@{ Directory=$profile.FullName; Path=$pkgPath; Original=$original; Json=($pkg | ConvertTo-Json -Depth 100 -WarningAction Stop) + [Environment]::NewLine }
+}
+$destDir = Assert-Child $destDir $pluginsDir
+if ($srcDir -eq $destDir -or $srcDir.StartsWith($destDir + '\', [StringComparison]::OrdinalIgnoreCase) -or $destDir.StartsWith($srcDir + '\', [StringComparison]::OrdinalIgnoreCase)) { throw '安装源与插件目的目录不能相同或相互包含' }
+if (Test-Path -LiteralPath $pluginsDir) { if ((Get-Item -LiteralPath $pluginsDir).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'plugins 目录不能为链接' } }
+if (Test-Path -LiteralPath $destDir) { if ((Get-Item -LiteralPath $destDir).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw '插件目的目录不能为链接' } }
+foreach ($plan in $plans) {
+    $nm = Join-Path $plan.Directory 'node_modules'
+    if ((Test-Path -LiteralPath $nm) -and ((Get-Item -LiteralPath $nm).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw "node_modules 不能为链接: $nm" }
+}
+Write-Host "[OK] 两引擎完整性验证通过：$($validated.Files) 个文件" -ForegroundColor Green
+
+$token = [Guid]::NewGuid().ToString('N')
+$stage = Assert-Child (Join-Path $pluginsDir ".ig5-stage-$token") $pluginsDir
+$previous = Assert-Child (Join-Path $pluginsDir ".ig5-previous-$token") $pluginsDir
+$switched = $false
+$movedPrevious = $false
+$records = @()
+try {
+    New-Item -ItemType Directory -Path $pluginsDir -Force | Out-Null
+    # Stage and verify a complete plugin before replacing a prior installation.
+    Copy-IG5Pack $srcDir $stage @('runtimes')
+    Copy-IG5Pack $runtimeInput (Join-Path $stage 'runtimes')
+    Write-IG5RuntimeManifest $validated (Join-Path $stage 'runtimes') $pluginVersion
+    $null = Assert-IG5RuntimePack (Join-Path $stage 'runtimes')
+    if (Test-Path -LiteralPath $destDir) { Move-Item -LiteralPath $destDir -Destination $previous; $movedPrevious = $true }
+    Move-Item -LiteralPath $stage -Destination $destDir
+    $switched = $true
+    foreach ($plan in $plans) {
+        $nm = Join-Path $plan.Directory 'node_modules'
+        $entry = Assert-Child (Join-Path $nm $pluginName) $nm
+        $savedEntry = Assert-Child (Join-Path $nm ".ig5-entry-$token") $nm
+        $backup = "$($plan.Path).bak-$token"
+        $record = [pscustomobject]@{ Plan=$plan; Entry=$entry; Saved=$savedEntry; OldEntry=$false; NewEntry=$false; Written=$false }
+        $records += $record
+        Copy-Item -LiteralPath $plan.Path -Destination $backup
+        New-Item -ItemType Directory -Path $nm -Force | Out-Null
+        if (Get-Item -LiteralPath $entry -Force -ErrorAction SilentlyContinue) { Move-Item -LiteralPath $entry -Destination $savedEntry; $record.OldEntry = $true }
+        New-Item -ItemType Junction -Path $entry -Target $destDir | Out-Null
+        $record.NewEntry = $true
+        $temporary = "$($plan.Path).ig5-$token"
+        [IO.File]::WriteAllText($temporary, $plan.Json, $utf8NoBom)
+        Move-Item -LiteralPath $temporary -Destination $plan.Path -Force
+        $record.Written = $true
+        Write-Host "[OK] profile: $(Split-Path $plan.Directory -Leaf)" -ForegroundColor Green
+    }
+    if ($movedPrevious) {
+        $backupRoot = Join-Path $dshRootPath 'ig5\artifacts'
+        New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
+        Move-Item -LiteralPath $previous -Destination (Join-Path $backupRoot "install-backup-$token")
+        $movedPrevious = $false
+    }
+} catch {
+    $failure = $_
+    foreach ($record in $records) {
+        if ($record.Written) { [IO.File]::WriteAllText($record.Plan.Path, $record.Plan.Original, $utf8NoBom) }
+        if ($record.NewEntry -and (Get-Item -LiteralPath $record.Entry -Force -ErrorAction SilentlyContinue)) { [IO.Directory]::Delete($record.Entry) }
+        if ($record.OldEntry -and (Get-Item -LiteralPath $record.Saved -Force -ErrorAction SilentlyContinue)) { Move-Item -LiteralPath $record.Saved -Destination $record.Entry }
+    }
+    if ($switched) { Remove-Staging $destDir }
+    if ($movedPrevious) { Move-Item -LiteralPath $previous -Destination $destDir }
+    if (Test-Path -LiteralPath $stage) { Remove-Staging $stage }
+    throw $failure
+}
+foreach ($record in $records) {
+    # Once committed, cleanup cannot roll back the new plugin or erase its backup.
+    try {
+        if ($record.OldEntry -and (Get-Item -LiteralPath $record.Saved -Force).LinkType -eq 'Junction') { [IO.Directory]::Delete($record.Saved) }
+    } catch { Write-Warning "旧 Junction 保留供手动清理: $($record.Saved)" }
+}
+Write-Host "`n[OK] 无限五代（IG5）已安装：$destDir" -ForegroundColor Green
+Write-Host '完整 Ghidra / x64dbg 能力随插件就位；无需运行 setup 脚本或修改系统 PATH。'
+Write-Host '完全退出并重启 DeepSeek Harness，然后调用 ig5_doctor 检查。'

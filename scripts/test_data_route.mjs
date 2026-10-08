@@ -2,10 +2,14 @@
 // No engine process, database, or user artifact is opened or changed.
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { spawn as nativeSpawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import { defineAdvancedTools } from '../advanced_tools.js';
+import { defineIntegrationTools } from '../integration_tools.js';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { engineId } from '../engine_runtime.js';
 
 const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8');
 const cfg = {
@@ -15,6 +19,9 @@ const cfg = {
   maxSessions: 3,
   requestTimeoutMs: 240_000,
   openTimeoutMs: 1_800_000,
+  reverseAvailable: true,
+  defaultEngine: 'reverse',
+  projectRoot: 'C:\\unused-test-projects',
 };
 const errorStart = source.indexOf('function publicEngineError(');
 const errorEnd = source.indexOf('// ── Worker 池', errorStart);
@@ -157,9 +164,9 @@ const toolsEnd = source.indexOf('// ── ig5dash', toolsStart);
 assert.ok(toolsStart >= 0 && toolsEnd > toolsStart, 'tool definitions must be present');
 const defineIg5Tools = vm.runInNewContext(
   source.slice(toolsStart, toolsEnd) + '\ndefineIg5Tools;',
-  { path, fs, publicEngineError, defineAdvancedTools,
+  { path, fs, publicEngineError, defineAdvancedTools, defineIntegrationTools,
     IG5_WRITE_TOOLS: vm.runInNewContext(source.slice(source.indexOf('const IG5_WRITE_TOOLS'), source.indexOf('function installApprovalGate')) + '\nIG5_WRITE_TOOLS;'),
-    PLUGIN_ID: 'dsh-infinite-gen-5', PLUGIN_VERSION: '0.9.0', setTimeout, clearTimeout },
+    PLUGIN_ID: 'dsh-infinite-gen-5', PLUGIN_VERSION: '1.0.0', setTimeout, clearTimeout },
 );
 let killed = false;
 let doctorMode = 'success';
@@ -194,7 +201,7 @@ const mockManager = {
   },
 };
 const definitions = defineIg5Tools({}, mockManager, cfg);
-assert.equal(definitions.length, 34);
+assert.equal(definitions.length, 36);
 for (const definition of definitions) {
   assert.doesNotMatch(definition.description, /\bIDA\b|IDAPython|idalib|Hex-Rays|ida_[a-z]/i);
 }
@@ -221,7 +228,14 @@ for (const mode of ['workerError', 'spawnThrow', 'spawnError']) {
 const workerStart = source.indexOf('class WorkerManager');
 const workerEnd = source.indexOf('// ── 诊断回路', workerStart);
 let workerMode = 'success';
+let releaseOpening, openingArrived, writesDuringOpening = 0;
 const workerContext = {
+  AsyncLocalStorage, engineId, terminateTree: (proc) => proc?.kill(),
+  ProjectStore: class {
+    open() { return { projectId: 'p', artifactId: 'a', sha256: 'h' }; }
+    attachEngine() { return { attachmentId: 'at', dbRevision: 0 }; }
+    closeAttachment() {}
+  },
   path, process, publicEngineError, WORKER: 'mock-worker.py', setTimeout, clearTimeout,
   spawn() {
     if (workerMode === 'spawnThrow') throw new Error(diagnostic);
@@ -232,6 +246,16 @@ const workerContext = {
     child.kill = () => { child.exitCode = 1; };
     child.stdin = { write(line) {
       const request = JSON.parse(line);
+      if (workerMode === 'delayedOpen') {
+        if (request.method === 'open') {
+          releaseOpening = () => child.stdout.emit('data', JSON.stringify({ id: request.id, result: { n_funcs: 1, bits: 64 } }) + '\n');
+          openingArrived?.();
+        } else {
+          writesDuringOpening++;
+          queueMicrotask(() => child.stdout.emit('data', JSON.stringify({ id: request.id, result: { ok: true } }) + '\n'));
+        }
+        return;
+      }
       if (workerMode === 'runtimeExit' && request.method !== 'open') {
         queueMicrotask(() => {
           child.stderr.emit('data', diagnostic);
@@ -242,9 +266,14 @@ const workerContext = {
       }
       queueMicrotask(() => child.stdout.emit('data', JSON.stringify(request.method === 'open'
         ? { id: request.id, result: { target: 'C:\\fixtures\\sample.exe', n_funcs: 1, bits: 64 } }
-        : { id: request.id, error: 'Traceback\n' + diagnostic }) + '\n'));
+        : workerMode === 'partialCommit'
+          ? { id: request.id, error: { message: 'Persistence failed after database save', code: 'partial_commit', committed: true, saved: true,
+            recoveryRequired: true, journalId: 'journal-test', revision: 1, durableRevision: 1, stage: 'journal' } }
+        : workerMode === 'metadataFailure'
+          ? { id: request.id, result: { ok: true } }
+          : { id: request.id, error: 'Traceback\n' + diagnostic }) + '\n'));
     } };
-    queueMicrotask(() => {
+    setImmediate(() => {
       if (workerMode === 'startupError') child.emit('error', new Error(diagnostic));
       else if (workerMode === 'startupExit' || workerMode === 'startupTimeout') {
         child.stderr.emit('data', diagnostic);
@@ -266,12 +295,53 @@ await assert.rejects(manager.rpc(manager.get('C:\\fixtures\\sample.exe'), 'micro
 });
 assert.equal(manager.sessions.size, 0, 'native worker crash must reject pending requests and remove the dead session');
 manager.killSession(manager.sessionKey('C:\\fixtures\\sample.exe'));
+workerMode = 'success';
+const metadataFailure = new WorkerManager(cfg);
+await metadataFailure.open('C:\\fixtures\\sample.exe');
+metadataFailure.projects.bumpRevision = () => { throw new Error('STORE_BUSY'); };
+workerMode = 'metadataFailure';
+await assert.rejects(metadataFailure.rpc(metadataFailure.get('C:\\fixtures\\sample.exe'), 'comment', {}), /completed but revision metadata could not be committed/);
+assert.equal(metadataFailure.sessions.size, 0, 'committed mutation plus metadata failure must reject and recycle instead of crashing the host or reusing a stale revision');
 for (const mode of ['spawnThrow', 'startupError', 'startupExit', 'startupTimeout']) {
   workerMode = mode;
-  if (mode === 'startupTimeout') workerContext.setTimeout = (callback) => { queueMicrotask(callback); return 1; };
+  if (mode === 'startupTimeout') workerContext.setTimeout = (callback) => { setImmediate(callback); return 1; };
   const failing = new WorkerManager(cfg);
   await assert.rejects(failing.open('C:\\fixtures\\sample.exe'), (error) => assertRedacted(error.message));
   for (const key of failing.sessions.keys()) failing.killSession(key);
 }
+workerContext.setTimeout = setTimeout;
+workerMode = 'success';
+const partialCommit = new WorkerManager(cfg);
+await partialCommit.open('C:\\fixtures\\sample.exe');
+partialCommit.projects.bumpRevision = () => ({ dbRevision: 1 });
+const partialSession = partialCommit.get('C:\\fixtures\\sample.exe');
+partialSession.cache.set('previous', 'stale');
+workerMode = 'partialCommit';
+await assert.rejects(partialCommit.rpc(partialSession, 'rename', {}), (error) => {
+  assert.equal(error.code, 'partial_commit'); assert.equal(error.committed, true); assert.equal(error.saved, true);
+  assert.equal(error.recoveryRequired, true); assert.equal(error.journalId, 'journal-test');
+  assert.equal(error.durableRevision, 1); assert.equal(error.stage, 'journal'); return true;
+});
+assert.equal(partialSession.dbRevision, 1); assert.equal(partialSession.cache.size, 0);
+partialCommit.killSession(partialSession.key);
+workerMode = 'delayedOpen';
+const openingManager = new WorkerManager(cfg);
+openingManager.projects.attachEngine = () => ({ attachmentId: 'historical', dbRevision: 7 });
+openingManager.projects.bumpRevision = () => ({ dbRevision: 8 });
+const openArrived = new Promise((resolve) => { openingArrived = resolve; });
+const opening = openingManager.open('C:\\fixtures\\sample.exe');
+await openArrived;
+assert.equal(typeof releaseOpening, 'function');
+const openingSession = openingManager.get('C:\\fixtures\\sample.exe');
+const earlyWrite = openingManager.rpc(openingSession, 'comment', {});
+await new Promise(setImmediate);
+assert.equal(writesDuringOpening, 0, 'no operation may run between transport readiness and database attachment');
+releaseOpening(); await opening; await earlyWrite;
+assert.equal(openingSession.dbRevision, 8, 'the first write must increment the attached historical revision');
+openingManager.killSession(openingSession.key);
+workerContext.spawn = nativeSpawn;
+const missingRuntime = new WorkerManager({ ...cfg, pythonExe: path.join(process.env.TEMP, 'ig5-deliberately-missing-runtime.exe') });
+await assert.rejects(missingRuntime.open('C:\\fixtures\\sample.exe'), /ENOENT/);
+assert.equal(missingRuntime.sessions.size, 0, 'early spawn failure must be caught rather than become an uncaught error');
 
 console.log('IG5 data route and metadata: approval isolation, user_only, inactive sessions, and success/failure Reverse redaction passed.');

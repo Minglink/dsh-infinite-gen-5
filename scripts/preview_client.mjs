@@ -42,28 +42,33 @@ const cfg={func:'decode_packet',start_ea:'0x140001000',total_blocks:6,total_edge
 const target='C:\\\\fixtures\\\\sample.exe', declaration='struct Packet {\\n  unsigned int id;\\n  char payload[32];\\n};';
 const variables=[{name:'key',type:'unsigned int',size:4,is_arg:true},{name:'buffer',type:'char *',size:8,is_arg:true},{name:'i',type:'int',size:4,is_arg:false}];
 const code='int decode_packet(unsigned int key, char *buffer)\\n{\\n  for (int i = 0; i < 32; ++i)\\n    buffer[i] ^= key;\\n  return key != 0;\\n}';
-const journal=Array.from({length:25},(_,i)=>({ts:'2026-10-09T12:'+String(i).padStart(2,'0')+':00Z',tool:i%3?'ig5_patch_bytes':'ig5_comment',args:{target,ea:'0x140001000'},detail:i%3?{before:'90 90',after:'CC 90',fileOffset:i}: {note:'人工审阅备注 <scr'+'ipt>仅显示文本</scr'+'ipt>'},isError:i===7}));
+const journal=Array.from({length:50},(_,i)=>({ts:'2026-10-09T12:'+String(i).padStart(2,'0')+':00Z',tool:i%3?'ig5_patch_bytes':'ig5_comment',args:{target,engine:i%2?'ghidra':'reverse',ea:'0x140001000'},detail:i%3?{before:'90 90',after:'CC 90',fileOffset:i}: {note:'人工审阅备注 <scr'+'ipt>仅显示文本</scr'+'ipt>'},isError:i===7}));
+window.__ig5Requests=[];window.__ig5Focuses=[];
 window.fetch=async(url,options)=>{
- const u=new URL(url,location.href),q=u.searchParams,type=q.get('type');let data;
+ const u=new URL(url,location.href),q=u.searchParams,type=q.get('type'),engine=q.get('engine')||'reverse';let data;window.__ig5Requests.push({url:String(url),method:options&&options.method||'GET'});
  if(u.pathname==='/ig5-diag')return {ok:true,json:async()=>({ok:true})};
- if(u.pathname==='/ig5-jobs')return {ok:true,json:async()=>({jobs:[],sessions:[{target,alive:true,n_funcs:2,n_segs:5,n_imports:12,bits:64,cpu:'x86_64',file_type:'PE'}]})};
+ if(u.pathname==='/ig5-jobs')return {ok:true,json:async()=>({now:Date.now(),jobs:[],sessions:['reverse','ghidra','x64dbg'].map((engine,i)=>({key:engine+':fixture',target,engine,projectId:'project_fixture',artifactId:'artifact_fixture_hash',dbRevision:i,alive:true,n_funcs:2,n_segs:5,n_imports:12,bits:64,cpu:'x86_64',file_type:'PE'}))})};
  if(u.pathname!=='/ig5-data'||(options&&options.method&&options.method!=='GET'))throw Error('preview refuses write requests');
  switch(type){
  case 'funcs': data={funcs:[{ea:'0x140001000',name:'decode_packet',size:148},{ea:'0x140002000',name:'check_header',size:40}],total:2};break;
- case 'decompile': data={ea:q.get('ea'),name:q.get('ea')==='0x140001000'?'decode_packet':'check_header',code};break;
+ case 'decompile': data={ea:q.get('ea'),name:q.get('ea')==='0x140001000'?'decode_packet':'check_header',code:'/* '+engine+' fixture */\\n'+code};break;
  case 'cfg': data=cfg;break;
  case 'slice': data={variables,slice_variable:q.get('var'),slice_lines:q.get('var')?code.split('\\n').map((code,i)=>({line_no:i+1,code})).filter(x=>x.code.includes(q.get('var'))):[]};break;
  case 'calls':data={rows:[{ea:'0x140002000',name:'check_header'}]};break;
- case 'xrefs':data={rows:[]};break;
+ case 'xrefs':data={rows:[{from:'0x140001000',func_ea:'0x140001000',func_name:'decode_packet'}]};break;
+ case 'strings':data={strings:[{ea:'0x140003000',str:'packet-key',length:10}],total:1};break;
+ case 'ir':data={kind:'ghidra-pcode',level:q.get('level'),operations:[{opcode:'INT_XOR',inputs:['key','buffer[i]'],output:'buffer[i]'}],truncated:false};break;
+ case 'debug_state':data={state:'paused',runId:'run_fixture',stopSeq:4,regs:{rip:'0x7ff712341000',rax:'0x2a'},note:'模拟暂停快照；没有实际调试进程。'};break;
  case 'disasm':data={ea:q.get('ea'),rows:[{ea:q.get('ea'),bytes:'48 31 C0',text:'xor rax, rax',size:3},{ea:'0x140001003',bytes:'C3',text:'ret',size:1}],total:2};break;
  case 'struct':data=q.get('action')==='get'?{name:'Packet',size:36,decl:declaration,fields:[{offset:0,size:4,type:'unsigned int',name:'id'},{offset:4,size:32,type:'char[32]',name:'payload'}]}:{items:[{ordinal:1,name:'Packet',size:36,is_struct:true}]};break;
  case 'listing':data={rows:[]};break;
- case 'approvals':{const offset=Number(q.get('offset')||0),limit=Number(q.get('limit')||20);data={rows:journal.slice(offset,offset+limit),total:journal.length,offset,limit};break;}
+ case 'approvals':{const offset=Number(q.get('offset')||0),limit=Number(q.get('limit')||20),filtered=journal.filter(item=>item.args.engine===engine);data={rows:filtered.slice(offset,offset+limit),total:filtered.length,offset,limit};break;}
  default:data={rows:[]};
  }return {ok:true,status:200,json:async()=>({data})};
 };
 const inputActions={captureInsertion(){const t=document.querySelector('#composer');return {start:t.selectionStart,end:t.selectionEnd,value:t.value}},insertText(text,span){const t=document.querySelector('#composer');if(t.value!==span.value)return false;t.value=t.value.slice(0,span.start)+text+t.value.slice(span.end);return true},persistDraft(){}};
-ReactDOM.createRoot(document.querySelector('#root')).render(React.createElement(plugin.__test.Workbench,{inputActions,useProjection:()=>({calls:8,errors:0})}));
+function PreviewApp(){const [viewRequest,setViewRequest]=React.useState(null);return React.createElement(plugin.__test.Workbench,{inputActions,useProjection:()=>({calls:8,errors:0}),viewRequest,openView(view,focus){window.__ig5Focuses.push({view,focus});setViewRequest({view,focus})},completeViewRequest(){setViewRequest(null)}})}
+ReactDOM.createRoot(document.querySelector('#root')).render(React.createElement(PreviewApp));
 window.__ig5PreviewReady=true;
 </script></body></html>`;
 

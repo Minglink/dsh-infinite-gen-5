@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "engine": "Ghidra",
+  "version": "12.1.4",
+  "runtimeRoot": "../../runtimes/ghidra",
+  "pythonExe": "python/python.exe",
+  "ghidraHome": "ghidra_12.1.4_PUBLIC",
+  "javaHome": "jdk-21.0.12.1+1",
+  "projectRoot": "projects"
+}

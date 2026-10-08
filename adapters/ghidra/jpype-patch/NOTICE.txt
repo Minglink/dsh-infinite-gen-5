@@ -1,0 +1,19 @@
+IG5 JPype Unicode bootstrap modification
+
+This directory retains JPype 1.5.2 upstream source, support JAR, LICENSE and
+NOTICE. JPype is licensed under Apache-2.0; IG5's project license does not
+replace or restrict the upstream license.
+
+IG5 modifies only JPypeContext.createContext: when the IG5-specific
+ig5.jpype.native_filename system property is set to the single permitted
+_jpype.cp312-win_amd64.pyd filename, Java resolves that filename against its
+Unicode user.dir before System.load. With the property absent, upstream
+nativeLib handling remains unchanged. This is a modified upstream component,
+not an unmodified JPype release or a change approved by the upstream project.
+
+The original support JAR SHA-256 is
+a8c993bccb81392102fca126d4d716605cbda2c6df2846d42c92dc3672bfd4f2.
+The runtime manifest and licenses/ig5-jpype-bootstrap/provenance.json record
+the modified JAR and source hashes. No system Python, Java or user installation
+is modified. The complete original JAR is retained here as a reproducible
+build input; only the runtime copy is replaced.

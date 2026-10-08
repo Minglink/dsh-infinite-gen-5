@@ -1,0 +1,50 @@
+[
+  {
+    "url": "https://raw.githubusercontent.com/x64dbg/x64dbg/9c8ca1cae0b6d56cc44f31fddcb10e3b02ffbb87/LICENSE",
+    "name": "x64dbg-LICENSE.txt"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/x64dbg/x64dbg/9c8ca1cae0b6d56cc44f31fddcb10e3b02ffbb87/docs/licenses.md",
+    "name": "x64dbg-dependencies.md"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/x64dbg/jansson/master/LICENSE",
+    "name": "Jansson-LICENSE.txt"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/x64dbg/TitanEngine/x64dbg/LICENSE",
+    "name": "TitanEngine-LICENSE.txt"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/x64dbg/GleeBug/vs2015/LICENSE",
+    "name": "GleeBug-LICENSE.txt"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/asmjit/asmtk/master/LICENSE.md",
+    "name": "asmtk-LICENSE.txt"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/asmjit/asmjit/master/LICENSE.md",
+    "name": "asmjit-LICENSE.txt"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/x64dbg/XEDParse/master/LICENSE",
+    "name": "XEDParse-LICENSE.txt"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/zyantific/zydis/master/LICENSE",
+    "name": "Zydis-LICENSE.txt"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/x64dbg/lz4/master/LICENSE",
+    "name": "lz4-LICENSE.txt"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/qt/qtbase/v5.15.2/LICENSE.LGPL3",
+    "name": "Qt-LGPL-3.0.txt"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/qt/qtbase/v5.15.2/LICENSE.GPL3",
+    "name": "Qt-GPL-3.0.txt"
+  }
+]

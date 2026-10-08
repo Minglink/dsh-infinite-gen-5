@@ -1,7 +1,7 @@
 {
   "name": "dsh-infinite-gen-5",
-  "version": "0.9.0",
-  "description": "无限五代（IG5）小样：DeepSeek Harness 纯逆向插件 —— Reverse 无头引擎 Worker 池 + ig5 工具面 + 逆向工作台。零提示词注入。",
+  "version": "1.0.0",
+  "description": "无限五代（IG5）：DeepSeek Harness 统一 Reverse / Ghidra 静态分析与 x64dbg 无头调试工作台。",
   "type": "module",
   "main": "./index.js",
   "exports": {
@@ -14,7 +14,15 @@
     "client.js",
     "advanced_tools.js",
     "semantic_diff.js",
+    "semantic_diff_async.js",
+    "semantic_diff_worker.js",
     "workflow.js",
+    "engine_runtime.js",
+    "integration_tools.js",
+    "source/",
+    "adapters/",
+    "runtimes/",
+    "third_party/",
     "skills/",
     "worker/",
     "scripts/",
@@ -23,7 +31,8 @@
     "README.md",
     "install.ps1",
     "uninstall.ps1",
-    "LICENSE"
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.txt"
   ],
   "scripts": {
     "harness:check": "node --check index.js && node --check client.js",
@@ -37,12 +46,22 @@
     "test:workflow": "node scripts/test_workflow.mjs",
     "test:client": "node scripts/test_client.mjs",
     "test:semantic-diff": "node scripts/test_semantic_diff.mjs",
-    "test:patch-runtime": "node scripts/test_patch_runtime.mjs"
+    "test:host-reliability": "node scripts/test_host_reliability.mjs",
+    "test:debug-reliability": "node scripts/test_debug_host_queue.mjs && node scripts/test_debug_reliability.mjs",
+    "test:patch-runtime": "node scripts/test_patch_runtime.mjs",
+    "test:projects": "node scripts/test_project_store.mjs && node scripts/test_address_ref.mjs",
+    "test:engines": "node scripts/test_engine_integration.mjs",
+    "test:runtime-bundle": "node scripts/test_runtime_bundle.mjs",
+    "test:self-contained": "node scripts/test_self_contained.mjs",
+    "test:install-package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test_install_package.ps1",
+    "test:ghidra": "node scripts/test_ghidra_runtime.mjs",
+    "test:ghidra-reliability": "node scripts/test_ghidra_reliability.mjs",
+    "test:x64dbg": "node scripts/test_x64dbg_runtime.mjs"
   },
   "dsh": {
     "id": "dsh-infinite-gen-5",
     "name": "无限五代",
-    "version": "0.9.0",
+    "version": "1.0.0",
     "repo": "Minglink/dsh-infinite-gen-5",
     "permissions": "子进程(python worker)、文件写(artifacts)、会话投影、客户端侧栏 tab",
     "bundle": {
@@ -53,5 +72,5 @@
       "immediately": true
     }
   },
-  "license": "MIT"
+  "license": "CC-BY-NC-SA-4.0"
 }

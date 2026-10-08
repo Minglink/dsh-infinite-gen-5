@@ -1,0 +1,9 @@
+x64dbg-automate==0.9.2
+msgpack==1.2.3
+psutil==6.1.1
+pydantic==2.14.0
+pydantic-core==2.50.0
+pyzmq==27.2.0
+annotated-types==0.8.0
+typing-extensions==4.16.0
+typing-inspection==0.4.4
