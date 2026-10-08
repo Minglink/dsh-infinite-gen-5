@@ -1,0 +1,57 @@
+{
+  "name": "dsh-infinite-gen-5",
+  "version": "0.9.0",
+  "description": "无限五代（IG5）小样：DeepSeek Harness 纯逆向插件 —— Reverse 无头引擎 Worker 池 + ig5 工具面 + 逆向工作台。零提示词注入。",
+  "type": "module",
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "advanced_tools.js",
+    "semantic_diff.js",
+    "workflow.js",
+    "skills/",
+    "worker/",
+    "scripts/",
+    "cordis.patch.yml",
+    "HARNESS_PLUGIN.md",
+    "README.md",
+    "install.ps1",
+    "uninstall.ps1",
+    "LICENSE"
+  ],
+  "scripts": {
+    "harness:check": "node --check index.js && node --check client.js",
+    "test:worker": "node scripts/test_worker.mjs",
+    "test:host": "node scripts/test_host.mjs",
+    "test:new-tools": "node scripts/test_new_tools.mjs",
+    "test:data-route": "node scripts/test_data_route.mjs",
+    "test:debug-api": "python scripts/test_debug_api.py",
+    "test:debug-runtime": "node scripts/test_debug_runtime.mjs",
+    "test:advanced": "node scripts/test_advanced_runtime.mjs",
+    "test:workflow": "node scripts/test_workflow.mjs",
+    "test:client": "node scripts/test_client.mjs",
+    "test:semantic-diff": "node scripts/test_semantic_diff.mjs",
+    "test:patch-runtime": "node scripts/test_patch_runtime.mjs"
+  },
+  "dsh": {
+    "id": "dsh-infinite-gen-5",
+    "name": "无限五代",
+    "version": "0.9.0",
+    "repo": "Minglink/dsh-infinite-gen-5",
+    "permissions": "子进程(python worker)、文件写(artifacts)、会话投影、客户端侧栏 tab",
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  },
+  "license": "MIT"
+}

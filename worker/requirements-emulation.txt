@@ -1,0 +1,2 @@
+# Windows x64 wheel used by the bundled CPU emulator. Install only into worker/vendor.
+unicorn==2.1.4 --hash=sha256:d7107500c64ce5c168fbff6bef9485b5db1350050036f4cea568650cf8bdbdf5

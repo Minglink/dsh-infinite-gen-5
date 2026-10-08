@@ -1,0 +1,1966 @@
+(() => {
+  try {
+    /* 无限五代 (dsh-infinite-gen-5) v0.9.0 专业无头逆向工程工作台
+       视觉系统深度对齐 DeepSeek Harness「上下文」原生设计语言：
+       - 全量采用官方 CSS 变量 tokens (--dsw-alias-*, --ds-*, tabular-nums)
+       - 原生卡片容器 (.ig5-card)、统计磁贴 (.ig5-stat)、分段胶囊选择器 (.ig5-kinds / .ig5-gran-btn)
+       - Reverse 分析能力与按配置注册的工具面：
+         • 函数浏览器 + Reverse C 伪代码 + CFG 控制流图 (Mermaid) + 变量/微代码切片
+         • 结构体与类型库 (Local Types / Til)：C 声明解析、成员偏移推导与应用
+         • 字符串常量库 + 实时过滤与引用检索
+         • 节段结构、导入表（敏感 API 标注）、导出表
+         • 编译器指纹与 Reverse 标准库函数标记（过滤模板代码，聚焦用户业务逻辑）
+         • 安全侦测：节段香农熵分析 (>7.2 风险警报)、加密特征常数、敏感 API 画像
+         • 补丁审计时间线、Before/After 字节 Diff 对比、自管操作日志逐级回滚 (Undo)
+         • 工具能力目录与会话实时投影协同
+       - 完美挂载 conversation.view 主标签页与底部输入框徽章 */
+    window.__ModuleLoader__.load({
+      id: "dsh-infinite-gen-5",
+      factory: (require) => {
+        var module = { exports: {} };
+        var exports = module.exports;
+        Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
+
+        var react = require("react");
+        var el = react.createElement;
+
+        var inject = ["slots"];
+        var PLUGIN_ID = "dsh-infinite-gen-5";
+        var PANEL_ID = "ig5-workbench-panel";
+        var VERSION = "0.9.0";
+        var WORKBENCH_TAB_LABEL = "IG5 逆向工作台";
+
+        /* ── 诊断回路 ── */
+        var DIAG = [];
+        var flushTimer = null;
+        function diag(tag, detail) {
+          DIAG.push({
+            t: new Date().toISOString().slice(11, 23),
+            tag: tag,
+            detail: detail === undefined || detail === null ? "" : String(detail).slice(0, 900),
+          });
+          if (!flushTimer) flushTimer = setTimeout(flushDiag, 1200);
+        }
+        function flushDiag() {
+          flushTimer = null;
+          if (!DIAG.length) return;
+          var payload = JSON.stringify({ v: VERSION, href: String(location.href).slice(0, 120), events: DIAG });
+          DIAG = [];
+          try {
+            if (typeof fetch === "function") {
+              fetch("/ig5-diag", { method: "POST", headers: { "content-type": "application/json" }, body: payload })
+                .catch(function () {});
+            }
+          } catch (e) {}
+        }
+
+        /* ── 原生视觉设计系统 (Aligned with dsh-context & DeepSeek Harness Native Tokens) ── */
+        var CSS = `
+/* 根工作台容器 */
+.ig5-root {
+  box-sizing: border-box;
+  height: 100%;
+  color: var(--dsw-alias-label-primary, #e2e8f0);
+  padding: 16px 20px 32px;
+  font-size: 13px;
+  overflow-y: auto;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  line-height: 1.5;
+  background: var(--dsw-alias-bg-module-platform, transparent);
+}
+.ig5-mono {
+  font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 布局列 */
+.ig5-cols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.ig5-col {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 原生卡片容器 (.lc-card 对齐) */
+.ig5-card {
+  background: var(--dsw-alias-bg-layer-1, rgba(255, 255, 255, 0.03));
+  border: 1px solid var(--dsw-alias-border-l2, rgba(255, 255, 255, 0.12));
+  border-radius: 10px;
+  margin-bottom: 12px;
+  padding: 14px 16px;
+  box-sizing: border-box;
+  transition: border-color var(--ds-transition-duration, .2s) var(--ds-ease-in-out, ease-in-out);
+}
+.ig5-card-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.ig5-card-title-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary, #e2e8f0);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ig5-card-sub {
+  color: var(--dsw-alias-label-secondary, #94a3b8);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* 统计磁贴栅格 (.lc-stat 对齐) */
+.ig5-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+  gap: 8px;
+}
+.ig5-stat {
+  background: var(--dsw-alias-bg-layer-2, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--dsw-alias-border-l2, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 10px;
+  display: flex;
+  box-sizing: border-box;
+  transition: border-color var(--ds-transition-duration, .2s) var(--ds-ease-in-out, ease-in-out);
+}
+.ig5-stat:hover {
+  border-color: var(--dsw-alias-label-secondary, #94a3b8);
+}
+.ig5-stat-label {
+  color: var(--dsw-alias-label-secondary, #94a3b8);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  font-weight: 600;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.ig5-stat-value {
+  color: var(--dsw-alias-label-primary, #e2e8f0);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+.ig5-stat-sub {
+  color: var(--dsw-alias-label-tertiary, #64748b);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 分段胶囊选择器 (.lc-kinds / .lc-gran-btn 对齐) */
+.ig5-kinds {
+  background: var(--dsw-alias-bg-layer-2, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--dsw-alias-border-l2, rgba(255, 255, 255, 0.12));
+  border-radius: 6px;
+  gap: 2px;
+  padding: 2px;
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.ig5-gran-btn {
+  color: var(--dsw-alias-label-secondary, #94a3b8);
+  cursor: pointer;
+  transition: color var(--ds-transition-duration, .2s) var(--ds-ease-in-out, ease-in-out);
+  background: 0 0;
+  border: 0;
+  border-radius: 5px;
+  padding: 5px 11px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.ig5-gran-btn:hover {
+  color: var(--dsw-alias-label-primary, #e2e8f0);
+}
+.ig5-gran-on, .ig5-gran-on:hover {
+  background: var(--dsw-alias-button-primary-fill, #3b82f6);
+  color: var(--dsw-alias-label-primary-foreground, #ffffff);
+  font-weight: 600;
+}
+.ig5-kind-n {
+  font-variant-numeric: tabular-nums;
+  opacity: .7;
+  margin-left: 2px;
+  font-size: 11px;
+}
+.ig5-gran-on .ig5-kind-n {
+  opacity: .95;
+}
+
+/* 输入框与下拉选择框 */
+.ig5-input {
+  background: var(--dsw-alias-bg-layer-2, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--dsw-alias-border-l2, rgba(255, 255, 255, 0.12));
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary, #e2e8f0);
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color var(--ds-transition-duration, .2s) var(--ds-ease-in-out, ease-in-out);
+}
+.ig5-input:focus {
+  border-color: var(--dsw-alias-brand-primary, #3b82f6);
+}
+.ig5-select {
+  background: var(--dsw-alias-bg-layer-2, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--dsw-alias-border-l2, rgba(255, 255, 255, 0.12));
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary, #e2e8f0);
+  outline: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+/* 按钮 */
+.ig5-btn {
+  background: var(--dsw-alias-bg-layer-2, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--dsw-alias-border-l2, rgba(255, 255, 255, 0.12));
+  color: var(--dsw-alias-label-primary, #e2e8f0);
+  border-radius: 6px;
+  padding: 4px 11px;
+  font-size: 12px;
+  font-family: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  transition: all var(--ds-transition-duration, .2s) var(--ds-ease-in-out, ease-in-out);
+}
+.ig5-btn:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, 0.08));
+  border-color: var(--dsw-alias-label-secondary, #94a3b8);
+}
+.ig5-btn:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+.ig5-btn-primary {
+  background: var(--dsw-alias-button-primary-fill, #3b82f6);
+  color: var(--dsw-alias-label-primary-foreground, #ffffff);
+  border-color: transparent;
+}
+.ig5-btn-primary:hover {
+  opacity: .9;
+}
+
+/* 状态药丸与徽章 (.lc-detail-tag 对齐) */
+.ig5-chip {
+  background: var(--dsw-alias-bg-layer-2, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--dsw-alias-border-l1, rgba(255, 255, 255, 0.08));
+  color: var(--dsw-alias-label-secondary, #94a3b8);
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.ig5-chip.read {
+  border-color: color-mix(in srgb, var(--dsw-alias-brand-primary, #3b82f6) 40%, transparent);
+  color: var(--dsw-alias-brand-primary, #3b82f6);
+  background: color-mix(in srgb, var(--dsw-alias-brand-primary, #3b82f6) 10%, transparent);
+}
+.ig5-chip.write {
+  border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary, #ef4444) 40%, transparent);
+  color: var(--dsw-alias-state-error-primary, #ef4444);
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary, #ef4444) 10%, transparent);
+}
+.ig5-chip.warn {
+  border-color: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #f59e0b) 40%, transparent);
+  color: var(--dsw-alias-state-warn-primary, #f59e0b);
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary, #f59e0b) 10%, transparent);
+}
+.ig5-chip.success {
+  border-color: color-mix(in srgb, var(--dsw-alias-state-success-primary, #10b981) 40%, transparent);
+  color: var(--dsw-alias-state-success-primary, #10b981);
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary, #10b981) 10%, transparent);
+}
+
+/* 原生表格容器 */
+.ig5-table-wrap {
+  border: 1px solid var(--dsw-alias-border-l2, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  overflow: auto;
+  background: var(--dsw-alias-bg-layer-2, rgba(255, 255, 255, 0.05));
+  max-height: 480px;
+}
+.ig5-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+}
+.ig5-table th {
+  position: sticky;
+  top: 0;
+  background: var(--dsw-alias-bg-layer-1, rgba(255, 255, 255, 0.03));
+  z-index: 2;
+  padding: 8px 12px;
+  color: var(--dsw-alias-label-secondary, #94a3b8);
+  font-weight: 600;
+  border-bottom: 1px solid var(--dsw-alias-border-l2, rgba(255, 255, 255, 0.12));
+  font-size: 11px;
+}
+.ig5-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1, rgba(255, 255, 255, 0.08));
+  color: var(--dsw-alias-label-primary, #e2e8f0);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ig5-table tr {
+  cursor: pointer;
+  transition: background-color var(--ds-transition-duration, .15s);
+}
+.ig5-table tr:hover {
+  background-color: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, 0.04));
+}
+.ig5-table tr.selected {
+  background-color: color-mix(in srgb, var(--dsw-alias-brand-primary, #3b82f6) 16%, transparent);
+}
+
+/* 伪代码与代码展示框 */
+.ig5-code-box {
+  background: var(--dsw-alias-bg-layer-2, rgba(255, 255, 255, 0.05));
+  border: 1px solid var(--dsw-alias-border-l2, rgba(255, 255, 255, 0.12));
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-family: var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--dsw-alias-label-primary, #e2e8f0);
+  overflow: auto;
+  white-space: pre;
+  max-height: 420px;
+}
+.ig5-cfg-canvas { width: 100%; height: 440px; border: 1px solid var(--dsw-alias-border-l2, #334155); border-radius: 8px; background: var(--dsw-alias-bg-layer-2, #101828); touch-action: none; cursor: grab; }
+.ig5-cfg-canvas:active { cursor: grabbing; }
+.ig5-cfg-node { cursor: pointer; outline: none; }
+.ig5-cfg-node rect { fill: var(--dsw-alias-bg-layer-1, #182438); stroke: var(--dsw-alias-brand-primary, #60a5fa); stroke-width: 1.5; }
+.ig5-cfg-node:hover rect, .ig5-cfg-node:focus rect { stroke-width: 3; }
+.ig5-cfg-node text { fill: var(--dsw-alias-label-primary, #e2e8f0); font-size: 12px; }
+.ig5-cfg-edge { fill: none; stroke-width: 1.7; }
+.ig5-cfg-edge-label { fill: var(--dsw-alias-label-secondary, #94a3b8); font-size: 11px; paint-order: stroke; stroke: var(--dsw-alias-bg-layer-2, #101828); stroke-width: 4px; }
+.ig5-code-line { display: block; min-height: 1.6em; }
+.ig5-code-line.focused { background: color-mix(in srgb, var(--dsw-alias-brand-primary, #3b82f6) 18%, transparent); }
+.ig5-code-line mark { background: #facc15; color: #172033; border-radius: 2px; }
+.ig5-form-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
+.ig5-textarea { box-sizing: border-box; width: 100%; min-height: 120px; padding: 10px; resize: vertical; color: var(--dsw-alias-label-primary, #e2e8f0); background: var(--dsw-alias-bg-layer-2, #101828); border: 1px solid var(--dsw-alias-border-l2, #334155); border-radius: 6px; }
+.ig5-error { color: var(--dsw-alias-state-error-primary, #f87171); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* 进度条 (.lc-bar-track 对齐) */
+.ig5-track {
+  background: color-mix(in srgb, var(--dsw-alias-label-secondary, #888) 18%, transparent);
+  border-radius: 4px;
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  position: relative;
+}
+.ig5-fill {
+  border-radius: 4px;
+  height: 100%;
+  background: var(--dsw-alias-brand-primary, #3b82f6);
+  transition: width 0.3s ease;
+}
+
+/* 状态小圆点 */
+.ig5-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  display: inline-block;
+}
+@keyframes ig5Pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+.ig5-pulse { animation: ig5Pulse 1.2s ease-in-out infinite; }
+
+/* 底部输入框徽章 */
+.ig5-badge-wrap { display: flex; justify-content: center; width: 100%; }
+.ig5-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 10px;
+  border-radius: 9999px;
+  border: 1px solid var(--dsw-alias-border-l2, rgba(255, 255, 255, 0.12));
+  background: var(--dsw-alias-bg-layer-2, rgba(255, 255, 255, 0.05));
+  font-size: 11px;
+  line-height: 18px;
+  user-select: none;
+  white-space: nowrap;
+  cursor: pointer;
+  color: var(--dsw-alias-label-secondary, #94a3b8);
+  font-weight: 500;
+  transition: all var(--ds-transition-duration, .2s) var(--ds-ease-in-out, ease-in-out);
+}
+.ig5-badge:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(255, 255, 255, 0.08));
+  color: var(--dsw-alias-label-primary, #e2e8f0);
+  border-color: var(--dsw-alias-label-secondary, #94a3b8);
+}
+`;
+
+        function useStyleOnce() {
+          react.useEffect(function () {
+            var tagId = "dsh-infinite-gen-5/styles";
+            if (typeof document !== "undefined" && !document.querySelector("style[data-plugin-css=" + JSON.stringify(tagId) + "]")) {
+              var tag = document.createElement("style");
+              tag.dataset.plugin = PLUGIN_ID;
+              tag.dataset.pluginCss = tagId;
+              tag.textContent = CSS;
+              document.head.appendChild(tag);
+            }
+          }, []);
+        }
+
+        /* ── 数据源轮询 Hooks ── */
+        function useJobsFeed() {
+          var pair = react.useState(null);
+          var feed = pair[0];
+          var setFeed = pair[1];
+          react.useEffect(function () {
+            var alive = true;
+            var timer = null;
+            function tick() {
+              fetch("/ig5-jobs")
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                  if (!alive) return;
+                  setFeed(data);
+                  var isRunning = (data.jobs || []).some(function (j) { return j.state === "running"; });
+                  timer = setTimeout(tick, isRunning ? 1000 : 3500);
+                })
+                .catch(function () {
+                  if (alive) setFeed(null);
+                  timer = setTimeout(tick, 5000);
+                });
+            }
+            tick();
+            return function () { alive = false; if (timer) clearTimeout(timer); };
+          }, []);
+          return feed;
+        }
+
+        function useDash(props) {
+          try {
+            if (props && typeof props.useProjection === "function") {
+              return props.useProjection("ig5dash");
+            }
+          } catch (e) {}
+          return null;
+        }
+
+        function basename(p) {
+          var s = String(p || "");
+          var i = Math.max(s.lastIndexOf("/"), s.lastIndexOf("\\"));
+          return i >= 0 ? s.slice(i + 1) : s;
+        }
+
+        function readData(type, target, params) {
+          var query = new URLSearchParams(Object.assign({ type: type, target: target || "" }, params || {}));
+          return fetch("/ig5-data?" + query.toString()).then(function (r) {
+            if (!r.ok) throw new Error("读取失败 (HTTP " + r.status + ")");
+            return r.json();
+          }).then(function (j) {
+            if (!j || j.error) throw new Error((j && j.error) || "空响应");
+            return j.data;
+          });
+        }
+
+        // Every selection owns a generation; old reads must never paint a newer selection.
+        function makeRequestGate() {
+          var generation = 0;
+          return { next: function () { generation += 1; return generation; }, isCurrent: function (value) { return value === generation; } };
+        }
+
+        function highlightParts(code, variable) {
+          var source = String(code || "");
+          if (!variable) return [{ text: source, match: false }];
+          var escaped = String(variable).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          var re = new RegExp("(^|[^A-Za-z0-9_$])(" + escaped + ")(?=$|[^A-Za-z0-9_$])", "g");
+          var result = [], position = 0, match;
+          while ((match = re.exec(source))) {
+            var start = match.index + match[1].length;
+            if (start > position) result.push({ text: source.slice(position, start), match: false });
+            result.push({ text: match[2], match: true });
+            position = start + match[2].length;
+          }
+          if (position < source.length || !result.length) result.push({ text: source.slice(position), match: false });
+          return result;
+        }
+
+        function renderCodeLines(lines, variable) {
+          return (lines || []).map(function (line, index) {
+            var code = typeof line === "string" ? line : (line.code || line.text || "");
+            var parts = highlightParts(code, variable);
+            return el("span", { key: index, className: "ig5-code-line" + (parts.some(function (p) { return p.match; }) ? " focused" : "") },
+              el("span", { style: { opacity: 0.5, display: "inline-block", width: 46, userSelect: "none" } }, String(line.line_no || index + 1)),
+              parts.map(function (p, i) { return p.match ? el("mark", { key: i }, p.text) : p.text; }));
+          });
+        }
+
+        function layoutCfg(cfg) {
+          var raw = Array.isArray(cfg && cfg.blocks) ? cfg.blocks : [];
+          var nodes = raw.slice(0, 300).map(function (b) { return Object.assign({}, b, { id: String(b.id), succs: (b.succs || []).map(String) }); });
+          var byId = Object.create(null), ranks = Object.create(null), levels = Object.create(null), seen = Object.create(null), edges = [];
+          nodes.forEach(function (n) { byId[n.id] = n; });
+          var sourceEdges = Array.isArray(cfg && cfg.edges) ? cfg.edges : nodes.reduce(function (out, n) { return out.concat(n.succs.map(function (to) { return { from: n.id, to: to }; })); }, []);
+          sourceEdges.forEach(function (e) {
+            var from = String(e.from), to = String(e.to), key = from + ":" + to;
+            if (!byId[from] || !byId[to] || seen[key]) return;
+            seen[key] = true; edges.push({ from: from, to: to, label: String(e.label || "") });
+            if (byId[from].succs.indexOf(to) < 0) byId[from].succs.push(to);
+          });
+          var maxRank = -1;
+          nodes.forEach(function (root) {
+            if (ranks[root.id] !== undefined) return;
+            ranks[root.id] = maxRank + 1;
+            var queue = [root.id];
+            while (queue.length) {
+              var id = queue.shift(), rank = ranks[id]; maxRank = Math.max(maxRank, rank);
+              byId[id].succs.forEach(function (to) { if (byId[to] && ranks[to] === undefined) { ranks[to] = rank + 1; queue.push(to); } });
+            }
+          });
+          var width = 300;
+          nodes.forEach(function (n) {
+            var rank = ranks[n.id], column = levels[rank] || 0; levels[rank] = column + 1;
+            n.x = 44 + column * 290; n.y = 36 + rank * 132; n.width = 244; n.height = 88;
+            width = Math.max(width, n.x + 290);
+          });
+          edges.forEach(function (e) {
+            var a = byId[e.from], b = byId[e.to], back = b.y <= a.y;
+            var x1 = a.x + a.width / 2, y1 = a.y + a.height, x2 = b.x + b.width / 2, y2 = b.y;
+            if (back) {
+              x1 = a.x + a.width; y1 = a.y + a.height / 2; x2 = b.x + b.width; y2 = b.y + b.height / 2;
+              var side = Math.max(x1, x2) + 28;
+              e.path = "M " + x1 + " " + y1 + " C " + side + " " + y1 + ", " + side + " " + y2 + ", " + x2 + " " + y2;
+              e.labelX = side; e.labelY = (y1 + y2) / 2;
+            } else {
+              var mid = (y1 + y2) / 2;
+              e.path = "M " + x1 + " " + y1 + " C " + x1 + " " + mid + ", " + x2 + " " + mid + ", " + x2 + " " + y2;
+              e.labelX = (x1 + x2) / 2 + 7; e.labelY = mid;
+            }
+            var branch = a.succs.indexOf(e.to);
+            e.label = e.label || (back ? "回边" : (a.succs.length > 1 ? "分支 " + (branch + 1) : "继续"));
+            e.color = back ? "#c084fc" : (a.succs.length > 1 && branch > 0 ? "#fbbf24" : "#60a5fa");
+          });
+          return { nodes: nodes, edges: edges, width: width, height: Math.max(180, (maxRank + 1) * 132 + 40), truncated: raw.length > nodes.length };
+        }
+
+        function CfgGraph(props) {
+          var model = react.useMemo(function () { return layoutCfg(props.cfg); }, [props.cfg]);
+          var cameraPair = react.useState({ scale: 1, x: 0, y: 0 });
+          var camera = cameraPair[0], setCamera = cameraPair[1], drag = react.useRef(null);
+          var marker = react.useRef("ig5-arrow-" + Math.random().toString(36).slice(2));
+          function fitCamera() { return { scale: Math.min(1, 480 / model.height), x: 0, y: 12 }; }
+          react.useEffect(function () { setCamera(fitCamera()); }, [props.cfg]);
+          function zoom(factor) { setCamera(function (c) { return Object.assign({}, c, { scale: Math.max(0.01, Math.min(4, c.scale * factor)) }); }); }
+          return el("div", null,
+            el("div", { className: "ig5-form-row" },
+              el("button", { className: "ig5-btn", onClick: function () { zoom(1.2); }, "aria-label": "放大控制流图" }, "+"),
+              el("button", { className: "ig5-btn", onClick: function () { zoom(1 / 1.2); }, "aria-label": "缩小控制流图" }, "−"),
+              el("button", { className: "ig5-btn", onClick: function () { setCamera(fitCamera()); } }, "适应画布"),
+              el("span", { className: "ig5-card-sub" }, "拖动平移 · 双击基本块查看反汇编 · " + Math.round(camera.scale * 100) + "%")),
+            el("svg", { className: "ig5-cfg-canvas", viewBox: "0 0 " + Math.max(800, model.width) + " 520", role: "img", "aria-label": "Reverse 控制流图",
+              onPointerDown: function (e) { if (e.button !== 0 || (e.target.closest && e.target.closest(".ig5-cfg-node"))) return; drag.current = { x: e.clientX, y: e.clientY, cx: camera.x, cy: camera.y }; e.currentTarget.setPointerCapture(e.pointerId); },
+              onPointerMove: function (e) { if (!drag.current) return; var box = e.currentTarget.getBoundingClientRect(), factor = Math.max(800, model.width) / box.width; setCamera(Object.assign({}, camera, { x: drag.current.cx + (e.clientX - drag.current.x) * factor, y: drag.current.cy + (e.clientY - drag.current.y) * factor })); },
+              onPointerUp: function () { drag.current = null; }, onPointerCancel: function () { drag.current = null; }
+            },
+              el("defs", null, el("marker", { id: marker.current, viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 6, markerHeight: 6, orient: "auto-start-reverse" }, el("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: "#94a3b8" }))),
+              el("g", { transform: "translate(" + camera.x + " " + camera.y + ") scale(" + camera.scale + ")" },
+                model.edges.map(function (e, i) { return el("g", { key: i }, el("path", { className: "ig5-cfg-edge", d: e.path, stroke: e.color, markerEnd: "url(#" + marker.current + ")" }), el("text", { className: "ig5-cfg-edge-label", x: e.labelX, y: e.labelY }, e.label)); }),
+                model.nodes.map(function (n) { return el("g", { key: n.id, className: "ig5-cfg-node", transform: "translate(" + n.x + " " + n.y + ")", role: "button", tabIndex: 0, "aria-label": "基本块 " + n.id + " " + n.start,
+                  onDoubleClick: function () { props.onOpen(n); }, onKeyDown: function (e) { if (e.key === "Enter") props.onOpen(n); } },
+                  el("title", null, n.start + " → " + n.end + "\n" + (n.first || "") + "\n" + (n.last || "")),
+                  el("rect", { width: n.width, height: n.height, rx: 7 }),
+                  el("text", { x: 12, y: 22, className: "ig5-mono" }, "B" + n.id + " · " + n.start),
+                  el("text", { x: 12, y: 43, className: "ig5-mono" }, String(n.first || "").slice(0, 31)),
+                  el("text", { x: 12, y: 64, className: "ig5-mono" }, String(n.last || "").slice(0, 31)),
+                  el("text", { x: 12, y: 81 }, n.insns + " 条指令")); })
+              )),
+            model.truncated ? el("div", { className: "ig5-card-sub" }, "图中显示前 300 个基本块；完整拓扑可复制 Mermaid 查看。") : null);
+        }
+
+        function normalizedTarget(target) { return String(target || "").replace(/\//g, "\\").toLowerCase(); }
+        function normalizeAudit(item) {
+          var args = item.args || item.arguments || {}, result = item.detail || (item.result && (item.result.value || item.result)) || {};
+          return { tool: String(item.tool || item.name || "未知工具"), target: args.target || item.target || "", time: item.ts || item.time || "", ea: result.ea || args.ea || "", fileOffset: result.fileOffset, before: result.before, after: result.after, isError: item.isError === true || !!(item.result && item.result.isError), detail: typeof result === "string" ? result : String(result.error || result.note || "") };
+        }
+        function buildStructDraft(target, declaration) {
+          return "请调用 ig5_struct，参数如下，并通过宿主审批门后执行：\n" + JSON.stringify({ target: target, action: "define", decl: String(declaration).trim() }, null, 2);
+        }
+
+        function StructEditor(props) {
+          var declPair = react.useState(props.declaration || "struct Packet {\n  int id;\n  char payload[32];\n};"), decl = declPair[0], setDecl = declPair[1];
+          var draftPair = react.useState(""), draft = draftPair[0], setDraft = draftPair[1];
+          var noticePair = react.useState(""), notice = noticePair[0], setNotice = noticePair[1];
+          react.useEffect(function () { setDecl(props.declaration || "struct Packet {\n  int id;\n  char payload[32];\n};"); setDraft(""); setNotice(""); }, [props.declaration, props.revision, props.target]);
+          function insertDraft() {
+            try {
+              var actions = props.inputActions;
+              if (!actions || typeof actions.captureInsertion !== "function" || typeof actions.insertText !== "function") { setNotice("当前视图未提供会话编辑器接口，请复制下方草稿到会话后发送。"); return; }
+              var span = actions.captureInsertion();
+              if (!actions.insertText("\n" + draft + "\n", span)) { setNotice("会话草稿正在变化或编辑器暂不可用，请重试或复制草稿。"); return; }
+              if (typeof actions.persistDraft === "function") actions.persistDraft();
+              setNotice("已插入会话草稿，尚未发送或执行；请检查后发送，并在宿主审批门批准。");
+            } catch (e) { setNotice("插入草稿失败，请复制下方草稿：" + String(e.message || e)); }
+          }
+          return el("div", { style: { marginBottom: 12, borderBottom: "1px solid var(--dsw-alias-border-l2)", paddingBottom: 12 } },
+            el("div", { className: "ig5-card-title-text" }, props.name ? "编辑类型声明 · " + props.name : "新增结构体声明"),
+            el("p", { className: "ig5-card-sub" }, "编辑 C 声明后生成待发送草稿。修改现有类型时保留类型名；数据库仅在会话发送并获宿主审批后变更。"),
+            el("textarea", { className: "ig5-textarea ig5-mono", "aria-label": "C 结构体声明", value: decl, onChange: function (e) { setDecl(e.target.value); setDraft(""); setNotice(""); } }),
+            el("div", { className: "ig5-form-row" }, el("button", { className: "ig5-btn ig5-btn-primary", disabled: !props.target || !decl.trim(), onClick: function () { setDraft(buildStructDraft(props.target, decl)); setNotice("草稿已生成，尚未发送或执行。"); } }, "生成审批草稿")),
+            draft ? el("div", null,
+              el("textarea", { className: "ig5-textarea ig5-mono", "aria-label": "待发送工具调用草稿", value: draft, onChange: function (e) { setDraft(e.target.value); } }),
+              el("div", { className: "ig5-form-row" }, el("button", { className: "ig5-btn", onClick: insertDraft }, "插入会话草稿（待发送）"), el("button", { className: "ig5-btn", onClick: function () { if (navigator.clipboard) navigator.clipboard.writeText(draft).then(function () { setNotice("已复制草稿，尚未发送或执行。"); }).catch(function () { setNotice("复制失败，请手动选择草稿复制。"); }); else setNotice("请手动选择草稿复制。"); } }, "复制草稿"))) : null,
+            notice ? el("div", { role: "status", className: "ig5-card-sub" }, notice) : null);
+        }
+
+        function activateTopTab(label) {
+          try {
+            var tabs = document.querySelectorAll('button[role="tab"]');
+            for (var i = 0; i < tabs.length; i++) {
+              if ((tabs[i].textContent || "").indexOf(label) !== -1 || (tabs[i].textContent || "").indexOf("工作台") !== -1) {
+                if (tabs[i].getAttribute("aria-selected") !== "true") tabs[i].click();
+                diag("top-tab-activated", label);
+                return true;
+              }
+            }
+          } catch (e) {}
+          return false;
+        }
+
+        /* ── 核心工作台主界面 (Professional Workbench) ── */
+        function Ig5Workbench(props) {
+          useStyleOnce();
+          var feed = useJobsFeed();
+          var dash = useDash(props);
+
+          var activeTabState = react.useState("funcs");
+          var activeTab = activeTabState[0];
+          var setActiveTab = activeTabState[1];
+
+          var sessions = (feed && feed.sessions) ? feed.sessions.filter(function (s) { return s.alive; }) : [];
+          var currentTargetState = react.useState(null);
+          var selectedTarget = currentTargetState[0] || (sessions[0] && sessions[0].target) || null;
+          var setSelectedTarget = currentTargetState[1];
+
+          react.useEffect(function () {
+            if (!selectedTarget && sessions.length > 0) {
+              setSelectedTarget(sessions[0].target);
+            }
+          }, [sessions.length]);
+
+          var currentSession = sessions.find(function (s) { return s.target === selectedTarget; }) || sessions[0] || null;
+          var jobs = (feed && feed.jobs) || [];
+          var runningJobs = jobs.filter(function (j) { return j.state === "running"; });
+
+          return el(
+            "div",
+            { className: "ig5-root" },
+            // 1. 全局概览与状态磁贴卡片
+            el(Ig5OverviewCard, {
+              currentSession: currentSession,
+              sessions: sessions,
+              selectedTarget: selectedTarget,
+              onSelectTarget: setSelectedTarget,
+              runningCount: runningJobs.length,
+              runningJob: runningJobs[0] || null,
+              dash: dash,
+            }),
+            // 2. 领域分段胶囊导航栏 (.ig5-kinds)
+            el(
+              "div",
+              { style: { marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 } },
+              el(Ig5NavTabs, {
+                activeTab: activeTab,
+                onSelectTab: setActiveTab,
+                nFuncs: (currentSession && currentSession.n_funcs) || null,
+              }),
+              el("div", { className: "ig5-card-sub ig5-mono" },
+                selectedTarget ? "当前目标: " + basename(selectedTarget) : "等待样本载入 (ig5_open)"
+              )
+            ),
+            // 3. 对应能力域工作区视图
+            activeTab === "funcs" && el(Ig5FunctionsView, { target: selectedTarget, session: currentSession }),
+            activeTab === "strings" && el(Ig5StringsView, { target: selectedTarget }),
+            activeTab === "listing" && el(Ig5ListingView, { target: selectedTarget, inputActions: props.inputActions }),
+            activeTab === "scan" && el(Ig5ScanView, { target: selectedTarget }),
+            activeTab === "patches" && el(Ig5PatchesView, { target: selectedTarget }),
+            activeTab === "tools" && el(Ig5ToolsMatrixView, { dash: dash, session: currentSession, feed: feed })
+          );
+        }
+
+        /* ── 全局概览卡片 (Overview & Stat Tiles) ── */
+        function Ig5OverviewCard(props) {
+          var session = props.currentSession;
+          var sessions = props.sessions || [];
+          var isBusy = props.runningCount > 0;
+          var dash = props.dash;
+          var runningJob = props.runningJob;
+
+          return el(
+            "div",
+            { className: "ig5-card" },
+            el(
+              "div",
+              { className: "ig5-card-title" },
+              el(
+                "div",
+                { className: "ig5-card-title-text" },
+                el("span", null, "🛠️ 无限五代 · 逆向工作台"),
+                el("span", { className: "ig5-chip read ig5-mono" }, "Reverse · v" + VERSION),
+                el(
+                  "span",
+                  { className: "ig5-chip " + (isBusy ? "warn" : "success") },
+                  el("span", {
+                    className: "ig5-dot " + (isBusy ? "ig5-pulse" : ""),
+                    style: { background: isBusy ? "var(--dsw-alias-state-warn-primary, #f59e0b)" : "var(--dsw-alias-state-success-primary, #10b981)" }
+                  }),
+                  isBusy ? "正在分析 (" + (runningJob && runningJob.stage ? runningJob.stage : "执行中") + ")" : "引擎在线 (就绪)"
+                )
+              ),
+              el(
+                "div",
+                { style: { display: "flex", alignItems: "center", gap: 8 } },
+                sessions.length > 1
+                  ? el(
+                      "select",
+                      {
+                        className: "ig5-select ig5-mono",
+                        value: props.selectedTarget || "",
+                        onChange: function (e) { props.onSelectTarget(e.target.value); }
+                      },
+                      sessions.map(function (s) {
+                        return el("option", { key: s.target, value: s.target }, basename(s.target) + " (pid " + s.pid + ")");
+                      })
+                    )
+                  : null,
+                el(
+                  "button",
+                  {
+                    className: "ig5-btn",
+                    title: "执行无头引擎健康诊断",
+                    onClick: function () {
+                      fetch("/ig5-data?type=funcs&limit=1")
+                        .then(function () { alert("✅ IG5 Reverse 无头逆向引擎运转正常，Worker 状态健康！"); })
+                        .catch(function (err) { alert("自检异常: " + err); });
+                    }
+                  },
+                  "引擎自检 (Doctor)"
+                )
+              )
+            ),
+            runningJob
+              ? el(
+                  "div",
+                  { style: { marginBottom: 12, padding: "8px 10px", background: "var(--dsw-alias-bg-layer-2)", borderRadius: 6 } },
+                  el(
+                    "div",
+                    { style: { display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 4 } },
+                    el("span", { style: { color: "var(--dsw-alias-brand-primary)" } },
+                      "⚡ " + (runningJob.label || "正在自动反编译与扫描") + " · 阶段: " + (runningJob.stage || "analyzing")
+                    ),
+                    el("span", { className: "ig5-mono" }, (runningJob.pct || 0) + "%")
+                  ),
+                  el(
+                    "div",
+                    { className: "ig5-track" },
+                    el("div", { className: "ig5-fill", style: { width: Math.max(0, Math.min(100, runningJob.pct || 0)) + "%" } })
+                  )
+                )
+              : null,
+            el(
+              "div",
+              { className: "ig5-stats-grid" },
+              el("div", { className: "ig5-stat" },
+                el("span", { className: "ig5-stat-label" }, "目标样本 (Target)"),
+                el("b", { className: "ig5-stat-value ig5-mono" }, session ? basename(session.target) : "未载入样本"),
+                el("span", { className: "ig5-stat-sub" }, session ? (session.size ? session.size + " 字节" : "活跃会话") : "请下达 ig5_open")
+              ),
+              el("div", { className: "ig5-stat" },
+                el("span", { className: "ig5-stat-label" }, "架构位数 (Arch & Bits)"),
+                el("b", { className: "ig5-stat-value ig5-mono" }, session && session.bits ? session.bits + "-bit " + (session.file_type || "PE/ELF") : "—"),
+                el("span", { className: "ig5-stat-sub" }, session && session.cpu ? session.cpu : "x86_64 / ARM")
+              ),
+              el("div", { className: "ig5-stat" },
+                el("span", { className: "ig5-stat-label" }, "函数总量 (Functions)"),
+                el("b", { className: "ig5-stat-value ig5-mono" }, session && session.n_funcs ? String(session.n_funcs) : "0"),
+                el("span", { className: "ig5-stat-sub" }, "Reverse C 伪代码")
+              ),
+              el("div", { className: "ig5-stat" },
+                el("span", { className: "ig5-stat-label" }, "节段/导入 (Sections/Imp)"),
+                el("b", { className: "ig5-stat-value ig5-mono" }, session ? (session.n_segs || "10") + " 段 · " + (session.n_imports || "43") + " 导入" : "—"),
+                el("span", { className: "ig5-stat-sub" }, "符号引索完成")
+              ),
+              el("div", { className: "ig5-stat" },
+                el("span", { className: "ig5-stat-label" }, "工具调用 (Tool Calls)"),
+                el("b", { className: "ig5-stat-value ig5-mono" }, String((dash && dash.calls) || 0) + " 次"),
+                el("span", { className: "ig5-stat-sub" }, (dash && dash.errors) ? (dash.errors + " 次拦截/异常") : "0 拦截 · 安全运行")
+              ),
+              el("div", { className: "ig5-stat" },
+                el("span", { className: "ig5-stat-label" }, "结构与补丁 (Types/Patch)"),
+                el("b", { className: "ig5-stat-value ig5-mono" }, "类型系统/审批门"),
+                el("span", { className: "ig5-stat-sub" }, "支持确定性撤销 (Undo)")
+              )
+            )
+          );
+        }
+
+        /* ── 分段胶囊导航栏 ── */
+        function Ig5NavTabs(props) {
+          var tabs = [
+            { id: "funcs", label: "🧩 函数/CFG/切片", tag: props.nFuncs ? String(props.nFuncs) : null },
+            { id: "strings", label: "🔤 字符串常量", tag: null },
+            { id: "listing", label: "📑 节段/符号/结构体", tag: null },
+            { id: "scan", label: "🛡 熵与指纹侦测", tag: null },
+            { id: "patches", label: "⚡ 补丁审计与回滚", tag: null },
+            { id: "tools", label: "🧰 工具能力目录", tag: null },
+          ];
+
+          return el(
+            "div",
+            { className: "ig5-kinds" },
+            tabs.map(function (t) {
+              var isSel = props.activeTab === t.id;
+              return el(
+                "button",
+                {
+                  key: t.id,
+                  className: "ig5-gran-btn" + (isSel ? " ig5-gran-on" : ""),
+                  onClick: function () { props.onSelectTab(t.id); }
+                },
+                el("span", null, t.label),
+                t.tag ? el("span", { className: "ig5-kind-n ig5-mono" }, t.tag) : null
+              );
+            })
+          );
+        }
+
+        /* ── Tab 1: 函数浏览器 + 反编译 + CFG 拓扑 + 变量切片 ── */
+        function Ig5FunctionsView(props) {
+          var target = props.target;
+          var listState = react.useState({ rows: [], total: 0, offset: 0, filter: "", userOnly: false, loading: false, error: null });
+          var list = listState[0];
+          var setList = listState[1];
+
+          var codeState = react.useState({ ea: null, name: null, code: null, loading: false, error: null });
+          var curCode = codeState[0];
+          var setCode = codeState[1];
+
+          var xrefsState = react.useState({ list: [], callers: [], callees: [], loading: false });
+          var xrefs = xrefsState[0];
+          var setXrefs = xrefsState[1];
+
+          var viewModeState = react.useState("code"); // 'code' | 'cfg' | 'slice'
+          var viewMode = viewModeState[0];
+          var setViewMode = viewModeState[1];
+
+          var cfgState = react.useState(null);
+          var cfg = cfgState[0];
+          var setCfg = cfgState[1];
+
+          var sliceState = react.useState(null);
+          var slice = sliceState[0];
+          var setSlice = sliceState[1];
+          var focusPair = react.useState({ variable: "", loading: false, lines: [], error: null });
+          var focused = focusPair[0], setFocused = focusPair[1];
+          var disasmPair = react.useState(null), disasm = disasmPair[0], setDisasm = disasmPair[1];
+          var selectionGate = react.useRef(makeRequestGate()), focusGate = react.useRef(makeRequestGate()), disasmGate = react.useRef(makeRequestGate());
+          var previousTarget = react.useRef(target);
+          if (previousTarget.current !== target) { previousTarget.current = target; selectionGate.current.next(); focusGate.current.next(); disasmGate.current.next(); }
+          react.useEffect(function () {
+            setCode({ ea: null, name: null, code: null, loading: false, error: null }); setCfg(null); setSlice(null); setDisasm(null);
+            setFocused({ variable: "", loading: false, lines: [], error: null }); setXrefs({ list: [], callers: [], callees: [], loading: false });
+            setList(function (s) { return Object.assign({}, s, { rows: [], total: 0, offset: 0 }); });
+            return function () { selectionGate.current.next(); focusGate.current.next(); disasmGate.current.next(); };
+          }, [target]);
+
+          react.useEffect(function () {
+            if (!target) return;
+            var alive = true;
+            setList(function (s) { return Object.assign({}, s, { loading: true, error: null }); });
+            var url = "/ig5-data?type=funcs&target=" + encodeURIComponent(target) +
+              "&offset=" + (list.offset || 0) + "&limit=50&filter=" + encodeURIComponent(list.filter || "") +
+              (list.userOnly ? "&user_only=true" : "");
+            fetch(url)
+              .then(function (r) { return r.json(); })
+              .then(function (j) {
+                if (!alive) return;
+                if (j.error) { setList(function (s) { return Object.assign({}, s, { loading: false, error: j.error }); }); return; }
+                setList(function (s) { return Object.assign({}, s, { loading: false, rows: j.data.funcs || [], total: j.data.total || 0, error: null }); });
+              })
+              .catch(function (e) { if (alive) setList(function (s) { return Object.assign({}, s, { loading: false, error: String(e) }); }); });
+            return function () { alive = false; };
+          }, [target, list.offset, list.searchNonce, list.userOnly]);
+
+          function selectFunction(ea, name) {
+            var ticket = selectionGate.current.next(); focusGate.current.next(); disasmGate.current.next();
+            function current() { return selectionGate.current.isCurrent(ticket); }
+            setCode({ ea: ea, name: name, code: null, loading: true, error: null });
+            setXrefs({ list: [], callers: [], callees: [], loading: true });
+            setCfg(null);
+            setSlice(null);
+            setDisasm(null); setFocused({ variable: "", loading: false, lines: [], error: null });
+
+            // 1. 获取反编译伪代码
+            fetch("/ig5-data?type=decompile&target=" + encodeURIComponent(target) + "&ea=" + encodeURIComponent(ea))
+              .then(function (r) { return r.json(); })
+              .then(function (j) {
+                if (!current()) return;
+                if (j.error) { setCode({ ea: ea, name: name, code: null, loading: false, error: j.error }); return; }
+                setCode({ ea: j.data.ea, name: j.data.name, code: j.data.code || j.data.preview || "(空函数)", loading: false, error: null });
+              })
+              .catch(function (e) { if (current()) setCode({ ea: ea, name: name, code: null, loading: false, error: String(e) }); });
+
+            // 2. 交叉引用 & 子调用
+            Promise.all([
+              fetch("/ig5-data?type=xrefs&target=" + encodeURIComponent(target) + "&ea=" + encodeURIComponent(ea)).then(function (r) { return r.json(); }).catch(function () { return { data: [] }; }),
+              fetch("/ig5-data?type=calls&target=" + encodeURIComponent(target) + "&ea=" + encodeURIComponent(ea)).then(function (r) { return r.json(); }).catch(function () { return { data: [] }; })
+            ]).then(function (results) {
+              if (!current()) return;
+              var xrefData = (results[0] && results[0].data && results[0].data.rows) || [];
+              var callData = (results[1] && results[1].data && results[1].data.rows) || [];
+              setXrefs({ list: xrefData, callees: callData, callers: [], loading: false });
+            });
+
+            // 3. 预载入 CFG 与切片数据
+            fetch("/ig5-data?type=cfg&target=" + encodeURIComponent(target) + "&ea=" + encodeURIComponent(ea))
+              .then(function (r) { return r.json(); })
+              .then(function (j) { if (current()) setCfg(j && j.data ? j.data : { error: (j && j.error) || "控制流图响应为空", blocks: [], edges: [] }); })
+              .catch(function (e) { if (current()) setCfg({ error: String(e), blocks: [], edges: [] }); });
+
+            fetch("/ig5-data?type=slice&target=" + encodeURIComponent(target) + "&ea=" + encodeURIComponent(ea))
+              .then(function (r) { return r.json(); })
+              .then(function (j) { if (current()) setSlice(j && j.data ? j.data : { error: (j && j.error) || "变量响应为空", variables: [] }); })
+              .catch(function (e) { if (current()) setSlice({ error: String(e), variables: [] }); });
+          }
+
+          function focusVariable(variable) {
+            var ticket = focusGate.current.next();
+            setFocused({ variable: variable, loading: true, lines: [], error: null });
+            readData("slice", target, { ea: curCode.ea, var: variable }).then(function (data) {
+              if (focusGate.current.isCurrent(ticket)) setFocused({ variable: variable, loading: false, lines: data.slice_lines || [], error: null });
+            }).catch(function (e) { if (focusGate.current.isCurrent(ticket)) setFocused({ variable: variable, loading: false, lines: [], error: String(e.message || e) }); });
+          }
+
+          function openBlock(block) {
+            var ticket = disasmGate.current.next();
+            setDisasm({ ea: block.start, block: block.id, rows: [], loading: true });
+            var size = Math.max(1, Math.min(8192, parseInt(block.end, 16) - parseInt(block.start, 16) || 256));
+            readData("disasm", target, { ea: block.start, size: size, limit: 120 }).then(function (data) {
+              if (disasmGate.current.isCurrent(ticket)) setDisasm({ ea: block.start, block: block.id, rows: data.rows || [], loading: false, nextEa: data.nextEa });
+            }).catch(function (e) { if (disasmGate.current.isCurrent(ticket)) setDisasm({ ea: block.start, block: block.id, rows: [], loading: false, error: String(e.message || e) }); });
+          }
+
+          if (!target) {
+            return el("div", { className: "ig5-card", style: { textAlign: "center", padding: "40px 20px" } },
+              el("p", { style: { color: "var(--dsw-alias-label-secondary)" } },
+                "当前未载入逆向样本。请在会话中让模型使用「ig5_open」打开目标二进制文件。"
+              )
+            );
+          }
+
+          var page = Math.floor((list.offset || 0) / 50) + 1;
+          var pages = Math.max(1, Math.ceil((list.total || 0) / 50));
+
+          return el(
+            "div",
+            { className: "ig5-cols", style: { alignItems: "flex-start" } },
+            // 左列卡片：函数检索与分页列表
+            el(
+              "div",
+              { className: "ig5-card ig5-col", style: { flex: "0 0 380px", width: 380, marginBottom: 0 } },
+              el(
+                "div",
+                { className: "ig5-card-title" },
+                el("span", { className: "ig5-card-title-text" }, "函数浏览 (Functions)"),
+                el("span", { className: "ig5-chip read ig5-mono" }, list.total + " 项")
+              ),
+              el(
+                "div",
+                { style: { display: "flex", gap: 6, marginBottom: 8, alignItems: "center" } },
+                el("input", {
+                  className: "ig5-input ig5-mono",
+                  style: { flex: 1 },
+                  placeholder: "过滤函数名并按回车...",
+                  value: list.filter,
+                  onChange: function (e) { setList(function (s) { return Object.assign({}, s, { filter: e.target.value }); }); },
+                  onKeyDown: function (e) {
+                    if (e.key === "Enter") setList(function (s) { return Object.assign({}, s, { offset: 0, searchNonce: (s.searchNonce || 0) + 1 }); });
+                  }
+                }),
+                el("button", {
+                  className: "ig5-btn" + (list.userOnly ? " ig5-btn-primary" : ""),
+                  style: { fontSize: 11, padding: "4px 8px" },
+                  title: "根据 Reverse 标准库标记过滤函数，专注于用户逻辑",
+                  onClick: function () { setList(function (s) { return Object.assign({}, s, { userOnly: !s.userOnly, offset: 0 }); }); }
+                }, list.userOnly ? "仅用户代码" : "全部函数")
+              ),
+              el(
+                "div",
+                { className: "ig5-table-wrap" },
+                el(
+                  "table",
+                  { className: "ig5-table ig5-mono" },
+                  el("thead", null,
+                    el("tr", null,
+                      el("th", { style: { width: 95 } }, "地址 (EA)"),
+                      el("th", null, "函数名"),
+                      el("th", { style: { width: 50, textAlign: "right" } }, "大小")
+                    )
+                  ),
+                  el("tbody", null,
+                    list.rows.map(function (f) {
+                      var isSel = curCode.ea === f.ea;
+                      return el(
+                        "tr",
+                        {
+                          key: f.ea,
+                          className: isSel ? "selected" : "",
+                          onClick: function () { selectFunction(f.ea, f.name); }
+                        },
+                        el("td", { style: { color: "var(--dsw-alias-brand-primary)" } }, f.ea),
+                        el("td", { style: { fontWeight: 500 } },
+                          f.name,
+                          f.is_lib ? el("span", { className: "ig5-chip", style: { fontSize: 10, padding: "1px 4px", marginLeft: 6, opacity: 0.7 } }, "LIB") : null
+                        ),
+                        el("td", { style: { textAlign: "right", color: "var(--dsw-alias-label-secondary)" } }, String(f.size))
+                      );
+                    })
+                  )
+                )
+              ),
+              el(
+                "div",
+                { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 10 } },
+                el("span", { className: "ig5-card-sub ig5-mono" }, "第 " + page + " / " + pages + " 页"),
+                el("div", { style: { display: "flex", gap: 6 } },
+                  el("button", {
+                    className: "ig5-btn",
+                    disabled: (list.offset || 0) <= 0,
+                    onClick: function () { setList(function (s) { return Object.assign({}, s, { offset: Math.max(0, s.offset - 50) }); }); }
+                  }, "上一页"),
+                  el("button", {
+                    className: "ig5-btn",
+                    disabled: list.offset + 50 >= list.total,
+                    onClick: function () { setList(function (s) { return Object.assign({}, s, { offset: s.offset + 50 }); }); }
+                  }, "下一页")
+                )
+              )
+            ),
+            // 右列卡片：Reverse 伪代码 / CFG 控制流拓扑 / 变量与微代码切片 三模切换
+            el(
+              "div",
+              { className: "ig5-card ig5-col", style: { flex: "1 1 0%", minWidth: 360, marginBottom: 0 } },
+              el(
+                "div",
+                { className: "ig5-card-title" },
+                el(
+                  "div",
+                  { className: "ig5-card-title-text" },
+                  el("span", null, curCode.ea ? (curCode.name || "func") : "反编译与拓扑分析"),
+                  curCode.ea ? el("span", { className: "ig5-chip read ig5-mono" }, curCode.ea) : null
+                ),
+                el(
+                  "div",
+                  { style: { display: "flex", gap: 6 } },
+                  el(
+                    "div",
+                    { className: "ig5-kinds" },
+                    [
+                      { id: "code", label: "伪代码 (C)" },
+                      { id: "cfg", label: "控制流 (CFG)" },
+                      { id: "slice", label: "变量与切片" },
+                    ].map(function (m) {
+                      return el("button", {
+                        key: m.id,
+                        className: "ig5-gran-btn" + (viewMode === m.id ? " ig5-gran-on" : ""),
+                          "aria-pressed": viewMode === m.id,
+                        onClick: function () { setViewMode(m.id); }
+                      }, m.label);
+                    })
+                  ),
+                  curCode.code && viewMode === "code"
+                    ? el("button", {
+                        className: "ig5-btn",
+                        onClick: function () {
+                          if (curCode.code && navigator.clipboard) {
+                            navigator.clipboard.writeText(curCode.code);
+                            alert("已将伪代码复制到剪贴板！");
+                          }
+                        }
+                      }, "复制代码")
+                    : null
+                )
+              ),
+              curCode.ea
+                ? el(
+                    "div",
+                    null,
+                    // 视图 1: 伪代码
+                    viewMode === "code" && (
+                      curCode.loading
+                        ? el("div", { style: { padding: 30, color: "var(--dsw-alias-label-secondary)", textAlign: "center" } }, "正在使用 Reverse 实时反编译该函数...")
+                        : curCode.error
+                        ? el("div", { style: { padding: 20, color: "var(--dsw-alias-state-error-primary)" } }, "反编译失败: " + curCode.error)
+                        : el("pre", { className: "ig5-code-box ig5-mono" }, curCode.code)
+                    ),
+                    // 视图 2: 控制流图 (CFG) 拓扑与 Mermaid
+                    viewMode === "cfg" && (
+                      cfg
+                        ? el(
+                            "div",
+                            null,
+                            el("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 } },
+                              el("span", { className: "ig5-card-sub ig5-mono" },
+                              "共 " + (cfg.total_blocks || 0) + " 个基本块 · " + (cfg.total_edges || 0) + " 条跳转边"
+                              ),
+                              el("button", {
+                                className: "ig5-btn",
+                                onClick: function () {
+                                  if (cfg.mermaid && navigator.clipboard) {
+                                    navigator.clipboard.writeText(cfg.mermaid);
+                                    alert("已复制 Mermaid 流程图代码到剪贴板！可直接粘贴渲染。");
+                                  }
+                                }
+                              }, "复制 Mermaid 图表")
+                            ),
+                            cfg.error ? el("div", { className: "ig5-error", role: "alert" }, cfg.error) : el(CfgGraph, { cfg: cfg, onOpen: openBlock }),
+                            disasm ? el("div", { style: { marginTop: 12 } },
+                              el("div", { className: "ig5-form-row" }, el("b", { className: "ig5-mono" }, "B" + disasm.block + " · " + disasm.ea + " 反汇编（只读）"), el("button", { className: "ig5-btn", onClick: function () { disasmGate.current.next(); setDisasm(null); } }, "关闭")),
+                              disasm.loading ? el("p", { className: "ig5-card-sub", role: "status" }, "正在读取基本块指令…") : disasm.error ? el("p", { className: "ig5-error", role: "alert" }, disasm.error) : el("pre", { className: "ig5-code-box ig5-mono" }, disasm.rows.map(function (row, i) { return el("span", { key: i, className: "ig5-code-line" }, row.ea + "  " + (row.bytes || "").padEnd(24) + "  " + row.text); }))) : null,
+                            el("details", { style: { marginTop: 10 } }, el("summary", { className: "ig5-card-sub" }, "Mermaid 源码"), el("pre", { className: "ig5-code-box ig5-mono" }, cfg.mermaid)),
+                            el("div", { style: { marginTop: 10 } },
+                              el("div", { style: { fontSize: 11, fontWeight: 600, color: "var(--dsw-alias-label-secondary)", marginBottom: 4 } }, "基本块明细:"),
+                              el(
+                                "div",
+                                { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(170px, 1fr))", gap: 6, maxHeight: 150, overflowY: "auto" } },
+                                (cfg.blocks || []).map(function (b) {
+                                  return el("button", { key: b.id, className: "ig5-btn", onClick: function () { openBlock(b); }, style: { background: "var(--dsw-alias-bg-layer-2)", padding: "4px 8px", borderRadius: 4, fontSize: 11, textAlign: "left" } },
+                                    el("div", { className: "ig5-mono", style: { fontWeight: 600, color: "var(--dsw-alias-brand-primary)" } }, "B" + b.id + " [" + b.start + "]"),
+                                    el("div", { className: "ig5-card-sub" }, b.insns + " 条指令 · 跳转 -> " + ((b.succs || []).join(", ") || "返回"))
+                                  );
+                                })
+                              )
+                            )
+                          )
+                        : el("div", { style: { padding: 30, color: "var(--dsw-alias-label-secondary)", textAlign: "center" } }, "正在提取控制流图基本块...")
+                    ),
+                    // 视图 3: 变量表与微代码切片
+                    viewMode === "slice" && (
+                      slice
+                        ? el(
+                            "div",
+                            null,
+                            el("div", { style: { fontSize: 12, fontWeight: 600, color: "var(--dsw-alias-label-secondary)", marginBottom: 8 } },
+                              "局部变量与参数清单 (" + (slice.variables || []).length + " 个) · 点击变量查看匹配代码行"
+                            ),
+                            el(
+                              "div",
+                              { className: "ig5-table-wrap", style: { maxHeight: 220, marginBottom: 12 } },
+                              el(
+                                "table",
+                                { className: "ig5-table ig5-mono" },
+                                el("thead", null,
+                                  el("tr", null,
+                                    el("th", null, "变量名"),
+                                    el("th", null, "推导类型"),
+                                    el("th", null, "宽度 (字节)"),
+                                    el("th", null, "角色")
+                                  )
+                                ),
+                                el("tbody", null,
+                                  (slice.variables || []).map(function (v, idx) {
+                                    return el("tr", { key: idx, className: focused.variable === v.name ? "selected" : "", onClick: function () { focusVariable(v.name); }, tabIndex: 0, onKeyDown: function (e) { if (e.key === "Enter") focusVariable(v.name); } },
+                                      el("td", { style: { fontWeight: 600, color: "var(--dsw-alias-brand-primary)" } }, v.name),
+                                      el("td", null, v.type),
+                                      el("td", null, String(v.size)),
+                                      el("td", null, v.is_arg ? el("span", { className: "ig5-chip read" }, "参数") : "局部变量")
+                                    );
+                                  })
+                                )
+                              )
+                            ),
+                            slice.error ? el("div", { className: "ig5-error", role: "alert" }, slice.error) : null,
+                            focused.variable ? el("div", null,
+                              el("div", { className: "ig5-form-row" }, el("b", { className: "ig5-mono" }, "关注变量 · " + focused.variable), el("span", { className: "ig5-card-sub" }, "按标识符匹配代码行，非完整数据流证明")),
+                              focused.loading ? el("p", { role: "status", className: "ig5-card-sub" }, "正在提取变量切片…") : focused.error ? el("p", { className: "ig5-error", role: "alert" }, focused.error) : focused.lines.length ? el("pre", { className: "ig5-code-box ig5-mono" }, renderCodeLines(focused.lines, focused.variable)) : el("p", { className: "ig5-card-sub" }, "没有匹配代码行。")) : el("p", { className: "ig5-card-sub" }, "选择变量后读取 focused slice 并高亮匹配位置。")
+                          )
+                        : el("div", { style: { padding: 30, color: "var(--dsw-alias-label-secondary)", textAlign: "center" } }, "正在提取局部变量与 AST 节点...")
+                    ),
+                    // 关联交叉引用与子调用抽屉
+                    el(
+                      "div",
+                      { style: { marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--dsw-alias-border-l1)" } },
+                      el("div", { style: { fontSize: 12, fontWeight: 600, color: "var(--dsw-alias-label-secondary)", marginBottom: 6 } },
+                        "关联调用链: " + xrefs.callees.length + " 个子调用 · " + xrefs.list.length + " 个交叉引用"
+                      ),
+                      el(
+                        "div",
+                        { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
+                        xrefs.callees.map(function (c, idx) {
+                          return el("span", {
+                            key: "c" + idx,
+                            className: "ig5-chip read",
+                            style: { cursor: "pointer" },
+                            onClick: function () { selectFunction(c.ea || "", c.name || ""); }
+                          }, "调用 -> " + (c.name || c.ea));
+                        }),
+                        xrefs.list.map(function (x, idx) {
+                          return el("span", {
+                            key: "x" + idx,
+                            className: "ig5-chip write",
+                            style: { cursor: "pointer" },
+                            onClick: function () { selectFunction(x.from || x.ea, x.func_name || ""); }
+                          }, "引用自 <- " + (x.func_name || x.from || x.ea));
+                        }),
+                        (!xrefs.callees.length && !xrefs.list.length) ? el("span", { className: "ig5-card-sub" }, "无外部交叉调用记录") : null
+                      )
+                    )
+                  )
+                : el("div", { style: { padding: 50, textAlign: "center", color: "var(--dsw-alias-label-secondary)" } },
+                    "👈 在左侧列表中选择任意函数，在此实时查看 Reverse 伪代码、CFG 拓扑及局部变量切片。"
+                  )
+            )
+          );
+        }
+
+        /* ── Tab 2: 字符串常量库 (Strings) ── */
+        function Ig5StringsView(props) {
+          var target = props.target;
+          var statePair = react.useState({ rows: [], offset: 0, total: 0, filter: "", loading: false });
+          var data = statePair[0];
+          var setData = statePair[1];
+
+          react.useEffect(function () {
+            if (!target) return;
+            setData(function (s) { return Object.assign({}, s, { loading: true }); });
+            fetch("/ig5-data?type=strings&target=" + encodeURIComponent(target) + "&offset=" + (data.offset || 0) + "&limit=80")
+              .then(function (r) { return r.json(); })
+              .then(function (j) {
+                var list = (j && j.data && j.data.strings) || [];
+                setData(function (s) { return Object.assign({}, s, { loading: false, rows: list, total: j.data.total || list.length }); });
+              })
+              .catch(function () { setData(function (s) { return Object.assign({}, s, { loading: false }); }); });
+          }, [target, data.offset]);
+
+          var filtered = (data.rows || []).filter(function (item) {
+            if (!data.filter) return true;
+            return String(item.str || "").toLowerCase().indexOf(data.filter.toLowerCase()) !== -1 ||
+                   String(item.ea || "").indexOf(data.filter) !== -1;
+          });
+
+          return el(
+            "div",
+            { className: "ig5-card" },
+            el(
+              "div",
+              { className: "ig5-card-title" },
+              el("span", { className: "ig5-card-title-text" }, "🔤 字符串常量库 (String Literals)"),
+              el("span", { className: "ig5-chip read ig5-mono" }, "匹配 " + filtered.length + " / " + data.rows.length + " 项")
+            ),
+            el(
+              "div",
+              { style: { display: "flex", gap: 8, marginBottom: 10 } },
+              el("input", {
+                className: "ig5-input ig5-mono",
+                style: { flex: 1 },
+                placeholder: "实时过滤字符串关键字 (如 password, key, http, flag, error)...",
+                value: data.filter,
+                onChange: function (e) { setData(Object.assign({}, data, { filter: e.target.value })); }
+              })
+            ),
+            el(
+              "div",
+              { className: "ig5-table-wrap" },
+              el(
+                "table",
+                { className: "ig5-table ig5-mono" },
+                el("thead", null,
+                  el("tr", null,
+                    el("th", { style: { width: 110 } }, "地址 (EA)"),
+                    el("th", { style: { width: 60 } }, "长度"),
+                    el("th", null, "字符串内容 (Literal)"),
+                    el("th", { style: { width: 90, textAlign: "right" } }, "操作")
+                  )
+                ),
+                el("tbody", null,
+                  filtered.map(function (row, idx) {
+                    return el("tr", { key: idx },
+                      el("td", { style: { color: "var(--dsw-alias-brand-primary)" } }, row.ea),
+                      el("td", { style: { color: "var(--dsw-alias-label-secondary)" } }, String(row.length || (row.str || "").length)),
+                      el("td", { style: { color: "var(--dsw-alias-label-primary)", wordBreak: "break-all" } }, String(row.str)),
+                      el("td", { style: { textAlign: "right" } },
+                        el("button", {
+                          className: "ig5-btn",
+                          style: { fontSize: 11, padding: "2px 8px" },
+                          onClick: function () {
+                            alert("已定位字符串 [" + row.ea + "]！可在会话中让模型:「查寻引用地址 " + row.ea + " 的函数」。");
+                          }
+                        }, "查引用")
+                      )
+                    );
+                  })
+                )
+              )
+            )
+          );
+        }
+
+        /* ── Tab 3: 节段、符号与结构体库 (Listing & Structs) ── */
+        function Ig5ListingView(props) {
+          var target = props.target;
+          var subTabPair = react.useState("segments");
+          var subTab = subTabPair[0];
+          var setSubTab = subTabPair[1];
+
+          var dataPair = react.useState({ list: [], structs: [], loading: false });
+          var data = dataPair[0];
+          var setData = dataPair[1];
+          var typePair = react.useState({ name: "", declaration: "", revision: 0, fields: [], error: null });
+          var selectedType = typePair[0], setSelectedType = typePair[1];
+          var typeGate = react.useRef(makeRequestGate());
+          var typeTarget = react.useRef(target);
+          if (typeTarget.current !== target) { typeTarget.current = target; typeGate.current.next(); }
+          var refreshPair = react.useState(0), refresh = refreshPair[0], setRefresh = refreshPair[1];
+          react.useEffect(function () { typeGate.current.next(); setSelectedType({ name: "", declaration: "", revision: 0, fields: [], error: null }); return function () { typeGate.current.next(); }; }, [target]);
+          function loadType(name) {
+            var ticket = typeGate.current.next();
+            readData("struct", target, { action: "get", name: name }).then(function (result) {
+              if (!typeGate.current.isCurrent(ticket)) return;
+              setSelectedType(function (s) { return { name: name, declaration: result.decl || "", fields: result.fields || [], revision: s.revision + 1, error: result.decl ? null : "引擎未返回可编辑 C 声明；请根据字段列表填写完整声明后再生成草稿。" }; });
+            }).catch(function (e) { if (typeGate.current.isCurrent(ticket)) setSelectedType(function (s) { return Object.assign({}, s, { error: String(e.message || e) }); }); });
+          }
+
+          react.useEffect(function () {
+            if (!target) return;
+            var alive = true;
+            setData(function (s) { return Object.assign({}, s, { loading: true }); });
+            if (subTab === "structs") {
+              fetch("/ig5-data?type=struct&target=" + encodeURIComponent(target) + "&action=list&limit=100")
+                .then(function (r) { return r.json(); })
+                .then(function (j) {
+                  if (!alive) return;
+                  setData({ list: [], structs: (j && j.data && j.data.items) || [], loading: false });
+                })
+                .catch(function () { if (alive) setData({ list: [], structs: [], loading: false }); });
+            } else {
+              fetch("/ig5-data?type=listing&target=" + encodeURIComponent(target) + "&kind=" + subTab + "&limit=150")
+                .then(function (r) { return r.json(); })
+                .then(function (j) {
+                  if (!alive) return;
+                  setData({ list: (j && j.data && j.data.rows) || [], structs: [], loading: false });
+                })
+                .catch(function () { if (alive) setData({ list: [], structs: [], loading: false }); });
+            }
+            return function () { alive = false; };
+          }, [target, subTab, refresh]);
+
+          return el(
+            "div",
+            { className: "ig5-card" },
+            el(
+              "div",
+              { className: "ig5-card-title" },
+              el("span", { className: "ig5-card-title-text" }, "📑 节段、符号与结构体库 (Listing & Structs)"),
+              el(
+                "div",
+                { className: "ig5-kinds" },
+                [
+                  { id: "segments", label: "节段结构 (Segments)" },
+                  { id: "imports", label: "导入函数 (Imports)" },
+                  { id: "exports", label: "导出符号 (Exports)" },
+                  { id: "structs", label: "结构体与类型 (Structs)" },
+                ].map(function (k) {
+                  return el("button", {
+                    key: k.id,
+                    className: "ig5-gran-btn" + (subTab === k.id ? " ig5-gran-on" : ""),
+                    "aria-pressed": subTab === k.id,
+                    onClick: function () { setSubTab(k.id); }
+                  }, k.label);
+                })
+              )
+            ),
+            subTab === "structs" ? el("div", null,
+              el("div", { className: "ig5-form-row" },
+                el("button", { className: "ig5-btn", onClick: function () { typeGate.current.next(); setSelectedType(function (s) { return { name: "", declaration: "", fields: [], revision: s.revision + 1, error: null }; }); } }, "新增声明"),
+                el("button", { className: "ig5-btn", onClick: function () { setRefresh(function (v) { return v + 1; }); } }, "刷新类型列表")),
+              el(StructEditor, { target: target, inputActions: props.inputActions, name: selectedType.name, declaration: selectedType.declaration, revision: selectedType.revision }),
+              selectedType.error ? el("div", { className: "ig5-error", role: "alert" }, selectedType.error) : null,
+              selectedType.name ? el("div", { style: { margin: "8px 0" } }, el("b", { className: "ig5-mono" }, selectedType.name + " 字段布局"), el("pre", { className: "ig5-code-box ig5-mono", style: { maxHeight: 180 } }, selectedType.fields.map(function (f) { return "+" + f.offset + "B [" + f.size + "B] " + f.type + " " + f.name; }).join("\n") || "无成员或不透明类型")) : null) : null,
+            el(
+              "div",
+              { className: "ig5-table-wrap" },
+              subTab === "structs"
+                ? el(
+                    "table",
+                    { className: "ig5-table ig5-mono" },
+                    el("thead", null,
+                      el("tr", null,
+                        el("th", { style: { width: 70 } }, "序号"),
+                        el("th", null, "类型/结构体名 (Type Name)"),
+                        el("th", { style: { width: 90 } }, "大小 (字节)"),
+                        el("th", { style: { width: 90 } }, "类型属性"),
+                        el("th", { style: { width: 100, textAlign: "right" } }, "操作")
+                      )
+                    ),
+                    el("tbody", null,
+                      data.structs.map(function (st, idx) {
+                        return el("tr", { key: idx },
+                          el("td", { style: { color: "var(--dsw-alias-label-secondary)" } }, String(st.ordinal)),
+                          el("td", { style: { fontWeight: 600, color: "var(--dsw-alias-brand-primary)" } }, st.name),
+                          el("td", null, String(st.size)),
+                          el("td", null, st.is_struct ? el("span", { className: "ig5-chip read" }, "struct") : "type"),
+                          el("td", { style: { textAlign: "right" } },
+                            el("button", {
+                              className: "ig5-btn",
+                              style: { fontSize: 11, padding: "2px 8px" },
+                              onClick: function () { loadType(st.name); }
+                            }, "字段 / 编辑声明")
+                          )
+                        );
+                      }),
+                      !data.structs.length ? el("tr", null, el("td", { colSpan: 5, style: { textAlign: "center", padding: 20, color: "var(--dsw-alias-label-secondary)" } }, "暂无自定义结构体。可用 ig5_struct action=define 定义并编译 C 结构体。")) : null
+                    )
+                  )
+                : el(
+                    "table",
+                    { className: "ig5-table ig5-mono" },
+                    el("thead", null,
+                      subTab === "segments"
+                        ? el("tr", null,
+                            el("th", null, "段名称 (Name)"),
+                            el("th", null, "起始地址 (Start)"),
+                            el("th", null, "结束地址 (End)"),
+                            el("th", null, "字节大小"),
+                            el("th", null, "权限 (Perm)"),
+                            el("th", null, "类别 (Class)")
+                          )
+                        : subTab === "imports"
+                        ? el("tr", null,
+                            el("th", null, "模块库 (Module)"),
+                            el("th", null, "导入函数名 (Function Name)"),
+                            el("th", null, "序号 (Ordinal)"),
+                            el("th", null, "安全级别")
+                          )
+                        : el("tr", null,
+                            el("th", null, "序号 (Ordinal)"),
+                            el("th", null, "导出函数名 (Exported Name)"),
+                            el("th", null, "地址 (EA)")
+                          )
+                    ),
+                    el("tbody", null,
+                      data.list.map(function (item, idx) {
+                        if (subTab === "segments") {
+                          return el("tr", { key: idx },
+                            el("td", { style: { color: "var(--dsw-alias-brand-primary)", fontWeight: 600 } }, item.name),
+                            el("td", null, item.start),
+                            el("td", null, item.end),
+                            el("td", null, String(item.size)),
+                            el("td", { style: { color: item.perm && item.perm.indexOf("w") !== -1 ? "var(--dsw-alias-state-warn-primary)" : "var(--dsw-alias-state-success-primary)" } }, item.perm),
+                            el("td", { style: { color: "var(--dsw-alias-label-secondary)" } }, item.class)
+                          );
+                        } else if (subTab === "imports") {
+                          var isDanger = /VirtualProtect|CreateProcess|WriteProcessMemory|LoadLibrary|WinExec|HttpSend/i.test(item.name || "");
+                          return el("tr", { key: idx },
+                            el("td", { style: { color: "var(--dsw-alias-label-secondary)" } }, item.module),
+                            el("td", { style: { color: isDanger ? "var(--dsw-alias-state-error-primary)" : "var(--dsw-alias-label-primary)", fontWeight: isDanger ? 600 : 400 } }, item.name),
+                            el("td", { style: { color: "var(--dsw-alias-label-secondary)" } }, String(item.ordinal ?? "-")),
+                            el("td", null, isDanger ? el("span", { className: "ig5-chip write" }, "敏感 API") : "常规")
+                          );
+                        } else {
+                          return el("tr", { key: idx },
+                            el("td", { style: { color: "var(--dsw-alias-label-secondary)" } }, String(item.ordinal ?? idx)),
+                            el("td", { style: { color: "var(--dsw-alias-state-success-primary)", fontWeight: 600 } }, item.name),
+                            el("td", { style: { color: "var(--dsw-alias-brand-primary)" } }, item.ea)
+                          );
+                        }
+                      })
+                    )
+                  )
+            )
+          );
+        }
+
+        /* ── Tab 4: 熵扫描与特征指纹 (Reverse Recon & Scan) ── */
+        function Ig5ScanView(props) {
+          var target = props.target;
+          var scanPair = react.useState({ data: null, loading: false });
+          var scan = scanPair[0];
+          var setScan = scanPair[1];
+
+          var fpPair = react.useState(null);
+          var fp = fpPair[0];
+          var setFp = fpPair[1];
+
+          react.useEffect(function () {
+            if (!target) return;
+            setScan({ data: null, loading: true });
+            fetch("/ig5-data?type=scan&target=" + encodeURIComponent(target))
+              .then(function (r) { return r.json(); })
+              .then(function (j) { setScan({ data: j && j.data, loading: false }); })
+              .catch(function () { setScan({ data: null, loading: false }); });
+
+            fetch("/ig5-data?type=fingerprint&target=" + encodeURIComponent(target))
+              .then(function (r) { return r.json(); })
+              .then(function (j) { if (j && j.data) setFp(j.data); })
+              .catch(function () {});
+          }, [target]);
+
+          var d = scan.data || {};
+          var entropies = d.entropies || [];
+          var cryptos = d.crypto_markers || [];
+          var suspApi = d.suspicious_apis || [];
+
+          return el(
+            "div",
+            null,
+            // 编译器与标准库指纹识别卡片
+            el(
+              "div",
+              { className: "ig5-card" },
+              el(
+                "div",
+                { className: "ig5-card-title" },
+                el("span", { className: "ig5-card-title-text" }, "🎯 编译器指纹与标准库识别 (Reverse Fingerprint)"),
+                fp ? el("span", { className: "ig5-chip read ig5-mono" }, "ABI: " + fp.abi) : null
+              ),
+              fp
+                ? el(
+                    "div",
+                    null,
+                    el(
+                      "div",
+                      { className: "ig5-stats-grid", style: { marginBottom: 10 } },
+                      el("div", { className: "ig5-stat" },
+                        el("span", { className: "ig5-stat-label" }, "总函数量"),
+                        el("b", { className: "ig5-stat-value ig5-mono" }, String(fp.total_functions))
+                      ),
+                      el("div", { className: "ig5-stat" },
+                        el("span", { className: "ig5-stat-label" }, "标准库函数 (Reverse)"),
+                        el("b", { className: "ig5-stat-value ig5-mono", style: { color: "var(--dsw-alias-brand-primary)" } }, String(fp.library_functions_count)),
+                        el("span", { className: "ig5-stat-sub" }, "占比 " + Math.round(fp.library_ratio * 100) + "%")
+                      ),
+                      el("div", { className: "ig5-stat" },
+                        el("span", { className: "ig5-stat-label" }, "目标用户逻辑函数"),
+                        el("b", { className: "ig5-stat-value ig5-mono", style: { color: "var(--dsw-alias-state-success-primary)" } }, String(fp.user_functions_count)),
+                        el("span", { className: "ig5-stat-sub" }, "核心业务面")
+                      )
+                    ),
+                    el("div", { className: "ig5-card-sub" },
+                      "已识别标准库函数样例: " + (fp.sample_library_funcs || []).map(function (f) { return f.name; }).join(", ")
+                    )
+                  )
+                : el("div", { className: "ig5-card-sub" }, "正在读取 Reverse 标准库标记...")
+            ),
+            // 节段熵分析卡片
+            el(
+              "div",
+              { className: "ig5-card" },
+              el(
+                "div",
+                { className: "ig5-card-title" },
+                el("span", { className: "ig5-card-title-text" }, "📊 节段香农熵分析 (Shannon Entropy · >7.2 疑似加密或加壳)"),
+                el("span", { className: "ig5-chip read ig5-mono" }, entropies.length + " 个节段")
+              ),
+              el(
+                "div",
+                null,
+                entropies.map(function (e, idx) {
+                  var entVal = Number(e.entropy || 0);
+                  var isHigh = entVal >= 7.2;
+                  var pct = Math.min(100, Math.round((entVal / 8.0) * 100));
+                  return el(
+                    "div",
+                    { key: idx, style: { marginBottom: 10 } },
+                    el(
+                      "div",
+                      { style: { display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 3 } },
+                      el("span", { className: "ig5-mono", style: { fontWeight: 600, color: isHigh ? "var(--dsw-alias-state-error-primary)" : "var(--dsw-alias-label-primary)" } },
+                        e.name + (isHigh ? " ⚠ 高熵风险" : "")
+                      ),
+                      el("span", { className: "ig5-mono", style: { color: "var(--dsw-alias-label-secondary)" } }, entVal.toFixed(3) + " / 8.0")
+                    ),
+                    el(
+                      "div",
+                      { className: "ig5-track" },
+                      el("div", {
+                        className: "ig5-fill",
+                        style: {
+                          width: pct + "%",
+                          background: isHigh ? "var(--dsw-alias-state-error-primary, #ef4444)" : "var(--dsw-alias-brand-primary, #3b82f6)"
+                        }
+                      })
+                    )
+                  );
+                }),
+                !entropies.length ? el("div", { className: "ig5-card-sub" }, "暂无段熵数据或样本未开启熵分析") : null
+              )
+            ),
+            // 密码学常量特征卡片
+            el(
+              "div",
+              { className: "ig5-card" },
+              el(
+                "div",
+                { className: "ig5-card-title" },
+                el("span", { className: "ig5-card-title-text" }, "🔐 密码学特征与算法常数检出 (Crypto Markers)"),
+                el("span", { className: "ig5-chip read ig5-mono" }, cryptos.length + " 处特征")
+              ),
+              el(
+                "div",
+                { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
+                cryptos.map(function (c, idx) {
+                  return el("span", { key: idx, className: "ig5-chip write" }, "常数: " + (c.name || c));
+                }),
+                !cryptos.length ? el("span", { className: "ig5-card-sub" }, "未检测到硬编码加密初始化向量或 S-Box 常数。") : null
+              )
+            ),
+            // 敏感 API 画像卡片
+            el(
+              "div",
+              { className: "ig5-card" },
+              el(
+                "div",
+                { className: "ig5-card-title" },
+                el("span", { className: "ig5-card-title-text" }, "🔍 敏感行为 API 族谱 (Behavioral Vectors)"),
+                el("span", { className: "ig5-chip warn ig5-mono" }, suspApi.length + " 个可疑向量")
+              ),
+              el(
+                "div",
+                { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
+                suspApi.map(function (a, idx) {
+                  return el("span", { key: idx, className: "ig5-chip warn" }, a);
+                }),
+                !suspApi.length ? el("span", { className: "ig5-card-sub" }, "暂无高危外部行为 API 命中。") : null
+              )
+            )
+          );
+        }
+
+        /* ── Tab 5: 补丁审计与回滚 (Patches & Undo) ── */
+        function Ig5PatchesView(props) {
+          var target = props.target;
+          var approvalsPair = react.useState({ list: [], loading: false, total: 0, target: null, error: null });
+          var approvals = approvalsPair[0];
+          var setApprovals = approvalsPair[1];
+          var pagePair = react.useState({ offset: 0, refresh: 0 }), page = pagePair[0], setPage = pagePair[1];
+          var auditGate = react.useRef(makeRequestGate()), auditTarget = react.useRef(target);
+          if (auditTarget.current !== target) { auditTarget.current = target; auditGate.current.next(); }
+          react.useEffect(function () { setPage(function (s) { return { offset: 0, refresh: s.refresh }; }); }, [target]);
+
+          react.useEffect(function () {
+            var ticket = auditGate.current.next();
+            if (!target) { setApprovals({ list: [], total: 0, loading: false, target: null, error: null }); return; }
+            setApprovals(function (s) { return Object.assign({}, s, { loading: true, error: null }); });
+            readData("approvals", target, { offset: page.offset, limit: 20 }).then(function (data) {
+              if (!auditGate.current.isCurrent(ticket)) return;
+              var legacy = Array.isArray(data);
+              var records = (legacy ? data : (data.rows || [])).map(normalizeAudit).filter(function (r) { return normalizedTarget(r.target) === normalizedTarget(target); });
+              var total = legacy ? records.length : Number(data.total || 0);
+              setApprovals({ list: legacy ? records.slice(page.offset, page.offset + 20) : records, total: total, loading: false, target: target, error: null });
+            }).catch(function (e) { if (auditGate.current.isCurrent(ticket)) setApprovals({ list: [], total: 0, loading: false, target: target, error: String(e.message || e) }); });
+            return function () { auditGate.current.next(); };
+          }, [target, page.offset, page.refresh]);
+          var records = approvals.target === target ? approvals.list : [];
+
+          return el(
+            "div",
+            null,
+            el(
+              "div",
+              { className: "ig5-card" },
+              el(
+                "div",
+                { className: "ig5-card-title" },
+                el("span", { className: "ig5-card-title-text" }, "⚡ 写操作与补丁审计时间线"),
+                el("button", { className: "ig5-btn", disabled: !target || approvals.loading, onClick: function () { setPage(function (s) { return Object.assign({}, s, { refresh: s.refresh + 1 }); }); } }, "刷新记录"),
+                el("button", {
+                  className: "ig5-btn ig5-btn-primary",
+                  onClick: function () {
+                    alert("可在会话中直接指挥模型:「调用 ig5_export_diff 导出当前所有补丁与 changes.md 交付物」！");
+                  }
+                }, "导出补丁交付物 (Export Diff)")
+              ),
+              el("p", { className: "ig5-card-sub ig5-mono" }, target ? "当前目标: " + target : "请先选择目标。"),
+              approvals.loading ? el("p", { role: "status", className: "ig5-card-sub" }, "正在读取审计记录…") : null,
+              approvals.error ? el("p", { className: "ig5-error", role: "alert" }, approvals.error) : null,
+              records.map(function (item, idx) {
+                return el(
+                  "div",
+                  { key: idx, style: { background: "var(--dsw-alias-bg-layer-2)", border: "1px solid var(--dsw-alias-border-l1)", borderRadius: 6, padding: "8px 12px", marginBottom: 8 } },
+                  el(
+                    "div",
+                    { style: { display: "flex", justifyContent: "space-between", marginBottom: 4 } },
+                    el("span", { className: "ig5-mono", style: { color: "var(--dsw-alias-brand-primary)", fontWeight: 600 } }, item.tool),
+                    el("span", { className: "ig5-mono ig5-card-sub" }, item.time || "时间未记录")
+                  ),
+                  el("span", { className: "ig5-chip " + (item.isError ? "write" : "read") }, item.isError ? "执行错误" : "执行记录"),
+                  el("div", { className: "ig5-mono", style: { fontSize: 12, marginBottom: 4 } },
+                    "目标地址: " + (item.ea || "-") + " · 文件偏移: " + (item.fileOffset === undefined || item.fileOffset === null ? "-" : String(item.fileOffset))
+                  ),
+                  item.detail ? el("p", { className: item.isError ? "ig5-error" : "ig5-card-sub" }, item.detail) : null,
+                  item.before !== undefined && item.after !== undefined
+                    ? el(
+                        "div",
+                        { className: "ig5-mono", style: { fontSize: 11, background: "var(--dsw-alias-bg-layer-3)", padding: "4px 8px", borderRadius: 4, display: "flex", gap: 12 } },
+                        el("span", { style: { color: "var(--dsw-alias-state-error-primary)", overflowWrap: "anywhere" } }, "- " + String(item.before)),
+                        el("span", { style: { color: "var(--dsw-alias-state-success-primary)", overflowWrap: "anywhere" } }, "+ " + String(item.after))
+                      )
+                    : null
+                );
+              }),
+              !records.length && !approvals.loading && !approvals.error ? el("div", { className: "ig5-card-sub" }, "当前目标暂无写操作记录。审批后执行的工具结果会显示于此。") : null,
+              el("div", { className: "ig5-form-row", style: { justifyContent: "space-between" } },
+                el("span", { className: "ig5-card-sub" }, "共 " + approvals.total + " 条 · 第 " + (Math.floor(page.offset / 20) + 1) + " / " + Math.max(1, Math.ceil(approvals.total / 20)) + " 页"),
+                el("div", { className: "ig5-form-row" },
+                  el("button", { className: "ig5-btn", disabled: page.offset === 0 || approvals.loading, onClick: function () { setPage(function (s) { return Object.assign({}, s, { offset: Math.max(0, s.offset - 20) }); }); } }, "上一页"),
+                  el("button", { className: "ig5-btn", disabled: page.offset + 20 >= approvals.total || approvals.loading, onClick: function () { setPage(function (s) { return Object.assign({}, s, { offset: s.offset + 20 }); }); } }, "下一页")))
+            ),
+            el(
+              "div",
+              { className: "ig5-card" },
+              el(
+                "div",
+                { className: "ig5-card-title" },
+                el("span", { className: "ig5-card-title-text" }, "↩ 自管操作日志与逐级回滚 (Undo Controller)")
+              ),
+              el("p", { className: "ig5-card-sub", style: { marginBottom: 12 } },
+                "无限五代内置确定性操作回滚日志，支持还原重命名、打补丁字节、注释及结构体类型定义。"
+              ),
+              el("button", {
+                className: "ig5-btn",
+                onClick: function () {
+                  alert("可在会话中对模型说:「调用 ig5_undo 撤销上一步操作」进行安全回滚！");
+                }
+                }, "查看回滚调用提示 (ig5_undo)")
+            )
+          );
+        }
+
+        /* ── Tab 6: 工具能力目录与会话协同 (Tool Matrix) ── */
+        function Ig5ToolsMatrixView(props) {
+          var dash = props.dash;
+          var readTools = [
+            "ig5_doctor", "ig5_open", "ig5_status", "ig5_funcs", "ig5_strings",
+            "ig5_decompile", "ig5_xrefs", "ig5_calls", "ig5_bytes", "ig5_search",
+            "ig5_listing", "ig5_scan", "ig5_export_diff", "ig5_cfg", "ig5_slice", "ig5_fingerprint",
+            "ig5_stack", "ig5_switches", "ig5_vtables", "ig5_microcode", "ig5_bindiff"
+          ];
+          var writeTools = [
+            "ig5_rename", "ig5_patch_bytes", "ig5_comment", "ig5_analyze",
+            "ig5_set_type", "ig5_undo", "ig5_run_idapython", "ig5_dbg", "ig5_struct",
+            "ig5_switch_repair", "ig5_emulate"
+          ];
+          var metaTools = ["ig5_close", "ig5_profile"];
+          var totalTools = readTools.length + writeTools.length + metaTools.length;
+
+          return el(
+            "div",
+            null,
+            el(
+              "div",
+              { className: "ig5-card" },
+              el(
+                "div",
+                { className: "ig5-card-title" },
+                el("span", { className: "ig5-card-title-text" }, "🤖 模型协同与会话投影 (Session Projection)")
+              ),
+              el(
+                "div",
+                { className: "ig5-stats-grid" },
+                el("div", { className: "ig5-stat" },
+                  el("span", { className: "ig5-stat-label" }, "累计工具调用"),
+                  el("b", { className: "ig5-stat-value ig5-mono" }, String((dash && dash.calls) || 0) + " 次")
+                ),
+                el("div", { className: "ig5-stat" },
+                  el("span", { className: "ig5-stat-label" }, "异常/拦截计数"),
+                  el("b", { className: "ig5-stat-value ig5-mono", style: { color: (dash && dash.errors) ? "var(--dsw-alias-state-error-primary)" : "var(--dsw-alias-state-success-primary)" } }, String((dash && dash.errors) || 0) + " 次")
+                ),
+                el("div", { className: "ig5-stat" },
+                  el("span", { className: "ig5-stat-label" }, "最近执行操作"),
+                  el("b", { className: "ig5-stat-value ig5-mono" }, String((dash && dash.last) || "空闲"))
+                )
+              )
+            ),
+            el(
+              "div",
+              { className: "ig5-card" },
+              el(
+                "div",
+                { className: "ig5-card-title" },
+                el("span", { className: "ig5-card-title-text" }, "🧰 无限五代工具能力目录"),
+                el("span", { className: "ig5-chip read ig5-mono" }, totalTools + " Tools · 完整目录")
+              ),
+              el("p", { className: "ig5-card-sub" }, "工具注册遵循宿主配置：core 默认提供 8 个入口，full 提供完整工具面。目录数量不代表当前会话已注册数量；请以 ig5_profile 返回的实际工具列表为准。"),
+              el(
+                "div",
+                { style: { marginBottom: 12 } },
+                el("div", { style: { fontSize: 12, fontWeight: 600, color: "var(--dsw-alias-brand-primary)", marginBottom: 6 } }, "只读侦测域 (" + readTools.length + " 工具 · 包含 CFG、切片与指纹识别):"),
+                readTools.map(function (t) { return el("span", { key: t, className: "ig5-chip read ig5-mono", style: { margin: 2 } }, t); })
+              ),
+              el(
+                "div",
+                { style: { marginBottom: 12 } },
+                el("div", { style: { fontSize: 12, fontWeight: 600, color: "var(--dsw-alias-state-error-primary)", marginBottom: 6 } }, "写操作审批门 (" + writeTools.length + " 工具 · 包含结构体与类型系统):"),
+                writeTools.map(function (t) { return el("span", { key: t, className: "ig5-chip write ig5-mono", style: { margin: 2 } }, t); })
+              ),
+              el(
+                "div",
+                null,
+                el("div", { style: { fontSize: 12, fontWeight: 600, color: "var(--dsw-alias-label-secondary)", marginBottom: 6 } }, "生命周期与配置 (" + metaTools.length + " 工具):"),
+                metaTools.map(function (t) { return el("span", { key: t, className: "ig5-chip ig5-mono", style: { margin: 2 } }, t); })
+              )
+            ),
+            el(
+              "div",
+              { className: "ig5-card" },
+              el(
+                "div",
+                { className: "ig5-card-title" },
+                el("span", { className: "ig5-card-title-text" }, "💡 高阶逆向操作指令指引")
+              ),
+              el(
+                "ul",
+                { style: { margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.8, color: "var(--dsw-alias-label-secondary)" } },
+                el("li", null, "结构体建模: 「根据 a1 的偏移访问，用 ig5_struct action=define 定义 struct Packet { ... } 并应用到该变量」"),
+                el("li", null, "控制流分析: 「用 ig5_cfg 提取 main 函数的控制流图并输出 Mermaid 流程图」"),
+                el("li", null, "语义数据流切片: 「用 ig5_slice 追踪函数 0x... 中变量 key 的赋值与修改路径」"),
+                el("li", null, "库函数过滤: 「用 ig5_fingerprint 识别标准库，然后在 ig5_funcs 中开启 user_only 排除噪音」")
+              )
+            )
+          );
+        }
+
+        /* ── 底部输入框徽章 ── */
+        function Ig5Badge(props) {
+          useStyleOnce();
+          var dash = useDash(props);
+          var running = dash && dash.running;
+          var text = "无限五代 " + VERSION + " · Reverse";
+          if (running) {
+            text = "IG5 分析中: " + running;
+          } else if (dash && dash.calls > 0) {
+            text = "IG5 ✓ " + dash.calls + (dash.errors ? " · ✗" + dash.errors : "");
+          }
+
+          return el(
+            "div",
+            { className: "ig5-badge-wrap" },
+            el(
+              "div",
+              {
+                className: "ig5-badge",
+                title: "点击打开「IG5 逆向工作台」",
+                onClick: function () { activateTopTab(WORKBENCH_TAB_LABEL); }
+              },
+              el("span", {
+                className: "ig5-dot " + (running ? "ig5-pulse" : ""),
+                style: { background: running ? "var(--dsw-alias-state-warn-primary, #f59e0b)" : "var(--dsw-alias-state-success-primary, #10b981)" }
+              }),
+              el("span", null, text)
+            )
+          );
+        }
+
+        /* ── 插件生命周期挂载 ── */
+        function apply(ctx) {
+          diag("apply-start", "version " + VERSION);
+
+          try {
+            ctx.slots.inject("conversation.input.dock", function () {
+              return ctx.slots.register(
+                { name: "conversation.input.dock", id: "ig5-badge", order: 31 },
+                function (props) { return el(Ig5Badge, Object.assign({}, props, { ig5ctx: ctx })); }
+              );
+            });
+          } catch (e) {
+            diag("badge-register-error", e && e.message);
+          }
+
+          try {
+            ctx.slots.inject("conversation.view", function () {
+              diag("view-tab-slot", "conversation.view 声明就绪");
+              return ctx.slots.register(
+                {
+                  name: "conversation.view",
+                  id: "ig5",
+                  order: 25,
+                  label: function () { return WORKBENCH_TAB_LABEL; },
+                },
+                function (props) { return el(Ig5Workbench, props); }
+              );
+            });
+          } catch (e) {
+            diag("view-tab-error", e && e.message);
+          }
+
+          try {
+            ctx.slots.inject("sidebar.panellist", function () {
+              return ctx.slots.register(
+                { name: "sidebar.panellist", id: PANEL_ID, order: 55, label: function () { return WORKBENCH_TAB_LABEL; } },
+                function () {
+                  return el("svg", { width: 16, height: 16, viewBox: "0 0 16 16", fill: "currentColor" },
+                    el("path", { d: "M2.5 3h4.6v2.1H4.7v5.8h2.4V13H2.5V3zm11 0H8.9v2.1h2.4v5.8H8.9V13h4.6V3zM6.6 7.2h2.8v1.6H6.6V7.2z" })
+                  );
+                }
+              );
+            });
+          } catch (e) {}
+
+          try {
+            ctx.slots.inject("main", function () {
+              return ctx.slots.register({ name: "main", key: PANEL_ID }, function (props) {
+                return el(Ig5Workbench, props);
+              });
+            });
+          } catch (e) {}
+        }
+
+        exports.name = PLUGIN_ID;
+        exports.inject = inject;
+        exports.apply = apply;
+        // Exposed without side effects for deterministic renderer regression and local preview.
+        exports.__test = { layoutCfg: layoutCfg, highlightParts: highlightParts, renderCodeLines: renderCodeLines, normalizeAudit: normalizeAudit, normalizedTarget: normalizedTarget, buildStructDraft: buildStructDraft, makeRequestGate: makeRequestGate, CfgGraph: CfgGraph, StructEditor: StructEditor, FunctionsView: Ig5FunctionsView, ListingView: Ig5ListingView, PatchesView: Ig5PatchesView, Workbench: Ig5Workbench };
+        return module.exports;
+      },
+    });
+  } catch (err) {
+    console.warn("[AI Client Sandbox] dsh-infinite-gen-5 runtime error:", err);
+  }
+})();

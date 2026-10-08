@@ -1,0 +1,16 @@
+Unicorn 2.1.4, Windows x64, unmodified upstream wheel
+Wheel: unicorn-2.1.4-cp37-abi3-win_amd64.whl
+SHA256: d7107500c64ce5c168fbff6bef9485b5db1350050036f4cea568650cf8bdbdf5
+Package provenance: https://pypi.org/project/unicorn/2.1.4/
+Corresponding source: https://github.com/unicorn-engine/unicorn/tree/2.1.4
+
+Upstream Python package metadata is retained in unicorn-2.1.4.dist-info.
+The Python package metadata identifies the bindings as BSD licensed; the
+Unicorn native engine identifies its license as GPLv2. Upstream COPYING,
+COPYING.LGPL2, COPYING_GLIB and qemu/LICENSE are included in licenses/.
+These components retain their upstream licenses and copyright notices;
+the plugin's MIT license does not replace them. See upstream source files
+for component-specific notices and build scripts.
+
+This dependency is loaded from the plugin's worker/vendor directory.
+The Reverse engine installation and its site-packages are not modified.

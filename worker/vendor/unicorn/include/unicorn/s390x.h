@@ -1,0 +1,200 @@
+/* Unicorn Engine */
+/* By Nguyen Anh Quynh <aquynh@gmail.com>, 2015-2021 */
+
+#ifndef UNICORN_S390X_H
+#define UNICORN_S390X_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#ifdef _MSC_VER
+#pragma warning(disable : 4201)
+#endif
+
+//> S390X CPU
+typedef enum uc_cpu_s390x {
+    UC_CPU_S390X_Z900 = 0,
+    UC_CPU_S390X_Z900_2,
+    UC_CPU_S390X_Z900_3,
+    UC_CPU_S390X_Z800,
+    UC_CPU_S390X_Z990,
+    UC_CPU_S390X_Z990_2,
+    UC_CPU_S390X_Z990_3,
+    UC_CPU_S390X_Z890,
+    UC_CPU_S390X_Z990_4,
+    UC_CPU_S390X_Z890_2,
+    UC_CPU_S390X_Z990_5,
+    UC_CPU_S390X_Z890_3,
+    UC_CPU_S390X_Z9EC,
+    UC_CPU_S390X_Z9EC_2,
+    UC_CPU_S390X_Z9BC,
+    UC_CPU_S390X_Z9EC_3,
+    UC_CPU_S390X_Z9BC_2,
+    UC_CPU_S390X_Z10EC,
+    UC_CPU_S390X_Z10EC_2,
+    UC_CPU_S390X_Z10BC,
+    UC_CPU_S390X_Z10EC_3,
+    UC_CPU_S390X_Z10BC_2,
+    UC_CPU_S390X_Z196,
+    UC_CPU_S390X_Z196_2,
+    UC_CPU_S390X_Z114,
+    UC_CPU_S390X_ZEC12,
+    UC_CPU_S390X_ZEC12_2,
+    UC_CPU_S390X_ZBC12,
+    UC_CPU_S390X_Z13,
+    UC_CPU_S390X_Z13_2,
+    UC_CPU_S390X_Z13S,
+    UC_CPU_S390X_Z14,
+    UC_CPU_S390X_Z14_2,
+    UC_CPU_S390X_Z14ZR1,
+    UC_CPU_S390X_GEN15A,
+    UC_CPU_S390X_GEN15B,
+    UC_CPU_S390X_QEMU,
+    UC_CPU_S390X_MAX,
+
+    UC_CPU_S390X_ENDING
+} uc_cpu_s390x;
+
+//> S390X registers
+typedef enum uc_s390x_reg {
+    UC_S390X_REG_INVALID = 0,
+    //> General purpose registers
+    UC_S390X_REG_R0,
+    UC_S390X_REG_R1,
+    UC_S390X_REG_R2,
+    UC_S390X_REG_R3,
+    UC_S390X_REG_R4,
+    UC_S390X_REG_R5,
+    UC_S390X_REG_R6,
+    UC_S390X_REG_R7,
+    UC_S390X_REG_R8,
+    UC_S390X_REG_R9,
+    UC_S390X_REG_R10,
+    UC_S390X_REG_R11,
+    UC_S390X_REG_R12,
+    UC_S390X_REG_R13,
+    UC_S390X_REG_R14,
+    UC_S390X_REG_R15,
+
+    //> Floating point registers
+    UC_S390X_REG_F0,
+    UC_S390X_REG_F1,
+    UC_S390X_REG_F2,
+    UC_S390X_REG_F3,
+    UC_S390X_REG_F4,
+    UC_S390X_REG_F5,
+    UC_S390X_REG_F6,
+    UC_S390X_REG_F7,
+    UC_S390X_REG_F8,
+    UC_S390X_REG_F9,
+    UC_S390X_REG_F10,
+    UC_S390X_REG_F11,
+    UC_S390X_REG_F12,
+    UC_S390X_REG_F13,
+    UC_S390X_REG_F14,
+    UC_S390X_REG_F15,
+    //> Not real registers, low half of vr16-vr31
+    UC_S390X_REG_F16,
+    UC_S390X_REG_F17,
+    UC_S390X_REG_F18,
+    UC_S390X_REG_F19,
+    UC_S390X_REG_F20,
+    UC_S390X_REG_F21,
+    UC_S390X_REG_F22,
+    UC_S390X_REG_F23,
+    UC_S390X_REG_F24,
+    UC_S390X_REG_F25,
+    UC_S390X_REG_F26,
+    UC_S390X_REG_F27,
+    UC_S390X_REG_F28,
+    UC_S390X_REG_F29,
+    UC_S390X_REG_F30,
+    UC_S390X_REG_F31,
+
+    //> Access registers
+    UC_S390X_REG_A0,
+    UC_S390X_REG_A1,
+    UC_S390X_REG_A2,
+    UC_S390X_REG_A3,
+    UC_S390X_REG_A4,
+    UC_S390X_REG_A5,
+    UC_S390X_REG_A6,
+    UC_S390X_REG_A7,
+    UC_S390X_REG_A8,
+    UC_S390X_REG_A9,
+    UC_S390X_REG_A10,
+    UC_S390X_REG_A11,
+    UC_S390X_REG_A12,
+    UC_S390X_REG_A13,
+    UC_S390X_REG_A14,
+    UC_S390X_REG_A15,
+
+    UC_S390X_REG_PC, // PC register
+    UC_S390X_REG_PSWM,
+
+    //> pseudo registers, high half of vr16-vr31
+    UC_S390X_REG_F0_HI,
+    UC_S390X_REG_F1_HI,
+    UC_S390X_REG_F2_HI,
+    UC_S390X_REG_F3_HI,
+    UC_S390X_REG_F4_HI,
+    UC_S390X_REG_F5_HI,
+    UC_S390X_REG_F6_HI,
+    UC_S390X_REG_F7_HI,
+    UC_S390X_REG_F8_HI,
+    UC_S390X_REG_F9_HI,
+    UC_S390X_REG_F10_HI,
+    UC_S390X_REG_F11_HI,
+    UC_S390X_REG_F12_HI,
+    UC_S390X_REG_F13_HI,
+    UC_S390X_REG_F14_HI,
+    UC_S390X_REG_F15_HI,
+    UC_S390X_REG_F16_HI,
+    UC_S390X_REG_F17_HI,
+    UC_S390X_REG_F18_HI,
+    UC_S390X_REG_F19_HI,
+    UC_S390X_REG_F20_HI,
+    UC_S390X_REG_F21_HI,
+    UC_S390X_REG_F22_HI,
+    UC_S390X_REG_F23_HI,
+    UC_S390X_REG_F24_HI,
+    UC_S390X_REG_F25_HI,
+    UC_S390X_REG_F26_HI,
+    UC_S390X_REG_F27_HI,
+    UC_S390X_REG_F28_HI,
+    UC_S390X_REG_F29_HI,
+    UC_S390X_REG_F30_HI,
+    UC_S390X_REG_F31_HI,
+
+    //> float control register
+    UC_S390X_REG_FPC,
+
+    //> control registers
+    UC_S390X_REG_CR0,
+    UC_S390X_REG_CR1,
+    UC_S390X_REG_CR2,
+    UC_S390X_REG_CR3,
+    UC_S390X_REG_CR4,
+    UC_S390X_REG_CR5,
+    UC_S390X_REG_CR6,
+    UC_S390X_REG_CR7,
+    UC_S390X_REG_CR8,
+    UC_S390X_REG_CR9,
+    UC_S390X_REG_CR10,
+    UC_S390X_REG_CR11,
+    UC_S390X_REG_CR12,
+    UC_S390X_REG_CR13,
+    UC_S390X_REG_CR14,
+    UC_S390X_REG_CR15,
+
+    UC_S390X_REG_ENDING, // <-- mark the end of the list or registers
+
+    //> Alias registers
+} uc_s390x_reg;
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif

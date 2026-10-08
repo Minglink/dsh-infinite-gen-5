@@ -1,0 +1,8 @@
+# Bundle patch layer: the row loads the package's main entry as the host half
+# (a plain Cordis plugin: ig5 tools + ig5dash projection); the `dsh.client`
+# declaration makes the web app load its ./client bundle as the browser half
+# (badge + IG5 逆向工作台 right-sidebar tab). No system-prompt overlay: IG5
+# injects nothing into the harness persona.
+- insert:
+    - id: dsh-infinite-gen-5
+      name: dsh-infinite-gen-5

@@ -1,0 +1,25 @@
+# 无限五代维护约定（v0.9.0）
+
+- 源码只在 `C:\Users\Administrator\Desktop\无限五代\dsh-infinite-gen-5` 修改。
+- 运行副本为 `C:\Users\Administrator\.dsh\plugins\dsh-infinite-gen-5`，不得直接改运行副本。
+- 每次调整后依次执行全部项目 JavaScript 语法检查、全部项目 Python 编译检查、回归烟测、Robocopy 镜像同步、重载宿主、本次启动日志检查。使用与宿主一致的 Python；完整命令与 npm 回归范围见 README。
+- 使用 PowerShell；后台启动宿主或助手进程时指定隐藏窗口。Robocopy `/MIR` 前核实源码与目的目录的绝对路径，退出码 0–7 可接受。
+- 对外界面、工具说明、诊断响应及错误消息统一使用 Reverse 引擎称谓，不泄露商业引擎版本或带版本的安装路径。内部配置/API 标识保留兼容。
+- Function Calling Schema 的必填项必须写在父级 `required: [...]` 数组，不能在 property 中写 `required: true`。
+- 完整目录为 34 工具：21 只读、11 审批、2 生命周期/配置。11 个审批工具必须经过 `installApprovalGate`，包含 `ig5_switch_repair` 与 `ig5_emulate`；不得通过脚本、HTTP 或直接 Worker RPC 给产品用户建立写入旁路。
+- 默认 Core 8 为 `doctor/open/status/funcs/strings/decompile/close/profile`（均带 `ig5_` 前缀）。需要高级能力时先调用 `ig5_profile toolset=full`；`toolset=core` 恢复 8 个入口，不传参数只查询。保留用户 `/ig5 toolset full|core` 入口；真实回归已覆盖 full→core8（注销写工具）→full34。切换作用域是插件实例，影响其所有会话，不持久化、不按会话隔离。重载使用 `config.toolset`；此操作仅配置工具面，不授予样本执行权限或改变审批要求。
+- 五个原生技能与 `/ig5` commands 已实现，由 `workflow.js` 随服务可用注册并在卸载时清理；修改注册代码必须验证 Core/Full 切换、注册失败回滚与生命周期。
+- 工作台 `/ig5-data` 仅允许显式只读类型，结构体仅允许 `list/get`；结构体编辑只生成可编辑 composer 草稿，插入后仍由用户发送并通过宿主审批。不得自动 submit 或覆盖现有草稿；无原生接口时保留复制入口。
+- `ig5_struct` 参数名是 `action`，调试参数名是 `op`。
+- 类型系统使用 `ida_typeinf.tinfo_t`、`udt_type_data_t`；Local Types 数量使用 `get_ordinal_limit/get_ordinal_count`；空地址使用 `ida_idaapi.BADADDR`；导入回调参数为 `(ea, name, ordinal)`。
+- 回滚依赖项目自建 `_op_journal`，不能假设无头引擎自动记录 Undo。switch repair 默认 preview，`apply=true` 需审批且不在该 Undo 范围内，必须明确说明。
+- `expected` 是可选参数；提供时必须前置比较并在不匹配时拒绝，补丁工作流应优先显式提供。必须拒绝未加载区域；导出应读取当前数据库状态、尊重已执行 Undo，不能盲目重放历史审批日志。
+- CFG SVG、焦点切片、结构体草稿与审计分页已完成 renderer 和真实浏览器 fixture 验证。异步读取须隔离函数/目标切换的旧响应；审计使用真实 `args/detail/ts/isError` 字段并按目标过滤；文本不得作为 HTML 注入。
+- 开发回归使用样本副本并断言返回值，不将“调用未抛异常”视为功能通过。默认样本为上级 `_research\fixtures\notepad.exe` 文件。
+- 调试器 `load` 成功不代表运行态通过；成功响应必须依据实际事件与进程状态。真实调试烟测是显式运行的 `scripts/test_debug_runtime.mjs`。
+- 原生 win32 已在 notepad 副本通过 start→ASLR 断点→寄存器读写→step→注释回写/Undo→故意访问违规的结构化异常上下文→恢复→stop。Bochs 仍仅 load/bpt 成功，start 曾返回 `rc=0/no-task`，不能把原生后端证据外推为 Bochs 运行态通过；外部模拟器路径未确认不是已证实的唯一根因。
+- 微码原生 filter 管线、多级真实 IR、临时 IR optimize 与受限 `xor-self/sub-self` optinsn 规则已验证。隔离构造真实临时 MBA 时两种规则各命中 1 次，`mov #0`/源清空/目的保留及原生 optimize、verify、finally remove 通过，IDB 字节不变；自然夹具自定义规则仍 `rule_hits=0`，不得声称自然函数发生规则改写。未实现通用去平坦化。
+- MSVC64 继承及 Itanium class/SI/VMI 已验证生成 PE 夹具中的真实字节布局，不等于原生 Linux ELF 装载验证。调用解析要求显式 `table+offset`，不自动推导寄存器来源。
+- `ig5_bindiff` 使用多特征启发式、变更块、歧义和截断信息；`[rcx+4]`→`[rcx+8]` 已在生成 PE 夹具中验证 matched+changed/变更块，不得把评分当成语义等价证明或自动漏洞确认。
+- 仿真使用插件内 vendored Unicorn 2.1.4，仅 x86/x64，复制内存最多 64 MiB，无 OS/import/TLS 仿真；保留返回值、内存与超时/fault 结果，不改引擎 site-packages。依赖锁定见 `worker/requirements-emulation.txt`；分发时保留 `worker/vendor/NOTICE.txt` 和完整上游许可证，插件 MIT 不替代依赖许可证。
+- 日志与产物位于 `C:\Users\Administrator\.dsh\ig5\artifacts`；检查本次启动新增的 `ig5-diag.log` 记录。

@@ -1,0 +1,170 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import test from 'node:test';
+
+const source = fs.readFileSync(new URL('../client.js', import.meta.url), 'utf8');
+let currentHarness;
+const React = {
+  createElement: (type, props, ...children) => ({ type, props: props || {}, children: children.flat(Infinity).filter(x => x !== null && x !== undefined && x !== false) }),
+  useState(initial) {
+    const h = currentHarness, i = h.cursor++;
+    if (!(i in h.cells)) h.cells[i] = typeof initial === 'function' ? initial() : initial;
+    return [h.cells[i], value => { h.cells[i] = typeof value === 'function' ? value(h.cells[i]) : value; }];
+  },
+  useRef(initial) { const h = currentHarness, i = h.cursor++; return h.cells[i] ||= { current: initial }; },
+  useMemo(fn, deps) {
+    const h = currentHarness, i = h.cursor++, old = h.cells[i];
+    if (!old || !same(old.deps, deps)) h.cells[i] = { deps, value: fn() };
+    return h.cells[i].value;
+  },
+  useEffect(fn, deps) {
+    const h = currentHarness, i = h.cursor++, old = h.effects[i];
+    if (!old || !same(old.deps, deps)) h.pending.push(() => { old?.cleanup?.(); h.effects[i] = { deps, cleanup: fn() }; });
+  },
+};
+const same = (a, b) => !!a && !!b && a.length === b.length && a.every((x, i) => Object.is(x, b[i]));
+let request = () => { throw new Error('unexpected network call'); };
+let api;
+const sandbox = { window: { __ModuleLoader__: { load: value => { api = value.factory(name => { assert.equal(name, 'react'); return React; }); } } }, console, URLSearchParams, fetch: (...args) => request(...args), setTimeout, clearTimeout, location: { href: 'http://localhost/test' }, navigator: {} };
+vm.runInNewContext(source, sandbox, { filename: 'client.js' });
+const ui = api.__test;
+const plain = value => JSON.parse(JSON.stringify(value));
+function harness(component, props = {}) {
+  return { component, props, cells: [], effects: [], pending: [], cursor: 0, tree: null,
+    render(nextProps) { if (nextProps) this.props = nextProps; this.cursor = 0; currentHarness = this; this.tree = component(this.props); currentHarness = null; this.pending.splice(0).forEach(fn => fn()); return this.tree; },
+    unmount() { this.effects.forEach(e => e?.cleanup?.()); },
+  };
+}
+function nodes(node, predicate) { if (!node || typeof node !== 'object') return []; return (predicate(node) ? [node] : []).concat((node.children || []).flatMap(x => nodes(x, predicate))); }
+function text(node) { return typeof node === 'string' || typeof node === 'number' ? String(node) : (node?.children || []).map(text).join(''); }
+function button(tree, label) { const found = nodes(tree, n => n.type === 'button' && text(n) === label)[0]; assert.ok(found, `button ${label}`); return found; }
+function row(tree, label) { const found = nodes(tree, n => n.type === 'tr' && text(n).includes(label) && typeof n.props.onClick === 'function')[0]; assert.ok(found, `row ${label}`); return found; }
+const response = data => ({ ok: true, status: 200, json: async () => ({ data }) });
+const settle = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
+function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
+function markup(node) {
+  const escape = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  if (typeof node === 'string' || typeof node === 'number') return escape(node);
+  if (!node) return '';
+  assert.equal(node.props.dangerouslySetInnerHTML, undefined, 'renderer must not inject HTML');
+  return `<${typeof node.type === 'string' ? node.type : 'component'}>${(node.children || []).map(markup).join('')}</${typeof node.type === 'string' ? node.type : 'component'}>`;
+}
+
+test('CFG layout preserves branches, loops and disconnected blocks without invalid edges', () => {
+  const graph = ui.layoutCfg({ blocks: [{ id: 0, succs: [1, 2] }, { id: 1, succs: [0] }, { id: 2, succs: [] }, { id: 9, succs: [] }], edges: [{ from: 0, to: 1 }, { from: 0, to: 2 }, { from: 1, to: 0 }, { from: 0, to: 1 }, { from: 0, to: 99 }] });
+  assert.equal(graph.nodes.length, 4); assert.equal(graph.edges.length, 3);
+  assert.equal(graph.edges[0].label, '分支 1'); assert.equal(graph.edges[1].label, '分支 2'); assert.equal(graph.edges[2].label, '回边');
+  assert.ok(graph.edges.every(e => !/NaN|undefined/.test(e.path)));
+  assert.equal(new Set(graph.nodes.map(n => `${n.x},${n.y}`)).size, 4);
+});
+
+test('large CFG is bounded and truthfully marks truncation', () => {
+  const graph = ui.layoutCfg({ blocks: Array.from({ length: 310 }, (_, id) => ({ id, succs: [id + 1] })) });
+  assert.equal(graph.nodes.length, 300); assert.equal(graph.truncated, true); assert.equal(graph.edges.length, 299);
+});
+
+test('variable highlighting respects identifiers and never interprets source as HTML', () => {
+  const parts = plain(ui.highlightParts('key = monkey + key2 + key; // <script>x</script>', 'key'));
+  assert.deepEqual(parts.filter(p => p.match).map(p => p.text), ['key', 'key']);
+  const tree = { type: 'pre', props: {}, children: ui.renderCodeLines([{ line_no: 19, code: '<img src=x onerror=alert(1)> key' }], 'key') };
+  assert.ok(markup(tree).includes('&lt;img')); assert.ok(!markup(tree).includes('<img'));
+  assert.equal(ui.highlightParts('a.b + aXb', 'a.b').filter(p => p.match).length, 1);
+});
+
+test('audit normalization uses actual nested journal fields and preserves offset zero', () => {
+  const item = ui.normalizeAudit({ ts: '2026-10-09T00:00:00Z', tool: 'ig5_patch_bytes', args: { target: 'C:/sample.exe', ea: '0x401000' }, detail: { before: '90', after: 'cc', fileOffset: 0 }, isError: false });
+  assert.equal(item.target, 'C:/sample.exe'); assert.equal(item.ea, '0x401000'); assert.equal(item.fileOffset, 0); assert.equal(item.before, '90');
+  assert.equal(ui.normalizedTarget('C:/A/B.EXE'), ui.normalizedTarget('c:\\a\\b.exe'));
+  assert.equal(ui.normalizeAudit({ result: { isError: true, value: 'failed' } }).isError, true);
+});
+
+test('structure draft serializes target and C declaration without executing a write', () => {
+  const declaration = 'struct Packet { char value[32]; };\n// "quoted"';
+  const draft = ui.buildStructDraft('C:\\samples\\a.exe', declaration);
+  const args = JSON.parse(draft.slice(draft.indexOf('{')));
+  assert.equal(args.action, 'define'); assert.equal(args.decl, declaration); assert.equal(args.target, 'C:\\samples\\a.exe'); assert.equal(args.op, undefined);
+});
+
+test('structure editor inserts an editable draft through native selection APIs without submit/fetch', () => {
+  const calls = [], span = { revision: 4, start: 7, end: 7 };
+  const h = harness(ui.StructEditor, { target: 'sample.exe', inputActions: { captureInsertion: () => span, insertText: (...args) => { calls.push(['insert', ...args]); return true; }, persistDraft: () => calls.push(['persist']), submit: () => { throw new Error('must not submit'); } } });
+  h.render(); button(h.tree, '生成审批草稿').props.onClick(); h.render();
+  const draft = nodes(h.tree, n => n.type === 'textarea' && n.props['aria-label'] === '待发送工具调用草稿')[0];
+  draft.props.onChange({ target: { value: draft.props.value + '\n请先核查类型名。' } }); h.render();
+  button(h.tree, '插入会话草稿（待发送）').props.onClick(); h.render();
+  assert.equal(calls[0][0], 'insert'); assert.equal(calls[0][2], span); assert.ok(calls[0][1].includes('请先核查类型名。')); assert.equal(calls[1][0], 'persist'); assert.match(text(h.tree), /尚未发送或执行/);
+});
+
+test('structure editor retains draft when composer is unavailable or refuses stale insertion', () => {
+  const h = harness(ui.StructEditor, { target: 'sample.exe' }); h.render(); button(h.tree, '生成审批草稿').props.onClick(); h.render(); button(h.tree, '插入会话草稿（待发送）').props.onClick(); h.render();
+  assert.match(text(h.tree), /复制下方草稿/);
+  assert.ok(nodes(h.tree, n => n.type === 'textarea' && n.props['aria-label'] === '待发送工具调用草稿')[0].props.value.includes('ig5_struct'));
+  const locked = harness(ui.StructEditor, { target: 'sample.exe', inputActions: { captureInsertion: () => ({}), insertText: () => false, persistDraft: () => assert.fail('must not persist rejected insertion') } });
+  locked.render(); button(locked.tree, '生成审批草稿').props.onClick(); locked.render(); button(locked.tree, '插入会话草稿（待发送）').props.onClick(); locked.render(); assert.match(text(locked.tree), /暂不可用/);
+});
+
+test('CFG nodes retain double-click and keyboard actions instead of being captured by canvas pan', () => {
+  const opened = [], h = harness(ui.CfgGraph, { cfg: { blocks: [{ id: 0, start: '0x1000', end: '0x1004', insns: 1, succs: [] }] }, onOpen: block => opened.push(block.start) });
+  h.render(); h.render(); const svg = nodes(h.tree, n => n.type === 'svg')[0], block = nodes(h.tree, n => n.type === 'g' && n.props.role === 'button')[0];
+  let captured = false;
+  svg.props.onPointerDown({ button: 0, target: { closest: () => true }, currentTarget: { setPointerCapture: () => { captured = true; } } });
+  assert.equal(captured, false); block.props.onDoubleClick(); block.props.onKeyDown({ key: 'Enter' }); assert.deepEqual(opened, ['0x1000', '0x1000']);
+});
+
+test('request generations reject old selections', () => {
+  const gate = ui.makeRequestGate(), first = gate.next(), second = gate.next();
+  assert.equal(gate.isCurrent(first), false); assert.equal(gate.isCurrent(second), true); gate.next(); assert.equal(gate.isCurrent(second), false);
+});
+
+test('rapid function selections keep newest code, CFG and variable data', async () => {
+  const pending = new Map();
+  request = url => {
+    const q = new URL(url, 'http://test').searchParams, type = q.get('type'), ea = q.get('ea');
+    if (type === 'funcs') return Promise.resolve(response({ funcs: [{ ea: '0x1000', name: 'first', size: 4 }, { ea: '0x2000', name: 'second', size: 4 }], total: 2 }));
+    const d = deferred(); pending.set(`${type}:${ea}`, d); return d.promise;
+  };
+  const h = harness(ui.FunctionsView, { target: 'sample.exe' }); h.render(); await settle(); h.render();
+  row(h.tree, 'first').props.onClick(); h.render(); row(h.tree, 'second').props.onClick();
+  for (const ea of ['0x2000', '0x1000']) for (const type of ['decompile', 'xrefs', 'calls', 'cfg', 'slice']) pending.get(`${type}:${ea}`).resolve(response(type === 'decompile' ? { ea, name: ea === '0x2000' ? 'second' : 'first', code: `code-${ea}` } : type === 'cfg' ? { blocks: [], edges: [], marker: ea } : type === 'slice' ? { variables: [{ name: `v-${ea}` }], marker: ea } : { rows: [] }));
+  await settle(); h.render(); assert.match(text(h.tree), /code-0x2000/); assert.ok(!text(h.tree).includes('code-0x1000'));
+  button(h.tree, '控制流 (CFG)').props.onClick(); h.render(); assert.equal(nodes(h.tree, n => n.type === ui.CfgGraph)[0].props.cfg.marker, '0x2000');
+  button(h.tree, '变量与切片').props.onClick(); h.render(); assert.match(text(h.tree), /v-0x2000/); assert.ok(!text(h.tree).includes('v-0x1000')); h.unmount();
+});
+
+test('focused variable click requests var and highlights returned source line', async () => {
+  const urls = [];
+  request = url => {
+    urls.push(url); const q = new URL(url, 'http://test').searchParams, type = q.get('type');
+    return Promise.resolve(response(type === 'funcs' ? { funcs: [{ ea: '0x1000', name: 'main', size: 4 }], total: 1 } : type === 'decompile' ? { ea: '0x1000', name: 'main', code: 'key = 2;' } : type === 'slice' ? { variables: [{ name: 'key', type: 'int', size: 4 }], slice_lines: q.get('var') ? [{ line_no: 4, code: 'key = 2;' }] : [] } : type === 'cfg' ? { blocks: [], edges: [] } : { rows: [] }));
+  };
+  const h = harness(ui.FunctionsView, { target: 'sample.exe' }); h.render(); await settle(); h.render(); row(h.tree, 'main').props.onClick(); await settle(); h.render(); button(h.tree, '变量与切片').props.onClick(); h.render(); row(h.tree, 'key').props.onClick(); await settle(); h.render();
+  assert.ok(urls.some(url => new URL(url, 'http://test').searchParams.get('var') === 'key')); assert.equal(nodes(h.tree, n => n.type === 'mark').map(text).join(''), 'key'); h.unmount();
+});
+
+test('switching target invalidates pending function reads and removes old code', async () => {
+  const pending = [];
+  request = url => {
+    const q = new URL(url, 'http://test').searchParams;
+    if (q.get('type') === 'funcs') return Promise.resolve(response({ funcs: [{ ea: '0x1000', name: q.get('target'), size: 4 }], total: 1 }));
+    const d = deferred(); pending.push({ d, type: q.get('type') }); return d.promise;
+  };
+  const h = harness(ui.FunctionsView, { target: 'old.exe' }); h.render(); await settle(); h.render(); row(h.tree, 'old.exe').props.onClick(); h.render(); h.render({ target: 'new.exe' });
+  for (const { d, type } of pending) d.resolve(response(type === 'decompile' ? { ea: '0x1000', name: 'old', code: 'STALE_CODE' } : type === 'cfg' ? { blocks: [], edges: [] } : type === 'slice' ? { variables: [] } : { rows: [] }));
+  await settle(); h.render(); assert.ok(!text(h.tree).includes('STALE_CODE')); assert.match(text(h.tree), /new.exe/); assert.match(text(h.tree), /在左侧列表中选择任意函数/); h.unmount();
+});
+
+test('CFG block jump uses only read-only disassembly and displays instructions', async () => {
+  const urls = [], block = { id: 0, start: '0x1000', end: '0x1004', succs: [], insns: 1 };
+  request = url => { urls.push(url); const q = new URL(url, 'http://test').searchParams, type = q.get('type'); return Promise.resolve(response(type === 'funcs' ? { funcs: [{ ea: '0x1000', name: 'main', size: 4 }], total: 1 } : type === 'decompile' ? { ea: '0x1000', name: 'main', code: 'return 0;' } : type === 'cfg' ? { blocks: [block], edges: [] } : type === 'slice' ? { variables: [] } : type === 'disasm' ? { rows: [{ ea: '0x1000', bytes: '90', text: 'nop' }] } : { rows: [] })); };
+  const h = harness(ui.FunctionsView, { target: 'sample.exe' }); h.render(); await settle(); h.render(); row(h.tree, 'main').props.onClick(); await settle(); h.render(); button(h.tree, '控制流 (CFG)').props.onClick(); h.render(); nodes(h.tree, n => n.type === ui.CfgGraph)[0].props.onOpen(block); await settle(); h.render();
+  assert.match(text(h.tree), /反汇编（只读）/); assert.match(text(h.tree), /nop/); assert.ok(urls.some(url => url.includes('type=disasm'))); h.unmount();
+});
+
+test('audit renderer filters targets, escapes malicious text, paginates and refreshes', async () => {
+  const urls = [];
+  request = url => { urls.push(url); return Promise.resolve(response({ rows: [{ tool: '<script>alert(1)</script>', args: { target: 'C:/a.exe', ea: '0x1000' }, ts: 'now', detail: { before: '90', after: 'cc', fileOffset: 0 } }, { tool: 'other-target', args: { target: 'C:/b.exe' } }], total: 25, offset: 0, limit: 20 })); };
+  const h = harness(ui.PatchesView, { target: 'C:/a.exe' }); h.render(); await settle(); h.render(); assert.ok(!text(h.tree).includes('other-target')); assert.match(text(h.tree), /文件偏移: 0/); assert.ok(markup(h.tree).includes('&lt;script&gt;')); assert.ok(!markup(h.tree).includes('<script>'));
+  button(h.tree, '下一页').props.onClick(); h.render(); await settle(); h.render(); assert.ok(urls.some(url => url.includes('offset=20')));
+  const before = urls.length; button(h.tree, '刷新记录').props.onClick(); h.render(); await settle(); assert.ok(urls.length > before); h.unmount();
+});
