@@ -15,6 +15,12 @@ import time
 import traceback
 import uuid
 
+# Isolated Python intentionally ignores the host PYTHONPATH; import only the
+# plugin-owned adapter and shared execution modules from verified relative roots.
+ADAPTER_ROOT = Path(__file__).resolve().parent
+if str(ADAPTER_ROOT) not in sys.path:
+    sys.path.insert(0, str(ADAPTER_ROOT))
+
 PROTOCOL = os.fdopen(os.dup(sys.stdout.fileno()), 'w', encoding='utf-8', buffering=1)
 os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
 sys.stdout = sys.stderr
@@ -105,6 +111,9 @@ def start_launcher(launcher, jpype):
     Only process-local metadata changes; vendor files are never rewritten.
     Bootstrap is single-threaded and every temporary Python value is restored.
     """
+    if os.name != 'nt':
+        launcher.start()
+        return 'native'
     original_classpath = launcher.class_path
     original_vm_args = launcher.vm_args[:]
     import jpype._core as core
@@ -301,7 +310,9 @@ class Worker:
                 'jvmBootstrap': self.jvm_bootstrap,
                 'analysisProfiles': {'default': 'interactive', 'interactive': {'skippedAnalyzers': ['Decompiler Parameter ID']}, 'full': {'skippedAnalyzers': []}},
                 'childProcessCleanup': 'Windows kill-on-job-close' if self.job_handle else 'host process-tree termination required',
-                'unsupported': ['dbg', 'emulate', 'microcode', 'idapython', 'switch_repair', 'vtables'],
+                'unsupported': ['dbg', 'microcode', 'idapython', 'switch_repair', 'vtables'] + ([] if os.name == 'nt' else ['emulate']),
+                'emulation': {'available': os.name == 'nt', 'targetArchitectures': ['x86', 'x64', 'ARM64'],
+                              'scope': 'CPU-only copied memory; no operating system, imports, TLS or native process'},
                 'journal': 'rename/comment/patch saved immediately with session inverse undo; other writes remain session-only with native undo until a save/close; intent and database markers reconcile interrupted persistence',
                 'analysisProfileScope': 'full enables batch Decompiler Parameter ID; other analyzer settings retain their configured defaults'}
 
@@ -591,15 +602,23 @@ class Worker:
                 'total_members': len(members), 'members': members, 'engine': 'Ghidra'}
 
     def m_ir(self, params):
+        from pcode_view import operation_view
         kind = params.get('kind', params.get('level', 'high'))
         maximum = bounded(params, 'max_instructions', 1000, 10000)
         function = self.function(params)
-        rows, blocks = [], []
+        rows, blocks, total, varnodes = [], [], 0, 0
+        varnode_maximum = min(20000, maximum * 8)
+        def append_operation(operation, address, index=None):
+            nonlocal varnodes
+            row = operation_view(self.program, operation, address, index, varnode_maximum - varnodes)
+            varnodes += len(row['inputs']) + int(row['output'] is not None)
+            rows.append(row)
         if kind == 'raw':
             for instruction in each(self.program.getListing().getInstructions(function.getBody(), True)):
-                for op in instruction.getPcode():
+                for index, op in enumerate(instruction.getPcode()):
+                    total += 1
                     if len(rows) < maximum:
-                        rows.append({'ea': addrstr(instruction.getAddress()), 'opcode': str(op.getMnemonic()), 'text': str(op)})
+                        append_operation(op, addrstr(instruction.getAddress()), index)
             blocks = self.m_cfg(params)['blocks']
         elif kind == 'high':
             _, result = self.decompile(params)
@@ -607,9 +626,9 @@ class Worker:
             if high is None:
                 raise RuntimeError('Ghidra high p-code unavailable')
             for op in each(high.getPcodeOps()):
+                total += 1
                 if len(rows) < maximum:
-                    rows.append({'ea': addrstr(op.getSeqnum().getTarget()), 'opcode': str(op.getMnemonic()), 'text': str(op),
-                                 'block': int(op.getParent().getIndex()) if op.getParent() is not None else None})
+                    append_operation(op, addrstr(op.getSeqnum().getTarget()))
             for block in high.getBasicBlocks():
                 blocks.append({'id': int(block.getIndex()), 'start': addrstr(block.getStart()), 'end': addrstr(block.getStop()),
                                'succs': [int(block.getOut(index).getIndex()) for index in range(block.getOutSize())]})
@@ -617,7 +636,56 @@ class Worker:
             raise ValueError('Ghidra ir kind must be raw or high')
         return {'ok': True, 'engine': 'Ghidra', 'kind': 'ghidra-' + kind + '-pcode', 'ea': addrstr(function.getEntryPoint()),
                 'instructions': rows, 'blocks': blocks, 'idb_modified': False, 'revision': self.revision,
-                'count': len(rows), 'truncated': len(rows) >= maximum}
+                'count': len(rows), 'total': total, 'truncated': total > maximum,
+                'varnodeCount': varnodes, 'varnodeLimit': varnode_maximum,
+                'varnodesTruncated': any(row['inputsTruncated'] or row['outputOmitted'] for row in rows),
+                'source': {'engine': 'Ghidra', 'representation': 'PcodeOp' if kind == 'raw' else 'HighFunction SSA',
+                           'language': str(self.program.getLanguageID()), 'artifactSHA256': self.source_hash,
+                           'function': addrstr(function.getEntryPoint()), 'revision': self.revision}}
+
+    def m_emulate(self, params):
+        self.require()
+        if os.name != 'nt':
+            raise UnsupportedError('CPU emulation requires a validated native Unicorn runtime for this host platform')
+        shared = ADAPTER_ROOT.parent.parent / 'worker'
+        if str(shared) not in sys.path:
+            sys.path.insert(0, str(shared))
+        from memory_image import MemoryImage, MemoryRegion
+        from cpu_emulator import emulate_image
+        bits = int(self.program.getLanguage().getDefaultSpace().getSize())
+        processor = str(self.program.getLanguage().getProcessor()).lower()
+        arch = 'arm64' if processor in ('aarch64', 'arm64') else 'x86' if processor in ('x86', 'i386') else None
+        if arch is None or (arch == 'arm64' and self.program.getLanguage().isBigEndian()):
+            raise UnsupportedError('CPU emulation supports little-endian x86/x64 and ARM64 targets only')
+        execution = dict(params)
+        if not execution.get('abi'):
+            compiler = str(self.program.getCompilerSpec().getCompilerSpecID()).lower()
+            if arch == 'arm64':
+                execution['abi'] = 'aapcs64'
+            elif bits == 32:
+                execution['abi'] = 'cdecl'
+            elif compiler == 'windows':
+                execution['abi'] = 'win64'
+            elif compiler in ('gcc', 'clang'):
+                execution['abi'] = 'sysv64'
+            else:
+                raise ValueError('Specify abi explicitly for this unclassified x64 compiler specification')
+        entry = self.function(params).getEntryPoint()
+        regions = []
+        for block in self.program.getMemory().getBlocks():
+            # Non-default/overlay address spaces cannot be flattened into native
+            # VA without aliasing. Keep the snapshot physically unambiguous.
+            if block.getStart().getAddressSpace() != self.program.getAddressFactory().getDefaultAddressSpace():
+                continue
+            base = int(block.getStart().getOffset()) & ((1 << bits) - 1)
+            def reader(offset, size, source=block):
+                if not source.isInitialized():
+                    return None
+                return self.read_bytes(source.getStart().add(offset), size)
+            regions.append(MemoryRegion(base, int(block.getSize()), reader,
+                                        name=str(block.getName()), zero_fill=not bool(block.isInitialized())))
+        image = MemoryImage(arch, bits, int(entry.getOffset()) & ((1 << bits) - 1), regions, source='ghidra')
+        return {**emulate_image(image, execution), 'idb_modified': False, 'revision': self.revision}
 
     def m_slice(self, params):
         function, result = self.decompile(params)
@@ -1104,6 +1172,10 @@ class Worker:
 
 METHODS = {name[2:]: name for name in vars(Worker) if name.startswith('m_')}
 METHODS.update({'status': 'm_stats', 'patch_bytes': 'm_patch', 'ping': 'm_stats'})
+if os.name != 'nt':
+    # Do not advertise emulation before a matching portable Unicorn runtime has
+    # been built and validated. A Windows DLL is not a Linux/phone dependency.
+    METHODS.pop('emulate', None)
 
 
 def main():

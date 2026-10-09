@@ -59,11 +59,14 @@
 /* 根工作台容器 */
 .ig5-root {
   box-sizing: border-box;
+  min-width: 0;
+  container-type: inline-size;
   height: 100%;
   color: var(--dsw-alias-label-primary, #e2e8f0);
   padding: 16px 20px 32px;
   font-size: 13px;
   overflow-y: auto;
+  overflow-x: hidden;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   line-height: 1.5;
   background: var(--dsw-alias-bg-module-platform, transparent);
@@ -84,6 +87,10 @@
   display: flex;
   flex-direction: column;
 }
+.ig5-functions-list { flex: 0 0 380px; width: 380px; margin-bottom: 0; }
+.ig5-functions-detail { flex: 1 1 0%; min-width: 360px; margin-bottom: 0; }
+.ig5-mobile-only { display: none; }
+.ig5-environment { overflow-wrap: anywhere; }
 
 /* 原生卡片容器 (.lc-card 对齐) */
 .ig5-card {
@@ -432,6 +439,39 @@
   color: var(--dsw-alias-label-primary, #e2e8f0);
   border-color: var(--dsw-alias-label-secondary, #94a3b8);
 }
+@container (max-width: 760px) {
+  .ig5-function-workspace { display: block; }
+  .ig5-functions-list, .ig5-functions-detail { width: 100%; min-width: 0; margin-bottom: 12px; }
+  .ig5-functions-list.is-collapsed { display: none; }
+  .ig5-mobile-only { display: inline-flex; }
+  .ig5-nav-tabs { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; }
+  .ig5-nav-tabs .ig5-gran-btn { flex-shrink: 0; }
+  .ig5-card { padding: 12px; }
+  .ig5-card-title-text { min-width: 0; flex-wrap: wrap; overflow-wrap: anywhere; }
+  .ig5-form-row, .ig5-card-title > div { flex-wrap: wrap; }
+  .ig5-btn, .ig5-gran-btn, .ig5-select { min-height: 44px; }
+  .ig5-input, .ig5-select, .ig5-textarea { font-size: 16px; max-width: 100%; min-width: 0; }
+  .ig5-functions-list .ig5-table-wrap { max-height: 280px; }
+  .ig5-cfg-canvas { height: 360px; }
+}
+@media (max-width: 760px) {
+  .ig5-root { padding: 12px 10px calc(20px + env(safe-area-inset-bottom, 0px)); }
+  .ig5-function-workspace { display: block; }
+  .ig5-functions-list, .ig5-functions-detail { width: 100%; min-width: 0; margin-bottom: 12px; }
+  .ig5-functions-list.is-collapsed { display: none; }
+  .ig5-mobile-only { display: inline-flex; }
+  .ig5-nav-tabs { flex-wrap: nowrap; max-width: 100%; overflow-x: auto; }
+  .ig5-nav-tabs .ig5-gran-btn { flex-shrink: 0; }
+  .ig5-btn, .ig5-gran-btn, .ig5-select { min-height: 44px; }
+  .ig5-input, .ig5-select, .ig5-textarea { font-size: 16px; max-width: 100%; min-width: 0; }
+  .ig5-card { padding: 12px; }
+  .ig5-card-title-text, .ig5-form-row, .ig5-card-title > div { flex-wrap: wrap; min-width: 0; }
+  .ig5-functions-list .ig5-table-wrap { max-height: 280px; }
+  .ig5-cfg-canvas { height: 360px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ig5-root *, .ig5-pulse { animation: none; transition: none; }
+}
 `;
 
         function useStyleOnce() {
@@ -595,25 +635,78 @@
           var model = react.useMemo(function () { return layoutCfg(props.cfg); }, [props.cfg]);
           var cameraPair = react.useState({ scale: 1, x: 0, y: 0 });
           var camera = cameraPair[0], setCamera = cameraPair[1], drag = react.useRef(null);
+          var canvas = react.useRef(null), viewportPair = react.useState({ width: 800, height: 520 });
+          var viewport = viewportPair[0], setViewport = viewportPair[1];
+          var pointers = react.useRef({}), pinch = react.useRef(null);
+          var touches = react.useRef({});
           var marker = react.useRef("ig5-arrow-" + Math.random().toString(36).slice(2));
-          function fitCamera() { return { scale: Math.min(1, 480 / model.height), x: 0, y: 12 }; }
-          react.useEffect(function () { setCamera(fitCamera()); }, [props.cfg]);
-          function zoom(factor) { setCamera(function (c) { return Object.assign({}, c, { scale: Math.max(0.01, Math.min(4, c.scale * factor)) }); }); }
+          function fitCamera() { return cfgFitCamera(model, viewport.width, viewport.height); }
+          react.useEffect(function () {
+            if (!canvas.current) return;
+            var svg = canvas.current;
+            function wheel(e) {
+              e.preventDefault();
+              var point = cfgPointerPoint(e, svg.viewBox.baseVal.width);
+              setCamera(function (c) {
+                var scale = Math.max(0.01, Math.min(4, c.scale * Math.exp(-e.deltaY * 0.001)));
+                return { scale: scale, x: point.x - (point.x - c.x) * scale / c.scale, y: point.y - (point.y - c.y) * scale / c.scale };
+              });
+            }
+            svg.addEventListener("wheel", wheel, { passive: false });
+            var observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(function (entries) {
+              var box = entries[0].contentRect;
+              if (box.width > 0 && box.height > 0) setViewport({ width: box.width, height: box.height });
+            });
+            if (observer) observer.observe(svg);
+            return function () { if (observer) observer.disconnect(); svg.removeEventListener("wheel", wheel); };
+          }, []);
+          react.useEffect(function () { setCamera(fitCamera()); }, [props.cfg, viewport.width, viewport.height]);
+          function zoom(factor) { setCamera(function (c) {
+            var scale = Math.max(0.01, Math.min(4, c.scale * factor)), x = viewport.width / 2, y = viewport.height / 2;
+            return { scale: scale, x: x - (x - c.x) * scale / c.scale, y: y - (y - c.y) * scale / c.scale };
+          }); }
           return el("div", null,
             el("div", { className: "ig5-form-row" },
               el("button", { className: "ig5-btn", onClick: function () { zoom(1.2); }, "aria-label": "放大控制流图" }, "+"),
               el("button", { className: "ig5-btn", onClick: function () { zoom(1 / 1.2); }, "aria-label": "缩小控制流图" }, "−"),
               el("button", { className: "ig5-btn", onClick: function () { setCamera(fitCamera()); } }, "适应画布"),
-              el("span", { className: "ig5-card-sub" }, "拖动平移 · 双击基本块查看反汇编 · " + Math.round(camera.scale * 100) + "%")),
-            el("svg", { className: "ig5-cfg-canvas", viewBox: "0 0 " + Math.max(800, model.width) + " 520", role: "img", "aria-label": "Reverse 控制流图",
-              onPointerDown: function (e) { if (e.button !== 0 || (e.target.closest && e.target.closest(".ig5-cfg-node"))) return; drag.current = { x: e.clientX, y: e.clientY, cx: camera.x, cy: camera.y }; e.currentTarget.setPointerCapture(e.pointerId); },
-              onPointerMove: function (e) { if (!drag.current) return; var box = e.currentTarget.getBoundingClientRect(), factor = Math.max(800, model.width) / box.width; setCamera(Object.assign({}, camera, { x: drag.current.cx + (e.clientX - drag.current.x) * factor, y: drag.current.cy + (e.clientY - drag.current.y) * factor })); },
-              onPointerUp: function () { drag.current = null; }, onPointerCancel: function () { drag.current = null; }
+              el("span", { className: "ig5-card-sub" }, "拖动平移 · 双指缩放 · 触控点按 / 鼠标双击基本块 · " + Math.round(camera.scale * 100) + "%")),
+            el("svg", { ref: canvas, className: "ig5-cfg-canvas", viewBox: "0 0 " + viewport.width + " " + viewport.height, role: "img", "aria-label": "控制流图",
+              onPointerDown: function (e) {
+                var node = e.target.closest && e.target.closest(".ig5-cfg-node");
+                if (e.pointerType !== "touch" && (e.button !== 0 || node)) return;
+                var point = cfgPointerPoint(e, viewport.width);
+                pointers.current[e.pointerId] = point;
+                if (e.pointerType === "touch") touches.current[e.pointerId] = { start: point, moved: false, multi: false, block: node && model.nodes.find(function (n) { return n.id === node.getAttribute("data-node-id"); }) };
+                var points = Object.values(pointers.current);
+                if (points.length >= 2) Object.values(touches.current).forEach(function (t) { t.multi = true; });
+                if (points.length === 2) { pinch.current = cfgPinchStart(points, camera); drag.current = null; }
+                else if (points.length > 2) { pinch.current = null; drag.current = null; }
+                else drag.current = { point: point, camera: camera };
+                e.currentTarget.setPointerCapture(e.pointerId);
+              },
+              onPointerMove: function (e) {
+                if (!pointers.current[e.pointerId]) return;
+                var point = cfgPointerPoint(e, viewport.width); pointers.current[e.pointerId] = point;
+                var touch = touches.current[e.pointerId];
+                if (touch && Math.hypot(point.x - touch.start.x, point.y - touch.start.y) > 8) touch.moved = true;
+                var points = Object.values(pointers.current);
+                if (pinch.current && points.length === 2) setCamera(cfgPinchCamera(pinch.current, points));
+                else if (drag.current) setCamera(Object.assign({}, drag.current.camera, { x: drag.current.camera.x + point.x - drag.current.point.x, y: drag.current.camera.y + point.y - drag.current.point.y }));
+              },
+              onPointerUp: function (e) {
+                var touch = touches.current[e.pointerId];
+                if (touch) { var point = cfgPointerPoint(e, viewport.width); if (Math.hypot(point.x - touch.start.x, point.y - touch.start.y) > 8) touch.moved = true; }
+                if (touch && !touch.moved && !touch.multi && touch.block) props.onOpen(touch.block);
+                delete touches.current[e.pointerId]; delete pointers.current[e.pointerId]; pinch.current = null;
+                var points = Object.values(pointers.current); drag.current = points.length === 1 ? { point: points[0], camera: camera } : null;
+              },
+              onPointerCancel: function () { pointers.current = {}; touches.current = {}; pinch.current = null; drag.current = null; }
             },
               el("defs", null, el("marker", { id: marker.current, viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 6, markerHeight: 6, orient: "auto-start-reverse" }, el("path", { d: "M 0 0 L 10 5 L 0 10 z", fill: "#94a3b8" }))),
               el("g", { transform: "translate(" + camera.x + " " + camera.y + ") scale(" + camera.scale + ")" },
                 model.edges.map(function (e, i) { return el("g", { key: i }, el("path", { className: "ig5-cfg-edge", d: e.path, stroke: e.color, markerEnd: "url(#" + marker.current + ")" }), el("text", { className: "ig5-cfg-edge-label", x: e.labelX, y: e.labelY }, e.label)); }),
-                model.nodes.map(function (n) { return el("g", { key: n.id, className: "ig5-cfg-node", transform: "translate(" + n.x + " " + n.y + ")", role: "button", tabIndex: 0, "aria-label": "基本块 " + n.id + " " + n.start,
+                model.nodes.map(function (n) { return el("g", { key: n.id, className: "ig5-cfg-node", "data-node-id": n.id, transform: "translate(" + n.x + " " + n.y + ")", role: "button", tabIndex: 0, "aria-label": "基本块 " + n.id + " " + n.start,
                   onDoubleClick: function () { props.onOpen(n); }, onKeyDown: function (e) { if (e.key === "Enter") props.onOpen(n); } },
                   el("title", null, n.start + " → " + n.end + "\n" + (n.first || "") + "\n" + (n.last || "")),
                   el("rect", { width: n.width, height: n.height, rx: 7 }),
@@ -625,7 +718,35 @@
             model.truncated ? el("div", { className: "ig5-card-sub" }, "图中显示前 300 个基本块；完整拓扑可复制 Mermaid 查看。") : null);
         }
 
-        function normalizedTarget(target) { return String(target || "").replace(/\//g, "\\").toLowerCase(); }
+        function cfgFitCamera(model, width, height) {
+          var scale = Math.max(0.01, Math.min(1, Math.max(1, width - 24) / model.width, Math.max(1, height - 24) / model.height));
+          return { scale: scale, x: (width - model.width * scale) / 2, y: (height - model.height * scale) / 2 };
+        }
+        function cfgPointerPoint(e, width) {
+          var svg = e.currentTarget;
+          if (svg.createSVGPoint && svg.getScreenCTM) {
+            var matrix = svg.getScreenCTM();
+            if (matrix) { var p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY; return p.matrixTransform(matrix.inverse()); }
+          }
+          var box = svg.getBoundingClientRect(), factor = width / Math.max(1, box.width);
+          return { x: (e.clientX - (box.left || 0)) * factor, y: (e.clientY - (box.top || 0)) * factor };
+        }
+        function cfgPinchStart(points, camera) {
+          return { distance: Math.max(1, Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y)),
+            center: { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 }, camera: camera };
+        }
+        function cfgPinchCamera(start, points) {
+          var distance = Math.hypot(points[1].x - points[0].x, points[1].y - points[0].y),
+            center = { x: (points[0].x + points[1].x) / 2, y: (points[0].y + points[1].y) / 2 },
+            scale = Math.max(0.01, Math.min(4, start.camera.scale * distance / start.distance));
+          return { scale: scale, x: center.x - (start.center.x - start.camera.x) * scale / start.camera.scale,
+            y: center.y - (start.center.y - start.camera.y) * scale / start.camera.scale };
+        }
+
+        function normalizedTarget(target) {
+          var value = String(target || "");
+          return /^[A-Za-z]:[\\/]/.test(value) || /^\\\\/.test(value) ? value.replace(/\//g, "\\").toLowerCase() : value;
+        }
         function normalizeAudit(item) {
           var args = item.args || item.arguments || {}, result = item.detail || (item.result && (item.result.value || item.result)) || {};
           return { tool: String(item.tool || item.name || "未知工具"), target: args.target || item.target || "", engine: (result.destination && result.destination.engine) || args.engine || item.engine || "reverse", time: item.ts || item.time || "", ea: result.ea || args.ea || "", fileOffset: result.fileOffset, before: result.before, after: result.after, isError: item.isError === true || !!(item.result && item.result.isError), detail: typeof result === "string" ? result : String(result.error || result.note || "") };
@@ -741,6 +862,7 @@
               runningJob: runningJobs[0] || null,
               dash: dash,
             }),
+            el(Ig5EnvironmentCard, { config: feed && feed.config }),
             // 2. 领域分段胶囊导航栏 (.ig5-kinds)
             el(
               "div",
@@ -764,6 +886,23 @@
             activeTab === "runtime" && el(Ig5RuntimeView, { sessions: allSessions.filter(function (s) { return s.engine === "x64dbg"; }), refresh: feed && feed.now }),
             activeTab === "tools" && el(Ig5ToolsMatrixView, { dash: dash, session: currentSession, feed: feed })
           );
+        }
+
+        function Ig5EnvironmentCard(props) {
+          var config = props.config;
+          if (!config || !config.host) return null;
+          var host = config.host, engines = Array.isArray(config.engines) ? config.engines : [];
+          return el("div", { className: "ig5-card ig5-environment" },
+            el("div", { className: "ig5-card-title" }, el("b", null, "本机执行环境"),
+              el("span", { className: "ig5-chip " + (host.supported ? "read" : "warn") }, host.id || "待确认")),
+            el("p", { className: "ig5-card-sub" }, host.supported ? "分析引擎在当前宿主设备执行；能力以下列实际可用状态为准。" : "当前宿主尚无匹配的本地引擎执行方案。移动界面可用不代表引擎已移植。"),
+            el("div", { className: "ig5-form-row" }, engines.map(function (engine) {
+              return el("span", { key: engine.id, className: "ig5-chip " + (engine.available ? "read" : "warn") },
+                engineName(engine.id) + " · " + (engine.available ? "可用" : "不可用") + (engine.source === "bundled" ? " · 随包" : ""));
+            })),
+            engines.filter(function (engine) { return !engine.available && engine.id !== "reverse" && engine.reason; }).map(function (engine) {
+              return el("p", { key: engine.id, className: "ig5-card-sub" }, engineName(engine.id) + ": " + String(engine.reason).slice(0, 300));
+            }));
         }
 
         /* ── 全局概览卡片 (Overview & Stat Tiles) ── */
@@ -934,7 +1073,7 @@
 
           return el(
             "div",
-            { className: "ig5-kinds" },
+            { className: "ig5-kinds ig5-nav-tabs" },
             tabs.map(function (t) {
               var isSel = props.activeTab === t.id;
               return el(
@@ -958,9 +1097,11 @@
           var listState = react.useState({ rows: [], total: 0, offset: 0, filter: "", userOnly: false, loading: false, error: null });
           var list = listState[0];
           var setList = listState[1];
+          var collapsePair = react.useState(false), listCollapsed = collapsePair[0], setListCollapsed = collapsePair[1];
 
           var codeState = react.useState({ ea: null, name: null, code: null, loading: false, error: null });
-          var curCode = codeState[0];
+          var storedCode = codeState[0];
+          var curCode = storedCode.scope && storedCode.scope !== scopeKey ? { ea: null, loading: false, code: null } : storedCode;
           var setCode = codeState[1];
 
           var xrefsState = react.useState({ list: [], callers: [], callees: [], loading: false });
@@ -981,14 +1122,15 @@
           var focusPair = react.useState({ variable: "", loading: false, lines: [], error: null });
           var focused = focusPair[0], setFocused = focusPair[1];
           var disasmPair = react.useState(null), disasm = disasmPair[0], setDisasm = disasmPair[1];
-          var selectionGate = react.useRef(makeRequestGate()), focusGate = react.useRef(makeRequestGate()), disasmGate = react.useRef(makeRequestGate());
+          var selectionGate = react.useRef(makeRequestGate()), focusGate = react.useRef(makeRequestGate()), disasmGate = react.useRef(makeRequestGate()), modeGate = react.useRef(makeRequestGate());
           var previousTarget = react.useRef(scopeKey);
-          if (previousTarget.current !== scopeKey) { previousTarget.current = scopeKey; selectionGate.current.next(); focusGate.current.next(); disasmGate.current.next(); }
+          if (previousTarget.current !== scopeKey) { previousTarget.current = scopeKey; selectionGate.current.next(); focusGate.current.next(); disasmGate.current.next(); modeGate.current.next(); }
           react.useEffect(function () {
             setCode({ ea: null, name: null, code: null, loading: false, error: null }); setCfg(null); setSlice(null); setDisasm(null);
             setFocused({ variable: "", loading: false, lines: [], error: null }); setXrefs({ list: [], callers: [], callees: [], loading: false });
             setList(function (s) { return Object.assign({}, s, { rows: [], total: 0, offset: 0 }); });
-            return function () { selectionGate.current.next(); focusGate.current.next(); disasmGate.current.next(); };
+            setListCollapsed(false);
+            return function () { selectionGate.current.next(); focusGate.current.next(); disasmGate.current.next(); modeGate.current.next(); };
           }, [target, engine]);
 
           react.useEffect(function () {
@@ -1010,9 +1152,10 @@
           }, [target, engine, list.offset, list.searchNonce, list.userOnly]);
 
           function selectFunction(ea, name) {
-            var ticket = selectionGate.current.next(); focusGate.current.next(); disasmGate.current.next();
+            var ticket = selectionGate.current.next(); focusGate.current.next(); disasmGate.current.next(); modeGate.current.next();
+            setListCollapsed(true);
             function current() { return selectionGate.current.isCurrent(ticket); }
-            setCode({ ea: ea, name: name, code: null, loading: true, error: null });
+            setCode({ ea: ea, name: name, code: null, loading: true, error: null, generation: ticket, scope: scopeKey });
             setXrefs({ list: [], callers: [], callees: [], loading: true });
             setCfg(null);
             setSlice(null);
@@ -1023,10 +1166,10 @@
               .then(function (r) { return r.json(); })
               .then(function (j) {
                 if (!current()) return;
-                if (j.error) { setCode({ ea: ea, name: name, code: null, loading: false, error: j.error }); return; }
-                setCode({ ea: j.data.ea, name: j.data.name, code: j.data.code || j.data.preview || "(空函数)", loading: false, error: null });
+                if (j.error) { setCode({ ea: ea, name: name, code: null, loading: false, error: j.error, generation: ticket, scope: scopeKey }); return; }
+                setCode({ ea: j.data.ea, name: j.data.name, code: j.data.code || j.data.preview || "(空函数)", loading: false, error: null, generation: ticket, scope: scopeKey });
               })
-              .catch(function (e) { if (current()) setCode({ ea: ea, name: name, code: null, loading: false, error: String(e) }); });
+              .catch(function (e) { if (current()) setCode({ ea: ea, name: name, code: null, loading: false, error: String(e), generation: ticket, scope: scopeKey }); });
 
             // 2. 交叉引用 & 子调用
             Promise.all([
@@ -1039,17 +1182,23 @@
               setXrefs({ list: xrefData, callees: callData, callers: [], loading: false });
             });
 
-            // 3. 预载入 CFG 与切片数据
-            fetch("/ig5-data?type=cfg&engine=" + encodeURIComponent(engine) + "&target=" + encodeURIComponent(target) + "&ea=" + encodeURIComponent(ea))
-              .then(function (r) { return r.json(); })
-              .then(function (j) { if (current()) setCfg(j && j.data ? j.data : { error: (j && j.error) || "控制流图响应为空", blocks: [], edges: [] }); })
-              .catch(function (e) { if (current()) setCfg({ error: String(e), blocks: [], edges: [] }); });
-
-            fetch("/ig5-data?type=slice&engine=" + encodeURIComponent(engine) + "&target=" + encodeURIComponent(target) + "&ea=" + encodeURIComponent(ea))
-              .then(function (r) { return r.json(); })
-              .then(function (j) { if (current()) setSlice(j && j.data ? j.data : { error: (j && j.error) || "变量响应为空", variables: [] }); })
-              .catch(function (e) { if (current()) setSlice({ error: String(e), variables: [] }); });
           }
+
+          // Only request the selected analysis view; every pending read owns its selection generation.
+          react.useEffect(function () {
+            if (!target || !curCode.ea || (viewMode !== "cfg" && viewMode !== "slice")) return;
+            var ticket = modeGate.current.next(), type = viewMode, ea = curCode.ea;
+            if ((type === "cfg" && cfg) || (type === "slice" && slice)) return;
+            readData(type, target, { ea: ea }, engine).then(function (data) {
+              if (!modeGate.current.isCurrent(ticket)) return;
+              if (type === "cfg") setCfg(data); else setSlice(data);
+            }).catch(function (e) {
+              if (!modeGate.current.isCurrent(ticket)) return;
+              if (type === "cfg") setCfg({ error: String(e.message || e), blocks: [], edges: [] });
+              else setSlice({ error: String(e.message || e), variables: [] });
+            });
+            return function () { modeGate.current.next(); };
+          }, [target, engine, curCode.ea, curCode.generation, viewMode]);
 
           function chooseFunction(ea, name) {
             if (typeof props.onNavigate === "function") props.onNavigate({ ea: ea, name: name });
@@ -1090,11 +1239,12 @@
 
           return el(
             "div",
-            { className: "ig5-cols", style: { alignItems: "flex-start" } },
+            { className: "ig5-cols ig5-function-workspace", style: { alignItems: "flex-start" } },
+            curCode.ea ? el("button", { className: "ig5-btn ig5-mobile-only", "aria-expanded": !listCollapsed, onClick: function () { setListCollapsed(!listCollapsed); } }, listCollapsed ? "返回函数列表" : "收起函数列表") : null,
             // 左列卡片：函数检索与分页列表
             el(
               "div",
-              { className: "ig5-card ig5-col", style: { flex: "0 0 380px", width: 380, marginBottom: 0 } },
+              { className: "ig5-card ig5-col ig5-functions-list" + (curCode.ea && listCollapsed ? " is-collapsed" : "") },
               el(
                 "div",
                 { className: "ig5-card-title" },
@@ -1117,7 +1267,7 @@
                 el("button", {
                   className: "ig5-btn" + (list.userOnly ? " ig5-btn-primary" : ""),
                   style: { fontSize: 11, padding: "4px 8px" },
-                  title: "根据 Reverse 标准库标记过滤函数，专注于用户逻辑",
+                  title: "根据当前静态引擎提供的库函数标记过滤列表",
                   onClick: function () { setList(function (s) { return Object.assign({}, s, { userOnly: !s.userOnly, offset: 0 }); }); }
                 }, list.userOnly ? "仅用户代码" : "全部函数")
               ),
@@ -1176,7 +1326,7 @@
             // 右列卡片：Reverse 伪代码 / CFG 控制流拓扑 / 变量与微代码切片 三模切换
             el(
               "div",
-              { className: "ig5-card ig5-col", style: { flex: "1 1 0%", minWidth: 360, marginBottom: 0 } },
+              { className: "ig5-card ig5-col ig5-functions-detail" },
               el(
                 "div",
                 { className: "ig5-card-title" },
@@ -1346,7 +1496,7 @@
                     )
                   )
                 : el("div", { style: { padding: 50, textAlign: "center", color: "var(--dsw-alias-label-secondary)" } },
-                    "👈 在左侧列表中选择任意函数，在此实时查看 Reverse 伪代码、CFG 拓扑及局部变量切片。"
+                    "选择函数，查看当前静态引擎的伪代码、CFG 拓扑及变量焦点行。"
                   )
             )
           );
@@ -1969,7 +2119,7 @@
                 { style: { margin: 0, paddingLeft: 18, fontSize: 12, lineHeight: 1.8, color: "var(--dsw-alias-label-secondary)" } },
                 el("li", null, "结构体建模: 「根据 a1 的偏移访问，用 ig5_struct action=define 定义 struct Packet { ... } 并应用到该变量」"),
                 el("li", null, "控制流分析: 「用 ig5_cfg 提取 main 函数的控制流图并输出 Mermaid 流程图」"),
-                el("li", null, "语义数据流切片: 「用 ig5_slice 追踪函数 0x... 中变量 key 的赋值与修改路径」"),
+                el("li", null, "变量焦点行: 「用 ig5_slice 查看函数 0x... 中匹配变量 key 的伪代码行」；这不代表完整数据流分析。"),
                 el("li", null, "库函数过滤: 「用 ig5_fingerprint 识别标准库，然后在 ig5_funcs 中开启 user_only 排除噪音」")
               )
             )
@@ -2065,7 +2215,7 @@
         exports.inject = inject;
         exports.apply = apply;
         // Exposed without side effects for deterministic renderer regression and local preview.
-        exports.__test = { engineName: engineName, sessionIdentity: sessionIdentity, parseWorkbenchFocus: parseWorkbenchFocus, layoutCfg: layoutCfg, highlightParts: highlightParts, renderCodeLines: renderCodeLines, normalizeAudit: normalizeAudit, normalizedTarget: normalizedTarget, buildStructDraft: buildStructDraft, makeRequestGate: makeRequestGate, CfgGraph: CfgGraph, StructEditor: StructEditor, FunctionsView: Ig5FunctionsView, StringsView: Ig5StringsView, ListingView: Ig5ListingView, PatchesView: Ig5PatchesView, RuntimeView: Ig5RuntimeView, IrView: Ig5IrView, OverviewCard: Ig5OverviewCard, Workbench: Ig5Workbench };
+        exports.__test = { cfgFitCamera: cfgFitCamera, EnvironmentCard: Ig5EnvironmentCard, cfgPinchStart: cfgPinchStart, cfgPinchCamera: cfgPinchCamera, engineName: engineName, sessionIdentity: sessionIdentity, parseWorkbenchFocus: parseWorkbenchFocus, layoutCfg: layoutCfg, highlightParts: highlightParts, renderCodeLines: renderCodeLines, normalizeAudit: normalizeAudit, normalizedTarget: normalizedTarget, buildStructDraft: buildStructDraft, makeRequestGate: makeRequestGate, CfgGraph: CfgGraph, StructEditor: StructEditor, FunctionsView: Ig5FunctionsView, StringsView: Ig5StringsView, ListingView: Ig5ListingView, PatchesView: Ig5PatchesView, RuntimeView: Ig5RuntimeView, IrView: Ig5IrView, OverviewCard: Ig5OverviewCard, Workbench: Ig5Workbench };
         return module.exports;
       },
     });

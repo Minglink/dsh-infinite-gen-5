@@ -108,7 +108,7 @@ static json_t* execute(json_t* req) {
     const char* method = text(req, "method");
     auto p = json_object_get(req, "params");
     if(!p) p = req;
-    if(!strcmp(method, "hello")) { auto r = json_object(); str(r, "bridge", "ig5-native"); num(r, "protocol", 1); num(r, "pid", GetCurrentProcessId()); num(r, "bits", sizeof(duint) * 8); flag(r,"ownerOnly",true); flag(r,"remoteClientsRejected",true); flag(r,"typedRequests",true); return r; }
+    if(!strcmp(method, "hello")) { auto r = json_object(); str(r, "bridge", "ig5-native"); num(r, "protocol", 2); num(r, "pid", GetCurrentProcessId()); num(r, "bits", sizeof(duint) * 8); flag(r,"ownerOnly",true); flag(r,"remoteClientsRejected",true); flag(r,"typedRequests",true); return r; }
     if(!strcmp(method, "state")) {
         auto r = json_object(); flag(r, "debugging", DbgIsDebugging()); flag(r, "running", DbgIsRunning());
         num(r, "pid", DbgIsDebugging() ? DbgGetProcessId() : 0); num(r, "tid", DbgIsDebugging() ? DbgGetThreadId() : 0); return r;
@@ -172,6 +172,37 @@ static json_t* execute(json_t* req) {
         return result;
     }
     if(!DbgIsDebugging() || DbgIsRunning()) return failure("operation requires a suspended process");
+    if(!strcmp(method, "threads")) {
+        THREADLIST list = {}; DbgGetThreadList(&list);
+        if(list.count < 0 || (list.count && !list.list)) return failure("thread list unavailable");
+        auto result = json_object(), rows = json_array();
+        for(int i = 0; i < list.count && i < 512; ++i) {
+            auto row = json_object(); const auto& item = list.list[i];
+            num(row,"threadId",item.BasicInfo.ThreadId); num(row,"number",item.BasicInfo.ThreadNumber);
+            address(row,"startAddress",item.BasicInfo.ThreadStartAddress); address(row,"teb",item.BasicInfo.ThreadLocalBase);
+            address(row,"runtimeVA",item.ThreadCip); str(row,"name",item.BasicInfo.threadName);
+            flag(row,"current",i == list.CurrentThread); num(row,"suspendCount",item.SuspendCount);
+            json_object_set_new(row,"priority",json_integer(item.Priority)); num(row,"waitReason",item.WaitReason);
+            num(row,"lastError",item.LastError); json_array_append_new(rows,row);
+        }
+        num(result,"total",list.count); flag(result,"truncated",list.count > 512);
+        json_object_set_new(result,"threads",rows); if(list.list) BridgeFree(list.list); return result;
+    }
+    if(!strcmp(method, "callstack")) {
+        auto api = DbgFunctions();
+        if(!api->GetCallStackEx) return failure("call stack API unavailable");
+        DBGCALLSTACK stack = {}; api->GetCallStackEx(&stack,false);
+        if(stack.total < 0 || (stack.total && !stack.entries)) return failure("call stack unavailable");
+        auto result = json_object(), rows = json_array();
+        for(int i = 0; i < stack.total && i < 256; ++i) {
+            auto row = json_object(); const auto& item = stack.entries[i]; num(row,"index",i);
+            address(row,"stackAddress",item.addr); address(row,"from",item.from); address(row,"to",item.to);
+            str(row,"comment",item.comment); json_array_append_new(rows,row);
+        }
+        num(result,"threadId",DbgGetThreadId()); num(result,"total",stack.total); flag(result,"truncated",stack.total > 256);
+        flag(result,"heuristic",true); str(result,"source","native-current-thread-unwind-and-stack-scan");
+        json_object_set_new(result,"frames",rows); if(stack.entries) BridgeFree(stack.entries); return result;
+    }
     if(!strcmp(method, "regs")) {
         REGDUMP_AVX512 dump = {};
         if(!DbgGetRegDumpEx(&dump, sizeof(dump))) return failure("register read failed");
@@ -185,18 +216,38 @@ static json_t* execute(json_t* req) {
         address(r,"eax",c.cax); address(r,"ebx",c.cbx); address(r,"ecx",c.ccx); address(r,"edx",c.cdx);
         address(r,"esi",c.csi); address(r,"edi",c.cdi); address(r,"esp",c.csp); address(r,"ebp",c.cbp); address(r,"eip",c.cip);
 #endif
-        address(r,"eflags",c.eflags); return r;
+        address(r,"eflags",c.eflags);
+        address(r,"dr0",c.dr0); address(r,"dr1",c.dr1); address(r,"dr2",c.dr2); address(r,"dr3",c.dr3);
+        address(r,"dr6",c.dr6); address(r,"dr7",c.dr7); return r;
     }
     if(!strcmp(method, "setreg")) {
         if(!reg_allowed(text(p,"reg"))) return failure("unsupported register");
         return json_boolean(DbgValSetScalar(text(p, "reg"), (duint)value(p, "value")));
     }
     if(!strcmp(method, "bpt") || !strcmp(method, "unbpt")) {
-        char cmd[64]; std::snprintf(cmd, sizeof(cmd), "%s 0x%llx", !strcmp(method, "bpt") ? "bp" : "bc", value(p, "ea"));
+        const char* kind = text(p,"kind"), *access = text(p,"access");
+        const bool hardware = !strcmp(kind,"hardware"), create = !strcmp(method,"bpt");
+        if(*kind && strcmp(kind,"software") && !hardware) return failure("invalid breakpoint kind");
+        unsigned long long size = json_object_get(p,"size") ? value(p,"size") : 1;
+        const bool execute = !*access || !strcmp(access,"execute"), write = !strcmp(access,"write"), readwrite = !strcmp(access,"readwrite");
+        if(!execute && !write && !readwrite) return failure("invalid hardware access");
+        if(hardware && (!(size == 1 || size == 2 || size == 4 || (sizeof(duint) == 8 && size == 8)) || (execute && size != 1) || value(p,"ea") % size)) return failure("invalid hardware size or alignment");
+        if(value(p,"ea") > (unsigned long long)(duint)-1) return failure("breakpoint address exceeds target width");
+        char cmd[128];
+        if(hardware && create) std::snprintf(cmd,sizeof(cmd),"bphws 0x%llx, %s, %llu",value(p,"ea"),execute ? "x" : write ? "w" : "r",size);
+        else std::snprintf(cmd,sizeof(cmd),"%s 0x%llx",hardware ? "bphwc" : create ? "bp" : "bc",value(p,"ea"));
         const duint ea = (duint)value(p,"ea");
         const bool ok = DbgCmdExecDirect(cmd);
-        const bool exists = (DbgGetBpxTypeAt(ea) & bp_normal) != 0;
-        return json_boolean(ok && (exists == !strcmp(method,"bpt")));
+        const auto type = hardware ? bp_hardware : bp_normal;
+        const bool exists = (DbgGetBpxTypeAt(ea) & type) != 0;
+        BRIDGEBP bp = {}; const bool found = DbgFunctions()->GetBridgeBp(type,ea,&bp);
+        // Read back metadata: an already-existing hardware bp must not silently
+        // accept different access/size merely because the command returned true.
+        const bool matches = !hardware || !create || (found && bp.enabled && (1u << bp.hwSize) == size && bp.typeEx == (execute ? hw_execute : write ? hw_write : hw_access));
+        auto result = json_object(); flag(result,"ok",ok && exists == create && matches); flag(result,"exists",exists);
+        str(result,"kind",hardware ? "hardware" : "software"); address(result,"ea",ea);
+        if(found) { num(result,"slot",bp.slot); num(result,"size",hardware ? 1u << bp.hwSize : 1); num(result,"typeEx",bp.typeEx); flag(result,"enabled",bp.enabled); }
+        return result;
     }
     if(!strcmp(method, "memread")) {
         const auto size = value(p, "size"); if(size < 1 || size > 4096) return failure("invalid read size");

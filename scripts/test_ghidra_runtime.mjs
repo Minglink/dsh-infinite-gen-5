@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { createHash } from 'node:crypto';
 import { mkdtemp, writeFile, readFile, copyFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -52,6 +55,18 @@ function rpc(method, params = {}, timeout = 120000) {
   });
 }
 function check(label, value) { console.log('PASS', label, JSON.stringify(value ?? '')); }
+function buildELF64(code, machine) {
+  const image = Buffer.alloc(0x100 + code.length);
+  image.set(Buffer.from('7f454c46020101000000000000000000', 'hex'));
+  image.writeUInt16LE(2, 16); image.writeUInt16LE(machine, 18); image.writeUInt32LE(1, 20);
+  image.writeBigUInt64LE(0x400100n, 24); image.writeBigUInt64LE(64n, 32);
+  image.writeUInt16LE(64, 52); image.writeUInt16LE(56, 54); image.writeUInt16LE(1, 56);
+  image.writeUInt32LE(1, 64); image.writeUInt32LE(5, 68);
+  image.writeBigUInt64LE(0n, 72); image.writeBigUInt64LE(0x400000n, 80); image.writeBigUInt64LE(0x400000n, 88);
+  image.writeBigUInt64LE(BigInt(image.length), 96); image.writeBigUInt64LE(BigInt(image.length), 104); image.writeBigUInt64LE(0x1000n, 112);
+  image.set(code, 0x100);
+  return image;
+}
 try {
   const greeting = await ready;
   assert.equal(greeting.engine, 'Ghidra');
@@ -73,6 +88,16 @@ try {
   assert(strings.strings.length > 0); check('defined strings', strings.total);
   const decompiled = await rpc('decompile', { ea: fixture.addresses.add });
   assert(decompiled.code.includes('return')); check('native decompiler', decompiled.code);
+  if (process.env.IG5_EXPECT_NATIVE_SHA256) {
+    assert.equal(process.platform, 'win32');
+    const command = `$OutputEncoding=[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false); $processes=@(Get-CimInstance Win32_Process -Filter 'ParentProcessId=${child.pid}' | Where-Object Name -EQ 'decompile.exe'); if($processes.Count -ne 1){throw 'Expected one owned native decompiler'}; $selected=$processes[0]; @{pid=$selected.ProcessId; parentPid=$selected.ParentProcessId; executablePath=$selected.ExecutablePath} | ConvertTo-Json -Compress`;
+    const { stdout } = await promisify(execFile)('powershell.exe', ['-NoProfile', '-Command', command], { windowsHide: true });
+    const proof = JSON.parse(stdout);
+    proof.sha256 = createHash('sha256').update(await readFile(proof.executablePath)).digest('hex');
+    assert.equal(proof.parentPid, child.pid); assert.equal(proof.sha256, process.env.IG5_EXPECT_NATIVE_SHA256);
+    assert.equal(path.resolve(proof.executablePath).toLowerCase(), path.resolve(manifest.ghidraHome, 'Ghidra', 'Features', 'Decompiler', 'os', 'win_x86_64', 'decompile.exe').toLowerCase());
+    check('verified source-built native process identity and hash', proof);
+  }
   assert.equal((await rpc('decompile', { ea: '', name: 'ig5_fixture_add' })).ea, fixture.addresses.add);
   const bytes = await rpc('bytes', { ea: fixture.addresses.add, size: 5 });
   assert.equal(bytes.hex, '488d0411c3');
@@ -91,7 +116,13 @@ try {
   const fingerprint = await rpc('fingerprint'); assert.equal(fingerprint.bits, 64); check('fingerprint', fingerprint);
   for (const kind of ['raw', 'high']) {
     const ir = await rpc('ir', { ea: fixture.addresses.add, kind });
-    assert(ir.instructions.length > 0); assert(ir.blocks.length > 0); assert.equal(ir.idb_modified, false); check(kind + ' p-code', ir.instructions.length);
+    assert(ir.instructions.length > 0); assert(ir.blocks.length > 0); assert.equal(ir.idb_modified, false);
+    assert(ir.instructions.every(row => Array.isArray(row.inputs) && row.inputs.every(node => node.space && node.size > 0 && /^0x[0-9a-f]+$/.test(node.offset))));
+    assert.equal(ir.source.artifactSHA256, opened.sourceHash); assert(ir.varnodeCount <= ir.varnodeLimit);
+    const exact = await rpc('ir', { ea: fixture.addresses.add, kind, max_instructions: ir.total });
+    assert.equal(exact.truncated, false); assert.equal(exact.count, exact.total);
+    const truncated = await rpc('ir', { ea: fixture.addresses.add, kind, max_instructions: 1 });
+    assert.equal(truncated.count, 1); assert.equal(truncated.truncated, true); check(kind + ' typed p-code', ir.instructions.length);
   }
   const slice = await rpc('slice', { ea: fixture.addresses.add }); assert(slice.variables.length > 0); assert(slice.lines.length > 0); assert.equal(slice.total_variables, slice.variables.length); assert(slice.slice_lines.every(row => row.line_no && row.code !== undefined)); check('HighFunction symbols', slice.variables.length);
   const semantics = await rpc('semantics', { limit: 100 }); assert(semantics.functions.length >= 16); assert(semantics.functions.every(row => row.semantic_hash && row.blocks.length)); check('semantic snapshots', semantics.count);
@@ -126,7 +157,10 @@ try {
   assert.equal(full.analysisProfile, 'full'); assert.deepEqual(full.skippedAnalyzers, []); assert.equal(full.partial, false);
   assert.equal(full.analysisScope, 'program'); assert.equal(full.analysisComplete, true);
   check('full reanalyze transaction');
-  await assert.rejects(rpc('emulate'), error => error.code === 'unsupported'); check('unsupported explicit');
+  const emulated = await rpc('emulate', { ea: fixture.addresses.add, args: [2, 3], abi: 'win64' });
+  assert.equal(emulated.return_value, '0x5'); assert.equal(emulated.reason, 'returned'); assert.equal(emulated.idb_modified, false);
+  assert.equal(emulated.sourceEngine, 'ghidra'); check('engine-neutral CPU emulation', emulated.return_value);
+  await assert.rejects(rpc('microcode'), error => error.code === 'unsupported'); check('unsupported explicit');
   await rpc('close'); assert.equal((await rpc('stats')).open, false);
   const reused = await rpc('open', { path: target }); await rpc('close');
   const persisted = await rpc('open', { path: target }); assert.equal(persisted.reusedProject, true); assert.equal(persisted.project, reused.project);
@@ -158,6 +192,27 @@ try {
     await rpc('close'); assert.deepEqual(await readFile(samplePath), sourceBytes); assert.deepEqual(await readFile(sampleCopy), sourceBytes);
     check('real notepad copy analysis', { functions: sample.n_funcs, imports: imports.total, strings: sampleStrings.total, entryIR: entryIR.count, calls: sampleCalls.total });
   }
+  const sysvBytes = buildELF64(Buffer.from('488d0437c3', 'hex'), 62), sysvPath = path.join(temp, 'x64 SysV真实函数.elf');
+  await writeFile(sysvPath, sysvBytes);
+  const sysvOpened = await rpc('open', { path: sysvPath, fresh: true });
+  assert.equal(sysvOpened.compilerSpec, 'gcc');
+  const sysv = await rpc('emulate', { ea: '0x400100', args: [13, 29] });
+  assert.equal(sysv.abi, 'sysv64'); assert.equal(sysv.return_value, '0x2a'); assert.equal(sysv.reason, 'returned');
+  await rpc('close'); assert.deepEqual(await readFile(sysvPath), sysvBytes);
+  check('target ELF compiler selects SysV64 ABI independently of host', sysv.return_value);
+  const armBytes = buildELF64(Buffer.from('0000018bc0035fd6', 'hex'), 183), armPath = path.join(temp, 'ARM64真实函数.elf');
+  await writeFile(armPath, armBytes);
+  const armOpened = await rpc('open', { path: armPath, fresh: true });
+  assert.equal(armOpened.proc, 'AARCH64'); assert.equal(armOpened.bits, 64);
+  const armFunctions = await rpc('funcs', { limit: 20 });
+  assert(armFunctions.funcs.some(row => row.ea === '0x400100'), JSON.stringify(armFunctions));
+  const armIR = await rpc('ir', { ea: '0x400100', kind: 'high' });
+  assert(armIR.instructions.some(row => row.opcode === 'INT_ADD'));
+  const armEmulated = await rpc('emulate', { ea: '0x400100', args: [7, 9], abi: 'aapcs64' });
+  assert.equal(armEmulated.return_value, '0x10'); assert.equal(armEmulated.reason, 'returned');
+  assert.equal(armEmulated.arch, 'arm64'); assert.equal(armEmulated.idb_modified, false);
+  await rpc('close'); assert.deepEqual(await readFile(armPath), armBytes);
+  check('ARM64 ELF typed p-code and isolated CPU emulation', armEmulated.return_value);
   assert.deepEqual(await readFile(target), fixture.image); assert(!protocolError); check('source untouched, stable project reuse and strict JSONL');
   console.log('Ghidra integration passed; artifacts:', temp);
 } catch (error) {

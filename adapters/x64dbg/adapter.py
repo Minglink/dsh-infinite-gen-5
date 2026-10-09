@@ -26,8 +26,8 @@ from types import SimpleNamespace
 import uuid
 
 OPS = ["load", "start", "bpt", "unbpt", "regs", "setreg", "step", "stepover",
-       "cont", "suspend", "readmem", "writemem", "stop", "state", "event", "modules", "trace"]
-CAPABILITIES = ["doctor", "open", "close", "dbg", *["dbg." + op for op in OPS], "cancel"]
+       "cont", "suspend", "readmem", "writemem", "stop", "state", "event", "modules", "trace", "threads", "callstack"]
+CAPABILITIES = ["doctor", "open", "close", "dbg", *["dbg." + op for op in OPS], "dbg.hardware_breakpoint", "cancel"]
 EVENT_NAMES = {"EVENT_BREAKPOINT": "breakpoint", "EVENT_SYSTEMBREAKPOINT": "system-breakpoint",
                "EVENT_STEPPED": "step", "EVENT_PAUSE_DEBUG": "paused", "EVENT_RESUME_DEBUG": "running",
                "EVENT_EXCEPTION": "exception", "EVENT_CREATE_PROCESS": "process-started",
@@ -156,8 +156,8 @@ class NativeClient:
                 break
             time.sleep(0.025)
         hello = self.request("hello")
-        if hello.get("pid") != pid or hello.get("protocol") != 1:
-            raise RpcError("ETRANSPORT", "native bridge handshake mismatch")
+        if hello.get("pid") != pid or hello.get("protocol") != 2:
+            raise RpcError("ETRANSPORT", "native bridge handshake mismatch; this adapter requires IG5 bridge protocol 2")
 
     def close(self):
         if self.handle:
@@ -244,11 +244,17 @@ class NativeClient:
     def set_reg(self, name, value):
         return self.request("setreg", reg=name, value=hex(value))
 
-    def set_breakpoint(self, ea):
-        return self.request("bpt", ea=hex(ea))
+    def set_breakpoint(self, ea, kind="software", access="execute", size=1):
+        return self.request("bpt", ea=hex(ea), kind=kind, access=access, size=size)
 
-    def clear_breakpoint(self, ea):
-        return self.request("unbpt", ea=hex(ea))
+    def clear_breakpoint(self, ea, kind="software", access="execute", size=1):
+        return self.request("unbpt", ea=hex(ea), kind=kind, access=access, size=size)
+
+    def get_threads(self):
+        return self.request("threads")
+
+    def get_callstack(self):
+        return self.request("callstack")
 
     def get_regs(self):
         data = {k: integer(v) for k, v in self.request("regs").items()}
@@ -713,8 +719,14 @@ class Adapter:
             return {"op": op, **self.wait_state(mark)}
         if not self.client:
             raise RpcError("ESTATE", "debugger is not loaded")
-        if op in ("regs", "setreg", "bpt", "unbpt", "step", "stepover", "cont", "readmem", "writemem", "modules", "trace"):
+        if op in ("regs", "setreg", "bpt", "unbpt", "step", "stepover", "cont", "readmem", "writemem", "modules", "trace", "threads", "callstack"):
             self.require_pause()
+        if op in ("threads", "callstack"):
+            name = "get_threads" if op == "threads" else "get_callstack"
+            if not hasattr(self.client, name):
+                raise RpcError("ENOTSUPPORTED", "operation requires the IG5 native bridge")
+            data = self.call(name)
+            return {"ok": True, "op": op, **data, "native": True, "context": self.context(), **self.state()}
         if op == "regs":
             dump = self.call("get_regs")
             regs = {k: hex(v) for k, v in dump.context.model_dump().items() if isinstance(v, int)}
@@ -734,9 +746,27 @@ class Adapter:
             after = self.evaluate(name)
             return {"ok": ok and after == value, "op": op, "reg": name, "before": hex(before), "after": hex(after), **self.state()}
         if op in ("bpt", "unbpt"):
-            ea = self.address(p)
-            ok = bool(self.call("set_breakpoint" if op == "bpt" else "clear_breakpoint", ea))
-            return {"ok": ok, "op": op, "ea": hex(ea), "context": self.context(ea), **self.state()}
+            kind, access = str(p.get("kind", "software")), str(p.get("access", "execute"))
+            size = integer(p.get("size", 1))
+            if kind not in ("software", "hardware") or access not in ("execute", "write", "readwrite"):
+                raise ValueError("invalid breakpoint kind or access")
+            if kind == "software" and (access != "execute" or size != 1):
+                raise ValueError("software breakpoints require execute access and size 1")
+            if size not in ((1, 2, 4, 8) if self.target["bits"] == 64 else (1, 2, 4)) or (access == "execute" and size != 1):
+                raise ValueError("invalid hardware breakpoint size")
+            ea = self.address(p, size)
+            if ea % size:
+                raise ValueError("hardware breakpoint address must be aligned to size")
+            name = "set_breakpoint" if op == "bpt" else "clear_breakpoint"
+            if isinstance(self.client, NativeClient):
+                result = self.call(name, ea, kind, access, size)
+                ok = bool(result.get("ok"))
+                detail = {"breakpoint": result}
+            else:
+                if kind != "software":
+                    raise RpcError("ENOTSUPPORTED", "hardware breakpoints require the IG5 native bridge")
+                ok, detail = bool(self.call(name, ea)), {}
+            return {"ok": ok, "op": op, "ea": hex(ea), "kind": kind, "access": access, "size": size, **detail, "context": self.context(ea), **self.state()}
         if op in ("readmem", "writemem"):
             if op == "readmem":
                 size = integer(p.get("size", 64))

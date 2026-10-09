@@ -111,6 +111,8 @@ try {
   tinyPacks(bundle); tinyPacks(legacy);
   write(path.join(relocated, 'package.json'), '{"type":"module"}');
   fs.copyFileSync(path.join(source, 'engine_runtime.js'), path.join(relocated, 'engine_runtime.js'));
+  fs.mkdirSync(path.join(relocated, 'source'), { recursive: true });
+  fs.copyFileSync(path.join(source, 'source/host_platform.js'), path.join(relocated, 'source/host_platform.js'));
   const moved = await import(pathToFileURL(path.join(relocated, 'engine_runtime.js')).href);
   const defaults = moved.runtimeConfiguration({ home: legacyHome });
   available(defaults); assert.equal(defaults.runtimeRoot, bundle);

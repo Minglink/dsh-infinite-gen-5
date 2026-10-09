@@ -255,10 +255,10 @@ function Assert-IG5PluginSource {
     param([string]$Root)
     # Keep this list aligned with the modules loaded by index.js, workers and the profile entry points.
     $required = @('package.json','index.js','client.js','engine_runtime.js','advanced_tools.js','integration_tools.js','workflow.js',
-        'semantic_diff.js','semantic_diff_async.js','semantic_diff_worker.js','source/project_store.js','source/address_ref.js',
-        'worker/ig5_worker.py','worker/advanced_analysis.py','worker/execution_analysis.py','worker/vendor/NOTICE.txt',
+        'semantic_diff.js','semantic_diff_async.js','semantic_diff_worker.js','source/project_store.js','source/address_ref.js','source/host_platform.js','source/worker_transport.js',
+        'worker/ig5_worker.py','worker/advanced_analysis.py','worker/execution_analysis.py','worker/memory_image.py','worker/cpu_emulator.py','worker/vendor/NOTICE.txt',
         'worker/vendor/unicorn/__init__.py','worker/vendor/unicorn/lib/unicorn.dll',
-        'adapters/ghidra/worker.py','adapters/ghidra/jpype-patch/JPypeContext.java','adapters/ghidra/jpype-patch/upstream/org.jpype.jar',
+        'adapters/ghidra/worker.py','adapters/ghidra/pcode_view.py','adapters/ghidra/jpype-patch/JPypeContext.java','adapters/ghidra/jpype-patch/upstream/org.jpype.jar',
         'adapters/ghidra/jpype-patch/LICENSE','adapters/ghidra/jpype-patch/UPSTREAM-NOTICE','adapters/ghidra/jpype-patch/NOTICE.txt','adapters/ghidra/jpype-patch/unicode-bootstrap.patch',
         'scripts/patch_ghidra_jpype.ps1','adapters/x64dbg/adapter.py','adapters/x64dbg/native/ig5-bridge.dp32','adapters/x64dbg/native/ig5-bridge.dp64','adapters/x64dbg/native/sha256.json',
         'scripts/runtime_pack.ps1','install.ps1','uninstall.ps1','cordis.patch.yml','README.md','HARNESS_PLUGIN.md','LICENSE','THIRD_PARTY_NOTICES.txt','third_party/sources/manifest.json')
@@ -286,8 +286,14 @@ function Assert-IG5PluginSource {
         if ($seen.ContainsKey($directory)) { throw "第三方源码目录重复: $($source.directory)" }
         $seen[$directory] = $true
         if (-not (Test-IG5Path $inventoryPath Leaf)) { throw "缺少第三方源码逐文件清单: $($source.fileInventory)" }
-        $inventory = Read-IG5Text $inventoryPath | ConvertFrom-Json
-        if (@($inventory.files).Count -ne [long]$source.fileCount -or [long]$inventory.fileCount -ne [long]$source.fileCount) { throw "第三方源码数量不符: $($source.directory)" }
-        Assert-IG5FileInventory $directory @($inventory.files) ([string]$source.directory)
+        $inventoryText = Read-IG5Text $inventoryPath
+        $inventory = $inventoryText | ConvertFrom-Json
+        # Fixed source acquisition emits raw row arrays; older archives use a
+        # { fileCount, files } envelope. Preserve both without member-enumerating
+        # an array's missing fileCount into thousands of null values.
+        $rawRows = $inventoryText.TrimStart().StartsWith('[')
+        $inventoryRows = if ($rawRows) { @($inventory) } else { @($inventory.files) }
+        if (@($inventoryRows).Count -ne [long]$source.fileCount -or (-not $rawRows -and [long]$inventory.fileCount -ne [long]$source.fileCount)) { throw "第三方源码数量不符: $($source.directory)" }
+        Assert-IG5FileInventory $directory @($inventoryRows) ([string]$source.directory)
     }
 }

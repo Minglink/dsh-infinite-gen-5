@@ -117,6 +117,57 @@ test('request generations reject old selections', () => {
   assert.equal(gate.isCurrent(first), false); assert.equal(gate.isCurrent(second), true); gate.next(); assert.equal(gate.isCurrent(second), false);
 });
 
+test('POSIX sample identities remain case-sensitive while Windows spellings match', () => {
+  assert.notEqual(ui.normalizedTarget('/home/user/A.exe'), ui.normalizedTarget('/home/user/a.exe'));
+  assert.equal(ui.normalizedTarget('C:/A/B.EXE'), ui.normalizedTarget('c:\\a\\b.exe'));
+});
+
+test('touch pinch preserves its focal point and clamps zoom; touch blocks open read-only', () => {
+  for (const viewport of [{ width: 329, height: 360 }, { width: 900, height: 440 }]) {
+    const graph = { width: 624, height: 700 }, fit = ui.cfgFitCamera(graph, viewport.width, viewport.height);
+    assert.ok(fit.x >= 11.99 && fit.y >= 11.99);
+    assert.ok(fit.x + graph.width * fit.scale <= viewport.width - 11.99);
+    assert.ok(fit.y + graph.height * fit.scale <= viewport.height - 11.99);
+  }
+  const start = ui.cfgPinchStart([{ x: 100, y: 100 }, { x: 200, y: 100 }], { scale: 1, x: 0, y: 0 });
+  const camera = ui.cfgPinchCamera(start, [{ x: 50, y: 100 }, { x: 250, y: 100 }]);
+  assert.equal(camera.scale, 2); assert.equal(camera.x, -150); assert.equal(camera.y, -100);
+  assert.equal(ui.cfgPinchCamera(start, [{ x: -10000, y: 100 }, { x: 10000, y: 100 }]).scale, 4);
+  const opened = [], h = harness(ui.CfgGraph, { cfg: { blocks: [{ id: 0, start: '0x1000', succs: [] }] }, onOpen: n => opened.push(n.start) });
+  h.render(); const svg = nodes(h.tree, n => n.type === 'svg')[0];
+  const event = (id, x, y) => ({pointerType: 'touch',pointerId:id,clientX:x,clientY:y,target:{closest:()=>({getAttribute:()=> '0'})},currentTarget:{setPointerCapture(){},getBoundingClientRect:()=>({width:800,left:0,top:0})}});
+  svg.props.onPointerDown(event(1,100,100)); svg.props.onPointerUp(event(1,100,100)); assert.deepEqual(opened, ['0x1000']);
+  svg.props.onPointerDown(event(2,100,100)); svg.props.onPointerMove(event(2,130,100)); svg.props.onPointerUp(event(2,130,100)); assert.equal(opened.length,1);
+  svg.props.onPointerDown(event(3,100,100)); svg.props.onPointerDown(event(4,200,100));
+  svg.props.onPointerMove(event(3,50,100)); svg.props.onPointerMove(event(4,250,100));
+  svg.props.onPointerUp(event(3,50,100)); svg.props.onPointerUp(event(4,250,100)); assert.equal(opened.length,1);
+  for (const id of [5,6,7]) svg.props.onPointerDown(event(id,100,100));
+  for (const id of [5,6,7]) svg.props.onPointerUp(event(id,100,100));
+  assert.equal(opened.length,1); h.unmount();
+});
+
+test('environment view reports missing local runtime and never assumes mobile execution', () => {
+  const h = harness(ui.EnvironmentCard, { config: { host: { id: 'linux-arm64', supported: true }, engines: [{ id: 'ghidra', available: false, source: 'bundled', reason: '<missing ARM64 runtime>' }] } });
+  h.render(); assert.match(text(h.tree), /Ghidra · 不可用/); assert.ok(markup(h.tree).includes('&lt;missing ARM64 runtime&gt;'));
+  h.render({ config: { host: { id: 'ios-arm64', supported: false }, engines: [] } }); assert.match(text(h.tree), /移动界面可用不代表引擎已移植/); h.unmount();
+});
+
+test('pending lazy CFG reads cannot replace a newer function or survive same-function reload', async () => {
+  const cfgReads = [];
+  request = url => {
+    const q = new URL(url, 'http://test').searchParams, type = q.get('type'), ea = q.get('ea');
+    if (type === 'cfg') { const d = deferred(); cfgReads.push({ ea, d }); return d.promise; }
+    return Promise.resolve(response(type === 'funcs' ? { funcs: [{ ea: '0x1000', name: 'one' }, { ea: '0x2000', name: 'two' }], total: 2 } : type === 'decompile' ? { ea, code: 'return 0;' } : { rows: [] }));
+  };
+  const h = harness(ui.FunctionsView, { target: '/home/sample.exe' }); h.render(); await settle(); h.render();
+  row(h.tree, 'one').props.onClick(); h.render(); button(h.tree, '控制流 (CFG)').props.onClick(); h.render();
+  row(h.tree, 'two').props.onClick(); h.render(); row(h.tree, 'two').props.onClick(); h.render();
+  assert.equal(cfgReads.length, 3);
+  cfgReads[2].d.resolve(response({ blocks: [], marker: 'current' })); await settle(); h.render();
+  for (const old of cfgReads.slice(0, 2)) old.d.resolve(response({ blocks: [], marker: 'stale' }));
+  await settle(); h.render(); assert.equal(nodes(h.tree, n => n.type === ui.CfgGraph)[0].props.cfg.marker, 'current'); h.unmount();
+});
+
 test('rapid function selections keep newest code, CFG and variable data', async () => {
   const pending = new Map();
   request = url => {
@@ -126,10 +177,11 @@ test('rapid function selections keep newest code, CFG and variable data', async 
   };
   const h = harness(ui.FunctionsView, { target: 'sample.exe' }); h.render(); await settle(); h.render();
   row(h.tree, 'first').props.onClick(); h.render(); row(h.tree, 'second').props.onClick();
-  for (const ea of ['0x2000', '0x1000']) for (const type of ['decompile', 'xrefs', 'calls', 'cfg', 'slice']) pending.get(`${type}:${ea}`).resolve(response(type === 'decompile' ? { ea, name: ea === '0x2000' ? 'second' : 'first', code: `code-${ea}` } : type === 'cfg' ? { blocks: [], edges: [], marker: ea } : type === 'slice' ? { variables: [{ name: `v-${ea}` }], marker: ea } : { rows: [] }));
+  assert.ok(!pending.has('cfg:0x2000') && !pending.has('slice:0x2000'), 'heavy views are requested on selection of that view');
+  for (const ea of ['0x2000', '0x1000']) for (const type of ['decompile', 'xrefs', 'calls']) pending.get(`${type}:${ea}`).resolve(response(type === 'decompile' ? { ea, name: ea === '0x2000' ? 'second' : 'first', code: `code-${ea}` } : { rows: [] }));
   await settle(); h.render(); assert.match(text(h.tree), /code-0x2000/); assert.ok(!text(h.tree).includes('code-0x1000'));
-  button(h.tree, '控制流 (CFG)').props.onClick(); h.render(); assert.equal(nodes(h.tree, n => n.type === ui.CfgGraph)[0].props.cfg.marker, '0x2000');
-  button(h.tree, '变量与切片').props.onClick(); h.render(); assert.match(text(h.tree), /v-0x2000/); assert.ok(!text(h.tree).includes('v-0x1000')); h.unmount();
+  button(h.tree, '控制流 (CFG)').props.onClick(); h.render(); pending.get('cfg:0x2000').resolve(response({ blocks: [], edges: [], marker: '0x2000' })); await settle(); h.render(); assert.equal(nodes(h.tree, n => n.type === ui.CfgGraph)[0].props.cfg.marker, '0x2000');
+  button(h.tree, '变量与切片').props.onClick(); h.render(); pending.get('slice:0x2000').resolve(response({ variables: [{ name: 'v-0x2000' }] })); await settle(); h.render(); assert.match(text(h.tree), /v-0x2000/); assert.ok(!text(h.tree).includes('v-0x1000')); h.unmount();
 });
 
 test('focused variable click requests var and highlights returned source line', async () => {
@@ -138,7 +190,7 @@ test('focused variable click requests var and highlights returned source line', 
     urls.push(url); const q = new URL(url, 'http://test').searchParams, type = q.get('type');
     return Promise.resolve(response(type === 'funcs' ? { funcs: [{ ea: '0x1000', name: 'main', size: 4 }], total: 1 } : type === 'decompile' ? { ea: '0x1000', name: 'main', code: 'key = 2;' } : type === 'slice' ? { variables: [{ name: 'key', type: 'int', size: 4 }], slice_lines: q.get('var') ? [{ line_no: 4, code: 'key = 2;' }] : [] } : type === 'cfg' ? { blocks: [], edges: [] } : { rows: [] }));
   };
-  const h = harness(ui.FunctionsView, { target: 'sample.exe' }); h.render(); await settle(); h.render(); row(h.tree, 'main').props.onClick(); await settle(); h.render(); button(h.tree, '变量与切片').props.onClick(); h.render(); row(h.tree, 'key').props.onClick(); await settle(); h.render();
+  const h = harness(ui.FunctionsView, { target: 'sample.exe' }); h.render(); await settle(); h.render(); row(h.tree, 'main').props.onClick(); await settle(); h.render(); button(h.tree, '变量与切片').props.onClick(); h.render(); await settle(); h.render(); row(h.tree, 'key').props.onClick(); await settle(); h.render();
   assert.ok(urls.some(url => new URL(url, 'http://test').searchParams.get('var') === 'key')); assert.equal(nodes(h.tree, n => n.type === 'mark').map(text).join(''), 'key'); h.unmount();
 });
 
@@ -151,13 +203,13 @@ test('switching target invalidates pending function reads and removes old code',
   };
   const h = harness(ui.FunctionsView, { target: 'old.exe' }); h.render(); await settle(); h.render(); row(h.tree, 'old.exe').props.onClick(); h.render(); h.render({ target: 'new.exe' });
   for (const { d, type } of pending) d.resolve(response(type === 'decompile' ? { ea: '0x1000', name: 'old', code: 'STALE_CODE' } : type === 'cfg' ? { blocks: [], edges: [] } : type === 'slice' ? { variables: [] } : { rows: [] }));
-  await settle(); h.render(); assert.ok(!text(h.tree).includes('STALE_CODE')); assert.match(text(h.tree), /new.exe/); assert.match(text(h.tree), /在左侧列表中选择任意函数/); h.unmount();
+  await settle(); h.render(); assert.ok(!text(h.tree).includes('STALE_CODE')); assert.match(text(h.tree), /new.exe/); assert.match(text(h.tree), /选择函数，查看当前静态引擎/); h.unmount();
 });
 
 test('CFG block jump uses only read-only disassembly and displays instructions', async () => {
   const urls = [], block = { id: 0, start: '0x1000', end: '0x1004', succs: [], insns: 1 };
   request = url => { urls.push(url); const q = new URL(url, 'http://test').searchParams, type = q.get('type'); return Promise.resolve(response(type === 'funcs' ? { funcs: [{ ea: '0x1000', name: 'main', size: 4 }], total: 1 } : type === 'decompile' ? { ea: '0x1000', name: 'main', code: 'return 0;' } : type === 'cfg' ? { blocks: [block], edges: [] } : type === 'slice' ? { variables: [] } : type === 'disasm' ? { rows: [{ ea: '0x1000', bytes: '90', text: 'nop' }] } : { rows: [] })); };
-  const h = harness(ui.FunctionsView, { target: 'sample.exe' }); h.render(); await settle(); h.render(); row(h.tree, 'main').props.onClick(); await settle(); h.render(); button(h.tree, '控制流 (CFG)').props.onClick(); h.render(); nodes(h.tree, n => n.type === ui.CfgGraph)[0].props.onOpen(block); await settle(); h.render();
+  const h = harness(ui.FunctionsView, { target: 'sample.exe' }); h.render(); await settle(); h.render(); row(h.tree, 'main').props.onClick(); await settle(); h.render(); button(h.tree, '控制流 (CFG)').props.onClick(); h.render(); await settle(); h.render(); nodes(h.tree, n => n.type === ui.CfgGraph)[0].props.onOpen(block); await settle(); h.render();
   assert.match(text(h.tree), /反汇编（只读）/); assert.match(text(h.tree), /nop/); assert.ok(urls.some(url => url.includes('type=disasm'))); h.unmount();
 });
 

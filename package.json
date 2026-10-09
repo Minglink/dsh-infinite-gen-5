@@ -32,7 +32,8 @@
     "install.ps1",
     "uninstall.ps1",
     "LICENSE",
-    "THIRD_PARTY_NOTICES.txt"
+    "THIRD_PARTY_NOTICES.txt",
+    "docs/"
   ],
   "scripts": {
     "harness:check": "node --check index.js && node --check client.js",
@@ -45,6 +46,10 @@
     "test:advanced": "node scripts/test_advanced_runtime.mjs",
     "test:workflow": "node scripts/test_workflow.mjs",
     "test:client": "node scripts/test_client.mjs",
+    "test:cpu": "python -B scripts/test_cpu_emulator.py",
+    "test:platform": "node scripts/test_host_platform.mjs",
+    "test:transport": "node scripts/test_worker_transport.mjs",
+    "test:x64dbg-features": "node scripts/test_x64dbg_features.mjs",
     "test:semantic-diff": "node scripts/test_semantic_diff.mjs",
     "test:host-reliability": "node scripts/test_host_reliability.mjs",
     "test:debug-reliability": "node scripts/test_debug_host_queue.mjs && node scripts/test_debug_reliability.mjs",

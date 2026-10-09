@@ -21,7 +21,7 @@
 - 微码原生 filter 管线、多级真实 IR、临时 IR optimize 与受限 `xor-self/sub-self` optinsn 规则已验证。隔离构造真实临时 MBA 时两种规则各命中 1 次，`mov #0`/源清空/目的保留及原生 optimize、verify、finally remove 通过，IDB 字节不变；自然夹具自定义规则仍 `rule_hits=0`，不得声称自然函数发生规则改写。未实现通用去平坦化。
 - MSVC64 继承及 Itanium class/SI/VMI 已验证生成 PE 夹具中的真实字节布局，不等于原生 Linux ELF 装载验证。调用解析要求显式 `table+offset`，不自动推导寄存器来源。
 - `ig5_bindiff` 使用多特征启发式、变更块、歧义和截断信息；`[rcx+4]`→`[rcx+8]` 已在生成 PE 夹具中验证 matched+changed/变更块，不得把评分当成语义等价证明或自动漏洞确认。
-- 仿真使用插件内 vendored Unicorn 2.1.4，仅 x86/x64，复制内存最多 64 MiB，无 OS/import/TLS 仿真；保留返回值、内存与超时/fault 结果，不改引擎 site-packages。依赖锁定见 `worker/requirements-emulation.txt`；分发时保留 `worker/vendor/NOTICE.txt` 和完整上游许可证，项目自身许可证不替代依赖许可证。
+- 仿真使用插件内 vendored Unicorn 2.1.4 和公共 `MemoryImage` / `cpu_emulator`，支持 x86/x64/ARM64 CPU 与明确 ABI，复制内存最多 64 MiB，无 OS/import/TLS 仿真；syscall/sysenter/interrupt 明确中止，超时、指令上限与 HLT 分开返回，映射页统一 RWX 不检验真实页保护。Reverse provider 仍仅提供 x86/x64；ARM64 已在 Ghidra + Windows Unicorn 验证，不代表 ARM64 手机宿主已移植。依赖锁定见 `worker/requirements-emulation.txt`；分发保留原始 RECORD、裁剪记录与完整上游许可证，静态 unicorn.lib 裁剪不改实际 DLL。
 - 日志与产物位于 `C:\Users\Administrator\.dsh\ig5\artifacts`；检查本次启动新增的 `ig5-diag.log` 记录。
 
 - v1.0.0 统一三引擎路由但不统一可写数据库。静态工具显式传 `engine=reverse|ghidra`，`ig5_ir` 读取真实 Ghidra raw/high p-code，Reverse 用 `ig5_microcode`，不得混同 IR 级别或能力。Ghidra-only（`reverse:false`）不要求商业安装；不支持的能力依据实际 capabilities 拒绝。
@@ -30,11 +30,11 @@
 - 数据库排他与修订按物理文件身份识别硬链接及目录别名，兼容未创建路径；多条历史记录冲突必须明确拒绝，不能猜测合并修订。file/RVA 转换同时核对来源和目的唯一映射；保留十六进制/BigInt，不用 Number 中转 64 位地址。
 - `source/address_ref.js` 使用十六进制字符串/BigInt 保持 64 位地址精度；VA/RVA/file/runtime/stack/register 等空间不得混用。转换要求明确 imagebase/section/已加载模块映射，BSS/overlay 不假造文件偏移。动态地址核对 runId/moduleLoadEpoch/stopSeq，旧暂停上下文不能继续执行。
 - `ig5_sync` 仅在同 hash 的两个静态引擎数据库间显式复制所选 RVA 名称、行尾注释、有限字节。preview 和 apply 都经工具级审批；apply 必须核验 digest、hash、attachments、revisions 与前后值，并锁定两边队列；部分失败返回 applied/remaining、atomic=false，已尝试计划不可重放。不得宣传自动全量同步、类型同步或跨引擎原子 Undo。
-- x64dbg 使用自建 ig5-native SDK+NamedPipe bridge，不依赖 automate/ZeroMQ。headless 不等于不执行样本；load 不执行，start/continue/trace 必须有该目标运行授权及审批。公开工具链已验证 x64 中文路径 PE 的 ASLR/RVA 断点、regs/readmem/modules、step/setreg、受限 trace、结构化 AV、控制 owner/takeover、过期 run/stop 拒绝、只读缓存 HTTP 与 stop/dispose；x64/x86 已分别完成真实 headless 闭环，14 项 fake、管道 DACL、取消/超时/强杀清理验证通过；不能外推任意样本。
+- x64dbg 使用自建 ig5-native SDK+NamedPipe bridge，不依赖 automate/ZeroMQ。headless 不等于不执行样本；load 不执行，start/continue/trace 必须有该目标运行授权及审批。公开工具链已验证 x64 中文路径 PE 的 ASLR/RVA 断点、regs/readmem/modules、step/setreg、受限 trace、结构化 AV、控制 owner/takeover、过期 run/stop 拒绝、只读缓存 HTTP 与 stop/dispose；x64/x86 真实 headless 闭环、24 项 adapter fake、管道 DACL、取消/超时/退出清理均通过。线程、当前线程调用栈与硬件断点已接入；两架构四槽各自通过 execute→删除/替换→write watch→真实写入命中共 8 流程。TitanEngine 回调补丁保留用户在暂停回调期间替换的断点，不误删新槽；不能外推任意样本。
 - 工作台静态选择器必须隔离 session key/target/engine，排除 x64dbg 调试会话。原生 openView 焦点绑定 engine/target/artifact；运行态页仅读缓存，不能借 GET 启动调试器或执行 RPC。Ghidra p-code 结果应标来源及截断。
 - 运行态缓存 state 必须带 scope，并在 render 时核对 session/target/engine/artifact/attachment；目标切换立即隐藏旧快照，不能仅依赖 effect 清理或等下一次响应。
 - 完整发行包内置 `runtimes/ghidra` 与 `runtimes/x64dbg`，默认 install 离线校验并带入插件，不依赖另跑 setup 或外部 `.dsh/ig5/runtimes`。manifest 相对路径保持可移动，显式 runtime 配置覆盖仍受支持；不要修改商业安装、全局 Python 或 system PATH。默认优先可用的已授权本机 Reverse，否则随包 Ghidra，用户可显式 engine。Reverse 为外部商业引擎，只使用已有授权本机安装，不称内置自研、不随包附程序或许可；DSH 也不随包。
-- `third_party/sources/{ghidra-master,x64dbg-development,x64dbg-runtime}` 为保留原内容/许可的上游源码归档，来源、固定gitlinks、文件hash、链接materialize与已知缺件在 manifest.json。桌面 Ghidra 12.3 DEV 不等于随包12.1.4对应源码；development原修订未知，固定补充模块不得冒称原gitlinks。官方运行件加IG5 bridge不宣称整套由桌面checkout编译。源码存在不等于已暴露功能或已具备全离线重编工具链。保留全部上游许可，项目NC条款不覆盖第三方。
+- `third_party/sources/{ghidra-12.1.4,ghidra-master,x64dbg-development,x64dbg-runtime}` 保留固定来源、逐文件 hash 与上游许可。随包 Ghidra 为固定 `Ghidra_12.1.4_build` 完整 Java/PyGhidra/native 的本地 DEV 构建，目录 PUBLIC 仅兼容别名；12.3 DEV 桌面原档独立保留。x64dbg 固定源码及 `third_party/x64dbg-build` 补丁已重建 x86/x64 headless/dbg/bridge/loaddll/TitanEngine，GUI 与 proof 列明链接依赖仍预编译。development 原修订未知，不冒称补充模块是原 gitlinks。源码存在不等于已暴露全部功能或随用户包提供全部离线构建工具链；保留所有上游许可，项目 NC 条款不覆盖第三方。
 - 安装/打包不能按目录basename把源码中的真实 projects/sessions/downloads 等目录误当运行缓存删掉；第三方逐文件清单应在复制后仍匹配。当前远端仓库未发布本轮自包含资产，禁止宣传现有GitHub下载已包含完整运行包。维护者setup属于联网资产重建，普通安装无需它；用户项目与缓存默认不分发。
 - Ghidra 默认 analysis_profile=interactive，仅跳过批量 Decompiler Parameter ID，函数反编译仍可用；full 显式选择。ig5_open analysis_timeout 为 1–600 秒。真实 notepad interactive 约 85 秒/853 函数、无超时、分析后 decompile 子进程数为 0，不作通用性能保证。分析预算到期须保留并传播 partial/analysis，作业、status 和工作台标明“部分分析结果”，不能把可读结果当作全分析完成。项目自有代码为 CC BY-NC-SA 4.0，第三方组件按各自许可保留通知，不受项目 NC 条款覆盖。
 - 引擎提交后若修订元数据持久化失败，必须捕获并返回明确错误、回收会话，不能让 stdout 事件异常终止宿主，也不能继续使用未更新的 dbRevision；此故障路径已回归。

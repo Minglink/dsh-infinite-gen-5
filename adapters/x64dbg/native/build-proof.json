@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "protocol": 2,
+  "upstreamCommit": "9c8ca1cae0b6d56cc44f31fddcb10e3b02ffbb87",
+  "built": [
+    {
+      "architecture": "x64",
+      "compiler": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\HostX64\\x64\\cl.exe",
+      "compilerVersion": "19.51.36260.0",
+      "sourceSHA256": "d49c6d7a9af82b2acd5c6bc52acdcd5b83a246931f6cb6fa425d9fe96aedf755",
+      "imports": [
+        {
+          "sha256": "8f076cf09fcba0f72fcdb682021a6267521a8ffc6f53d6c05a1bd195de2428bb",
+          "path": "x64bridge.lib"
+        },
+        {
+          "sha256": "b57b517e46e19821bec30410b86799ff6a31c4785fb17ab1be4f609498f0b7a6",
+          "path": "x64dbg.lib"
+        }
+      ],
+      "product": "ig5-bridge.dp64",
+      "productSHA256": "2cc4dddae642e46f380ebae007e7f99a9e2d9485e6c78bc3c7288d73ef2e9324"
+    },
+    {
+      "architecture": "x86",
+      "compiler": "C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\HostX86\\x86\\cl.exe",
+      "compilerVersion": "19.51.36260.0",
+      "sourceSHA256": "d49c6d7a9af82b2acd5c6bc52acdcd5b83a246931f6cb6fa425d9fe96aedf755",
+      "imports": [
+        {
+          "sha256": "b96871f8700da49af0fec76c363d3a2fca25912953f949b11cb4d13bdd55c077",
+          "path": "x32bridge.lib"
+        },
+        {
+          "sha256": "1fd38a0b6db891073d4fda97b5e34563f0615f7526a2e9ed56483efb7a36e8e7",
+          "path": "x32dbg.lib"
+        }
+      ],
+      "product": "ig5-bridge.dp32",
+      "productSHA256": "3a8f59554cf124d3626d3502f6426b8a692215ed6c6d405995a54604cc1db599"
+    }
+  ],
+  "createdUtc": "2026-10-09T15:45:34.2986907Z"
+}

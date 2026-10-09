@@ -1,9 +1,15 @@
-Unicorn 2.1.4, Windows x64, unmodified upstream wheel
+Unicorn 2.1.4, Windows x64, runtime subset of the upstream wheel
 Wheel: unicorn-2.1.4-cp37-abi3-win_amd64.whl
 SHA256: d7107500c64ce5c168fbff6bef9485b5db1350050036f4cea568650cf8bdbdf5
 Package provenance: https://pypi.org/project/unicorn/2.1.4/
 Corresponding source: https://github.com/unicorn-engine/unicorn/tree/2.1.4
 
+The unused 49,894,000-byte static linking archive unicorn/lib/unicorn.lib is
+omitted. Native unicorn.dll, Python bindings and component licenses are
+unchanged. runtime-subset.json records the omitted file's SHA-256. Original
+upstream RECORD is retained in provenance/; the installed RECORD omits that
+file. scripts/prepare_unicorn_runtime.ps1 reproduces this pruning with a pinned
+hash check. This is not an unmodified complete wheel distribution.
 Upstream Python package metadata is retained in unicorn-2.1.4.dist-info.
 The Python package metadata identifies the bindings as BSD licensed; the
 Unicorn native engine identifies its license as GPLv2. Upstream COPYING,
@@ -13,4 +19,6 @@ the license of IG5's own code does not replace them. See upstream source files
 for component-specific notices and build scripts.
 
 This dependency is loaded from the plugin's worker/vendor directory.
-The Reverse engine installation and its site-packages are not modified.
+Both Reverse and Ghidra providers can load this CPU runtime. Their installations
+and global site-packages are not modified. This Windows x64 native dependency
+does not establish Linux ARM64 or iOS runtime support.

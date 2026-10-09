@@ -34,7 +34,6 @@ unicorn/include/unicorn/tricore.h,sha256=SmuqdWyRwu90gT2VgA1VbomxM6hg6mlwFgMy8yq
 unicorn/include/unicorn/unicorn.h,sha256=BBSzlIqL3T8oRR9_KuA7XHkNCOqT5uArLk2xmg3klQc,54032
 unicorn/include/unicorn/x86.h,sha256=3XWnaApVUnF6Sr5VnBD1uAX3xorm8r6XKTh_IwCGDA8,41722
 unicorn/lib/unicorn.dll,sha256=AQ2F3OhLj2_67D1UIPG193aPhZ64Mb5XTH2iPmVu6PE,9598976
-unicorn/lib/unicorn.lib,sha256=YKlf-2VylCt9sfV5AdI-Zk7SKlSn2S38rRX8Pj7x9yQ,49894000
 unicorn/m68k_const.py,sha256=r5XzLygQ_hmIiscj23DHTH-x3yvIujV47eCii47KlKc,1144
 unicorn/mips_const.py,sha256=CHkloloShmLglbuGGvPDiipsUi_CHiIuMbca6sqqY9M,5160
 unicorn/ppc_const.py,sha256=EeDFKhwTeHQ1IRn7PRYhY5B5_tpldO5XUnHvaDoKjxc,10880

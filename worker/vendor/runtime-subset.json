@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "wheel": "unicorn-2.1.4-cp37-abi3-win_amd64.whl",
+  "wheelSha256": "d7107500c64ce5c168fbff6bef9485b5db1350050036f4cea568650cf8bdbdf5",
+  "source": "https://pypi.org/project/unicorn/2.1.4/",
+  "removed": [
+    {
+      "sha256": "60a95ffb6572942b7db1f57901d23e664ed22a54a7d92dfcad15fc3e3ef1f724",
+      "path": "unicorn/lib/unicorn.lib",
+      "reason": "Unused static linking archive; Python runtime loads unicorn.dll",
+      "bytes": 49894000
+    }
+  ],
+  "originalRecord": "provenance/unicorn-2.1.4-original-RECORD.csv",
+  "binariesModified": false
+}

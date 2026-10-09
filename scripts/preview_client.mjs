@@ -43,11 +43,12 @@ const target='C:\\\\fixtures\\\\sample.exe', declaration='struct Packet {\\n  un
 const variables=[{name:'key',type:'unsigned int',size:4,is_arg:true},{name:'buffer',type:'char *',size:8,is_arg:true},{name:'i',type:'int',size:4,is_arg:false}];
 const code='int decode_packet(unsigned int key, char *buffer)\\n{\\n  for (int i = 0; i < 32; ++i)\\n    buffer[i] ^= key;\\n  return key != 0;\\n}';
 const journal=Array.from({length:50},(_,i)=>({ts:'2026-10-09T12:'+String(i).padStart(2,'0')+':00Z',tool:i%3?'ig5_patch_bytes':'ig5_comment',args:{target,engine:i%2?'ghidra':'reverse',ea:'0x140001000'},detail:i%3?{before:'90 90',after:'CC 90',fileOffset:i}: {note:'人工审阅备注 <scr'+'ipt>仅显示文本</scr'+'ipt>'},isError:i===7}));
+const config={host:{id:'win32-x64',supported:true,execution:'local-node-host'},runtimeSource:{ghidra:'bundled',x64dbg:'bundled'},engines:[{id:'reverse',available:true},{id:'ghidra',available:true,source:'bundled'},{id:'x64dbg',available:true,source:'bundled'}]};
 window.__ig5Requests=[];window.__ig5Focuses=[];
 window.fetch=async(url,options)=>{
  const u=new URL(url,location.href),q=u.searchParams,type=q.get('type'),engine=q.get('engine')||'reverse';let data;window.__ig5Requests.push({url:String(url),method:options&&options.method||'GET'});
  if(u.pathname==='/ig5-diag')return {ok:true,json:async()=>({ok:true})};
- if(u.pathname==='/ig5-jobs')return {ok:true,json:async()=>({now:Date.now(),jobs:[],sessions:['reverse','ghidra','x64dbg'].map((engine,i)=>({key:engine+':fixture',target,engine,projectId:'project_fixture',artifactId:'artifact_fixture_hash',dbRevision:i,alive:true,n_funcs:2,n_segs:5,n_imports:12,bits:64,cpu:'x86_64',file_type:'PE'}))})};
+ if(u.pathname==='/ig5-jobs')return {ok:true,json:async()=>({config,now:Date.now(),jobs:[],sessions:['reverse','ghidra','x64dbg'].map((engine,i)=>({key:engine+':fixture',target,engine,projectId:'project_fixture',artifactId:'artifact_fixture_hash',dbRevision:i,alive:true,n_funcs:2,n_segs:5,n_imports:12,bits:64,cpu:'x86_64',file_type:'PE'}))})};
  if(u.pathname!=='/ig5-data'||(options&&options.method&&options.method!=='GET'))throw Error('preview refuses write requests');
  switch(type){
  case 'funcs': data={funcs:[{ea:'0x140001000',name:'decode_packet',size:148},{ea:'0x140002000',name:'check_header',size:40}],total:2};break;

@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -8,6 +7,7 @@ import { defineAdvancedTools } from './advanced_tools.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
 import { runtimeConfiguration, engineId, terminateTree } from './engine_runtime.js';
+import { spawnWorker, attachWorker, doctorWorker } from './source/worker_transport.js';
 import { ProjectStore } from './source/project_store.js';
 import { defineIntegrationTools } from './integration_tools.js';
 
@@ -23,7 +23,7 @@ const WORKER = path.join(HERE, 'worker', 'ig5_worker.py');
 // ── Config（cordis.yml 插件行可覆盖；misconfiguration fails loud） ──────────
 function resolveConfig(cfg = {}) {
   const runtime = runtimeConfiguration(cfg);
-  const idaDir = cfg.reverse === false ? null : cfg.idaDir || process.env.IG5_IDA_DIR || findIdaDir();
+  const idaDir = cfg.reverse === false || runtime.host.id !== 'win32-x64' ? null : cfg.idaDir || process.env.IG5_IDA_DIR || findIdaDir();
   const reverseAvailable = !!idaDir && fs.existsSync(path.join(idaDir, 'idalib'));
   const pythonCandidates = [
     cfg.pythonExe,
@@ -118,7 +118,8 @@ class WorkerManager {
   }
 
   sessionKey(target, engine = this.scope.getStore()?.engine || this.cfg.defaultEngine || 'reverse') {
-    const base = path.resolve(String(target)).toLowerCase();
+    const absolute = path.resolve(String(target));
+    const base = (this.cfg.host?.platform || process.platform) === 'win32' ? absolute.toLowerCase() : absolute;
     return engine === 'reverse' ? base : `${base}::${engineId(engine)}`;
   }
 
@@ -175,46 +176,9 @@ class WorkerManager {
   }
 
   spawnWorker(engine = this.scope.getStore()?.engine || this.cfg.defaultEngine || 'reverse') {
-    let child;
-    engine = engineId(engine);
-    let executable, args, env = { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' };
-    if (engine === 'reverse') {
-      if (!this.cfg.reverseAvailable) throw new Error('Reverse runtime is unavailable; configure it or use engine=ghidra');
-      executable = this.cfg.pythonExe;
-      args = ['-X', 'utf8', WORKER, '--ida-dir', this.cfg.idaDir];
-    } else {
-      const pack = this.cfg[engine];
-      if (!pack?.available) throw new Error(`${engine} runtime is unavailable: ${pack?.reason || 'not configured'}`);
-      executable = pack.pythonExe;
-      args = ['-I', '-B', path.join(HERE, 'adapters', engine, engine === 'ghidra' ? 'worker.py' : 'adapter.py')];
-      if (engine === 'ghidra') Object.assign(env, { IG5_GHIDRA_HOME: pack.ghidraHome, IG5_JAVA_HOME: pack.javaHome,
-        IG5_GHIDRA_PROJECT_ROOT: path.join(this.cfg.projectRoot, 'ghidra-databases') });
-      else Object.assign(env, { IG5_X64DBG_RUNTIME: pack.manifest, IG5_X64DBG_STATE_ROOT: path.join(this.cfg.stateRoot, 'x64dbg') });
-    }
-    try {
-      child = spawn(
-        executable,
-        args,
-        {
-          stdio: ['pipe', 'pipe', 'pipe'],
-          windowsHide: true,
-          // Windows Python otherwise decodes stdio with the ANSI code page and a
-          // non-ASCII target path arrives as mojibake.
-          env,
-        },
-      );
-    } catch (error) {
-      throw new Error(publicEngineError(error, this.cfg));
-    }
-    // Admission awaits a promise before installing the full session listeners.
-    // An ENOENT spawn error can arrive in that gap on Node's nextTick queue.
-    child.on('error', (error) => { child.__ig5SpawnError = error; });
-    child.stderr?.on('data', (d) => {
-      const tail = String(d);
-      const s = child.__ig5;
-      if (s) s.stderrTail = (s.stderrTail + tail).slice(-4000);
+    return spawnWorker(this.cfg, engineId(engine), HERE, {
+      formatError: error => this.rpcError(error), timers: { setTimeout, clearTimeout },
     });
-    return child;
   }
 
   async open(target, autoAnalysis = true, options = {}) {
@@ -241,16 +205,7 @@ class WorkerManager {
       const session = await this.admitSession(key, target, engine);
       const proc = session.proc;
 
-      let buf = '';
-      const onLine = (line) => {
-        line = line.trim();
-        if (!line) return;
-        let obj = null;
-        try {
-          obj = JSON.parse(line);
-        } catch {
-          return; // IDA 插件横幅噪音，忽略
-        }
+      const onLine = (obj) => {
         if (obj.ig5 === 'ready') {
           session.ready = true;
           session.capabilities = obj.capabilities || null;
@@ -303,56 +258,20 @@ class WorkerManager {
           }
         }
       };
-      proc.stdout.on('data', (d) => {
-        buf += d.toString('utf8');
-        let idx;
-        while ((idx = buf.indexOf('\n')) >= 0) {
-          onLine(buf.slice(0, idx));
-          buf = buf.slice(idx + 1);
-        }
+      session.client = attachWorker(proc, {
+        session, onMessage: onLine, formatError: error => this.rpcError(error),
+        timers: { setTimeout, clearTimeout },
+        onExit: () => {
+          // Includes pipe/protocol failures as well as actual exit; never leave an untracked worker alive.
+          terminateTree(proc);
+          if (session.attachmentId) { try { this.projects.closeAttachment(session.attachmentId); } catch {} }
+          if (this.sessions.get(key) === session) this.sessions.delete(key);
+          if (session.engine === 'x64dbg') this.debugOwners.delete(path.resolve(session.target).toLowerCase());
+          session.runtime = null; session.controlOwner = null;
+        },
       });
-      proc.stdin.on?.('error', (error) => {
-        for (const pending of session.pending.values()) { clearTimeout(pending.timer); pending.removeAbort?.(); pending.reject(error); }
-        session.pending.clear();
-      });
-
-      const readyOrExit = new Promise((resolve, reject) => {
-        if (proc.__ig5SpawnError) { reject(new Error(publicEngineError(proc.__ig5SpawnError, this.cfg))); return; }
-        const t = setTimeout(
-          () => reject(new Error(`worker 未在 60s 内就绪\n${publicEngineError(session.stderrTail, this.cfg).slice(-600)}`)),
-          60_000,
-        );
-        proc.once('exit', (code) => {
-          clearTimeout(t);
-          reject(new Error(`worker 提前退出 code=${code}\n${publicEngineError(session.stderrTail, this.cfg).slice(-600)}`));
-        });
-        proc.once('error', (error) => {
-          clearTimeout(t);
-          reject(new Error(publicEngineError(error, this.cfg)));
-        });
-        proc.stdout.on('data', function poll() {
-          if (session.ready) {
-            clearTimeout(t);
-            proc.stdout.removeListener('data', poll);
-            resolve();
-          }
-        });
-      });
-      try { await readyOrExit; } catch (error) { this.killSession(key); throw error; }
-      proc.removeAllListeners('exit');
-      proc.on('exit', (code) => {
-        session.ready = false;
-        for (const pending of session.pending.values()) {
-          clearTimeout(pending.timer);
-          pending.removeAbort?.();
-          pending.reject(new Error(publicEngineError(`worker exited code=${code}: ${session.stderrTail.slice(-600)}`, this.cfg)));
-        }
-        session.pending.clear();
-        if (session.attachmentId) { try { this.projects.closeAttachment(session.attachmentId); } catch {} }
-        if (this.sessions.get(key) === session) this.sessions.delete(key);
-        if (session.engine === 'x64dbg') this.debugOwners.delete(path.resolve(session.target).toLowerCase());
-        session.runtime = null; session.controlOwner = null;
-      });
+      try { await session.client.waitReady(60_000); }
+      catch (error) { this.killSession(key); throw error; }
 
       session.lastOp = 'open';
       session.progress = null;
@@ -403,39 +322,10 @@ class WorkerManager {
     if (session.pending.size >= 64) throw new Error('Worker queue is full; wait for current operations to finish');
     this.checkCancelled();
     const signal = this.scope.getStore()?.signal;
-    const id = ++session.seq;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        session.pending.get(id)?.removeAbort?.();
-        session.pending.delete(id);
-        this.killSession(session.key); // 超时 = 进程级回收，守护逻辑的最小集
-        reject(new Error(`worker rpc 超时（${method}，${timeoutMs}ms），已回收该 worker，可重新 ig5_open`));
-      }, timeoutMs);
-      const pending = {
-        method, params,
-        resolve,
-        reject,
-        timer,
-        onProgress: typeof onProgress === 'function' ? onProgress : undefined,
-      };
-      if (signal) {
-        const abort = () => {
-          pending.cancelled = true;
-          if (session.engine === 'x64dbg') {
-            // The adapter matches this ID; it must never cancel an unrelated request.
-            session.proc.stdin.write(JSON.stringify({ id: ++session.seq, method: 'cancel', params: { requestId: id } }) + '\n');
-          } else if (!this.isMutation(method, params)) {
-            reject(Object.assign(new Error('IG5 read cancelled; engine result will be discarded'), { code: 'ABORT_ERR' }));
-          }
-          // A running static write may already be committed. Keep its response and
-          // revision bookkeeping, rather than falsely claiming rollback or killing it.
-        };
-        signal.addEventListener('abort', abort, { once: true });
-        pending.removeAbort = () => signal.removeEventListener('abort', abort);
-      }
-      session.pending.set(id, pending);
-      session.lastOp = method;
-      session.proc.stdin.write(JSON.stringify({ id, method, params }) + '\n');
+    const client = session.client || attachWorker(session.proc, { session, formatError: error => this.rpcError(error) });
+    return client.request(session, method, params, {
+      timeoutMs, signal, onProgress, mutation: this.isMutation(method, params),
+      onTimeout: () => this.killSession(session.key),
     }).catch((error) => { throw this.rpcError(error); });
   }
 
@@ -489,6 +379,10 @@ class WorkerManager {
       throw new Error(`Target already has a ${owner} debug session; stop it before switching debugger`);
     }
     const debuggerEngine = backend === 'x64dbg' ? 'x64dbg' : 'reverse';
+    if (debuggerEngine !== 'x64dbg' && (['threads', 'callstack'].includes(params.op)
+        || ['bpt', 'unbpt'].includes(params.op) && params.kind === 'hardware')) {
+      throw Object.assign(new Error('Threads, callstack and hardware breakpoints require backend=x64dbg; this Reverse debugger does not advertise them'), { code: 'unsupported' });
+    }
     if (['load', 'start'].includes(params.op)) {
       const executedPath = params.path || session.target;
       if (createHash('sha256').update(fs.readFileSync(executedPath)).digest('hex') !== session.sha256) {
@@ -508,7 +402,7 @@ class WorkerManager {
       throw new Error('This debugger requires a Reverse session; select backend=x64dbg for Ghidra targets');
     }
     const caller = this.scope.getStore()?.agentId || 'local';
-    const readOnly = ['regs', 'readmem', 'state', 'event', 'modules'].includes(params.op);
+    const readOnly = ['regs', 'readmem', 'state', 'event', 'modules', 'threads', 'callstack'].includes(params.op);
     if (!readOnly && debugSession.controlOwner && debugSession.controlOwner !== caller && params.control !== 'takeover') {
       throw new Error('Debugger is controlled by another agent; explicitly request approved control=takeover before changing its state');
     }
@@ -556,38 +450,20 @@ class WorkerManager {
   async doctor(engine = this.scope.getStore()?.engine || this.cfg.defaultEngine) {
     const child = this.spawnWorker(engine);
     try {
-      return await new Promise((resolve, reject) => {
-        let buffer = '', stderr = '';
-        const timer = setTimeout(() => { reject(new Error(`${engine} self-check timed out`)); }, 90_000);
-        const finish = (error, value) => { clearTimeout(timer); error ? reject(error) : resolve(value); };
-        child.stderr.on('data', (data) => { stderr = (stderr + data.toString()).slice(-1000); });
-        child.once('error', (error) => finish(error));
-        child.once('exit', (code) => finish(new Error(`${engine} self-check exited ${code}: ${stderr}`)));
-        child.stdout.on('data', (data) => {
-          buffer += data.toString('utf8');
-          let end;
-          while ((end = buffer.indexOf('\n')) >= 0) {
-            const line = buffer.slice(0, end); buffer = buffer.slice(end + 1);
-            let response; try { response = JSON.parse(line); } catch { continue; }
-            if (response.id !== 0) continue;
-            if (response.error) finish(new Error(publicEngineError(response.error, this.cfg)));
-            else if (engine === 'reverse') finish(null, { ok: true, engine: 'Reverse', python: response.result?.python,
-              runtimeReady: response.result?.idalib === 'loaded', caps: {
-                planAndWait: response.result?.caps?.['ida_auto.plan_and_wait'] === true,
-                wait: response.result?.caps?.['ida_auto.auto_wait'] === true,
-                makeCode: response.result?.caps?.['ida_auto.auto_make_code'] === true } });
-            else finish(null, { ...response.result, engine, runtimeReady: true });
-          }
-        });
-        child.stdin.write(JSON.stringify({ id: 0, method: 'doctor', params: {} }) + '\n');
-      });
+      const result = await doctorWorker(child, { formatError: error => this.rpcError(error) });
+      if (engine === 'reverse') return { ok: true, engine: 'Reverse', python: result?.python,
+        runtimeReady: result?.idalib === 'loaded', caps: {
+          planAndWait: result?.caps?.['ida_auto.plan_and_wait'] === true,
+          wait: result?.caps?.['ida_auto.auto_wait'] === true,
+          makeCode: result?.caps?.['ida_auto.auto_make_code'] === true } };
+      return { ...result, engine, runtimeReady: true };
     } finally { terminateTree(child); }
   }
 
   engines() {
     return [{ id: 'reverse', label: 'Reverse', available: this.cfg.reverseAvailable, default: this.cfg.defaultEngine === 'reverse' },
       ...['ghidra', 'x64dbg'].map((id) => ({ id, label: id === 'ghidra' ? 'Ghidra' : 'x64dbg',
-        available: !!this.cfg[id]?.available, mode: this.cfg[id]?.mode || 'headless',
+        available: !!this.cfg[id]?.available, platform: this.cfg[id]?.platform, mode: this.cfg[id]?.mode || 'headless',
         default: this.cfg.defaultEngine === id, source: this.cfg[id]?.source, portable: this.cfg[id]?.portable,
         reason: this.cfg[id]?.reason }))];
   }
@@ -612,6 +488,7 @@ class WorkerManager {
       pend.reject(new Error('worker 已被关闭'));
     }
     s.pending.clear();
+    s.client?.dispose();
     try {
       terminateTree(s.proc);
     } catch {
@@ -728,7 +605,7 @@ class WorkerManager {
       now: Date.now(),
       sessions: this.status(),
       jobs: [...this.jobs.values()].sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0)),
-      config: { engine: this.cfg.defaultEngine, engines: this.engines(), maxSessions: this.cfg.maxSessions, openTimeoutMs: this.cfg.openTimeoutMs,
+      config: { host: this.cfg.host, runtimeSource: Object.fromEntries(['ghidra', 'x64dbg'].map(id => [id, this.cfg[id]?.source || null])), engine: this.cfg.defaultEngine, engines: this.engines(), maxSessions: this.cfg.maxSessions, openTimeoutMs: this.cfg.openTimeoutMs,
         ...(this.workflow?.snapshot() || { toolset: this.cfg.toolset }) },
     };
   }
@@ -973,7 +850,7 @@ function installDataRoute(ctx, mgr, cfg) {
             try {
               const rawLines = fs.readFileSync(auditFile, 'utf8').split('\n').filter(Boolean);
               const items = rawLines.map((l) => { try { return JSON.parse(l); } catch { return null; } })
-                .filter((item) => item?.args?.target && path.resolve(item.args.target).toLowerCase() === path.resolve(session.target).toLowerCase()
+                .filter((item) => item?.args?.target && mgr.sessionKey(item.args.target, session.engine) === mgr.sessionKey(session.target, session.engine)
                   && (!session.engine || (item.detail?.destination?.engine || item.args.engine || 'reverse') === session.engine)).reverse();
               const offset = Math.max(0, params.offset || 0), limit = Math.max(1, Math.min(params.limit || 30, 200));
               send(200, { target: session.target, type, data: { rows: items.slice(offset, offset + limit), total: items.length, offset, limit } });
@@ -1140,6 +1017,8 @@ function defineIg5Tools(ctx, mgr, cfg) {
           plugin: PLUGIN_ID,
           version: PLUGIN_VERSION,
           engine: cfg.defaultEngine || 'reverse',
+          host: cfg.host,
+          runtimeSource: Object.fromEntries(['ghidra', 'x64dbg'].map(id => [id, cfg[id]?.source || null])),
           engines: mgr.engines?.() || [],
           projects: mgr.projects?.listProjects?.() || [],
           ...(mgr.workflow?.snapshot() || { toolset: cfg.toolset || 'core' }),
@@ -1168,66 +1047,19 @@ function defineIg5Tools(ctx, mgr, cfg) {
       parameters: { type: 'object', properties: {}, additionalProperties: false },
       output: { schema: { type: 'object', additionalProperties: true }, render: textRender },
       async execute(args = {}) {
-        if (args.engine && args.engine !== 'reverse' || cfg.defaultEngine && cfg.defaultEngine !== 'reverse') {
-          return mgr.doctor(args.engine || cfg.defaultEngine);
-        }
+        if (typeof mgr.doctor === 'function') return mgr.doctor(args.engine || cfg.defaultEngine || 'reverse');
         let child;
         try {
           child = mgr.spawnWorker();
-          const result = await new Promise((resolve, reject) => {
-            let buf = '';
-            const t = setTimeout(() => reject(new Error('doctor 超时')), 60_000);
-            child.stdout.on('data', (d) => {
-              buf += d.toString('utf8');
-              let idx;
-              while ((idx = buf.indexOf('\n')) >= 0) {
-                const line = buf.slice(0, idx).trim();
-                buf = buf.slice(idx + 1);
-                if (!line) continue;
-                try {
-                  const obj = JSON.parse(line);
-                  if (obj.id === 0) {
-                    clearTimeout(t);
-                    if (obj.error) reject(new Error(obj.error));
-                    else resolve(obj.result);
-                    return;
-                  }
-                } catch {
-                  // noise
-                }
-              }
-            });
-            child.once('exit', (code) => {
-              clearTimeout(t);
-              reject(new Error(`doctor worker exit code=${code}`));
-            });
-            child.once('error', (error) => {
-              clearTimeout(t);
-              reject(error);
-            });
-            child.stdin.write(JSON.stringify({ id: 0, method: 'doctor', params: {} }) + '\n');
-          });
-          return {
-            ok: true,
-            engine: 'Reverse (headless)',
-            python: result.python,
-            runtimeReady: result.idalib === 'loaded',
-            caps: {
+          const result = await doctorWorker(child, { timeoutMs: 60_000,
+            formatError: error => new Error(publicEngineError(error, cfg)) });
+          return { ok: true, engine: 'Reverse (headless)', python: result.python,
+            runtimeReady: result.idalib === 'loaded', caps: {
               planAndWait: result.caps?.['ida_auto.plan_and_wait'] === true,
               wait: result.caps?.['ida_auto.auto_wait'] === true,
-              makeCode: result.caps?.['ida_auto.auto_make_code'] === true,
-            },
-            artifactDir: cfg.artifactDir,
-          };
-        } catch (error) {
-          throw new Error(publicEngineError(error, cfg));
-        } finally {
-          try {
-            child?.kill();
-          } catch {
-            // already dead
-          }
-        }
+              makeCode: result.caps?.['ida_auto.auto_make_code'] === true }, artifactDir: cfg.artifactDir };
+        } catch (error) { throw new Error(publicEngineError(error, cfg)); }
+        finally { try { child?.kill(); } catch {} }
       },
     },
     {
@@ -1783,8 +1615,10 @@ function defineIg5Tools(ctx, mgr, cfg) {
           target: { type: 'string', description: 'Target path previously opened with ig5_open' },
           op: {
             type: 'string',
-            description: 'load | start | bpt | unbpt | regs | setreg | step | stepover | cont | suspend | readmem | writemem | stop',
+            description: 'load | start | bpt | unbpt | regs | setreg | threads | callstack | modules | state | event | step | stepover | trace | cont | suspend | readmem | writemem | stop',
           },
+          kind: { type: 'string', enum: ['software', 'hardware'], default: 'software', description: 'Breakpoint kind for bpt/unbpt' },
+          access: { type: 'string', enum: ['execute', 'write', 'readwrite'], default: 'execute', description: 'Hardware breakpoint access' },
           backend: { type: 'string', enum: ['auto', 'x64dbg', 'bochs', 'win32'], description: 'Explicit debugger selection; auto resumes the selected debugger, otherwise prefers the configured default' },
           control: { type: 'string', enum: ['claim', 'takeover', 'release'], description: 'Explicit approval-gated debugger ownership change' },
           expected_stop_seq: { type: 'number', description: 'Reject a plan made for a previous debugger pause' },
@@ -1796,7 +1630,7 @@ function defineIg5Tools(ctx, mgr, cfg) {
           address_space: { type: 'string', enum: ['runtime', 'database', 'rva'], description: 'Explicit address interpretation for x64dbg ea; default runtime' },
           max_steps: { type: 'number', description: 'Bounded x64dbg single-step trace budget' },
           expected: { type: 'string', description: 'Optional original register or memory value checked before modification' },
-          size: { type: 'number', description: 'Byte count (readmem, default 64)' },
+          size: { type: 'number', description: 'Memory byte count (default 64); hardware bpt size 1|2|4|8, execute requires 1' },
           hex: { type: 'string', description: 'Byte payload (writemem)' },
           path: { type: 'string', description: 'Debuggee path override (start)' },
           timeout: { type: 'number', description: 'Event wait seconds (default 15; cont 30)' },
@@ -1807,12 +1641,14 @@ function defineIg5Tools(ctx, mgr, cfg) {
       async execute(args) {
         const target = requireString(args, 'target');
         const op = requireString(args, 'op');
-        if (!['load', 'start', 'bpt', 'unbpt', 'regs', 'setreg', 'step', 'stepover', 'cont', 'suspend', 'readmem', 'writemem', 'stop', 'state', 'event', 'modules', 'trace'].includes(op)) {
+        if (!['load', 'start', 'bpt', 'unbpt', 'regs', 'setreg', 'threads', 'callstack', 'step', 'stepover', 'cont', 'suspend', 'readmem', 'writemem', 'stop', 'state', 'event', 'modules', 'trace'].includes(op)) {
           throw new Error(`unknown dbg op: ${op}`);
         }
+        if (op === 'bpt' && args.kind === 'hardware' && args.size !== undefined && ![1, 2, 4, 8].includes(args.size)) throw new Error('Hardware breakpoint size must be 1, 2, 4 or 8');
         return mgr.rpc(mgr.get(target), 'dbg', {
           op,
           backend: args?.backend || 'auto',
+          kind: args.kind || 'software', access: args.access || 'execute',
           reg: args?.reg,
           value: args?.value,
           ea: args?.ea || '',

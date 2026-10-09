@@ -1,6 +1,14 @@
 # ⚒️ DeepSeek Harness AI 驱动专业逆向工作台（无限五代 ∞ IG5）v1.0.0
 （本工具仅限用于合法授权的软件逆向工程、安全审计与学术研究）
 
+本轮重构继续保持 **1.0.0**：抽出公共 worker 通信与内存仿真核心，维护固定版本的 Ghidra / x64dbg 源码构建，增加真实硬件断点回归，并优化手机宽度下的工作台。完整 Windows 包包含本地运行依赖，无需用户另行安装 Java、Python 或调试器。
+
+首次使用：解压完整包 → `plugin/install.ps1` → 重启 DSH → `/ig5 engines` → `/ig5 open --engine ghidra <路径>`。高级功能通过 `/ig5 toolset full` 展开。仓库源码、便携发行包和手机原生执行包是不同交付物；当前已验证的发行平台为 **Windows x64**。
+
+- [重构后的模块与能力边界](docs/ARCHITECTURE.md)
+- [固定源码构建、验证与部署](docs/BUILD.md)
+- [Android / iOS 本地离线运行的实际进度](docs/MOBILE.md)
+
 <p align="center">
   <img src="assets/banner.png" alt="无限五代 IG5 · AI 驱动的专业逆向工作台" width="100%" />
 </p>
@@ -30,7 +38,7 @@
 
 **无限五代（dsh-infinite-gen-5 / IG5）** 是专为 **DeepSeek Harness (DSH)** 桌面客户端打造的高性能、无头**纯逆向分析插件与可视化工作台系统**。
 
-完整本地发行包内含 Ghidra、x64dbg 的可运行依赖与上游源码，安装后无需再运行 setup 或安装全局 Java/Python。IG5 通过适配器接入这两套上游引擎，并未将其 Java/C++ 实现重写为自研引擎。Reverse 是可选的外部商业引擎，仅使用用户已有的本机授权安装，程序和许可证均不随包提供；DeepSeek Harness 仍需另行安装。
+完整本地发行包内含 Ghidra、x64dbg 的可运行依赖、固定上游源码、IG5 维护补丁与源码构建证据，安装后无需再运行 setup 或安装全局 Java/Python。本轮实际重建 Ghidra 12.1.4 的完整 Java 框架、PyGhidra、原生反编译 / Sleigh 组件，以及 x64dbg x86 / x64 无头核心。Ghidra 来自固定 12.1.4 tag 的本地 DEV 发行构建；保留的预编译第三方依赖与工具链边界见 BUILD 文档。IG5 的宿主、工作台、身份模型、审批与两引擎的执行协议统一维护。Reverse 使用用户已有的本机授权安装，程序和许可证不随包提供；DeepSeek Harness 仍需另行安装。
 
 与上一代以提示词注入为主的形态不同，五代彻底实现了从“脚本封装”向**“专业级全功能 Agent 逆向工作站”**的本质蜕变：
 * **零提示词常驻占领**：不侵占全局系统提示词，彻底杜绝大模型在日常对话中的偏见与输出畸变；
@@ -85,7 +93,7 @@
 
 ### 2. 轻量纯内存单函数仿真执行 (`ig5_emulate`)
 * **内置 Unicorn 2.1.4 引擎**：无需安装庞大的外部依赖，零环境污染。
-* **受限函数执行**：x86/x64 内存复制上限 64 MiB，可设置参数和指令/时间预算，捕获返回值、内存和 fault；无 OS/import/TLS 环境，不能外推真实进程行为。
+* **受限函数执行**：Reverse 与 Ghidra 通过公共内存映像提供器执行 x86/x64，Ghidra 另支持 ARM64 / AAPCS64；内存复制上限 64 MiB，可设置参数和指令/时间预算，捕获返回值、内存和 fault。无 OS/import/TLS 环境，不能外推真实进程行为。ARM64 样本在 Windows 宿主仿真通过，不代表 Android 原生运行包已完成。
 
 ### 3. Reverse Win32 与 x64dbg 原生调试车道 (`ig5_dbg`)
 * Reverse native win32 与自建 x64dbg SDK/NamedPipe headless bridge 已分别验证真实 start、ASLR/RVA 断点、寄存器读写、step 与结构化异常；两条后端证据分别记录。Bochs 仍只有 load/bpt 通过。
@@ -153,7 +161,7 @@ ig5_sync action=apply target="C:\samples\app.exe" plan_id="<preview返回的ID>"
 
 `setup_ghidra_runtime.ps1` 与 `setup_x64dbg_runtime.ps1` 是维护者联网重建运行资产的脚本，不是用户安装前置步骤。`-RuntimeSource` 仅用于显式导入其他已校验运行包。完整包不含 DSH、商业 Reverse 程序、用户项目或缓存；用户工程应单独备份，打包脚本拒绝 `-IncludeProjects`。
 
-上游源码归档位于 `third_party/sources/ghidra-master`、`x64dbg-development` 与 `x64dbg-runtime`，来源、固定提交/gitlinks、逐文件 SHA-256、符号链接 materialize 记录及已知缺件见 [源码清单](third_party/sources/manifest.json)。桌面 Ghidra 源码为 12.3 DEV，随包运行版为官方 12.1.4；不能声称运行版由该桌面源码编译。x64dbg-runtime 锁定运行版对应提交及递归子模块；development 原档缺少提交信息，其补充子模块采用清单中明确记录的固定运行版修订，不冒称原 development gitlinks。源码归档不等于离线可重编全部引擎：Ghidra 构建依赖缓存、编译器/SDK/Qt 开发环境及预编译依赖的全部传递源码不在此作完整性承诺。引擎源码中的功能也不自动成为 IG5 已暴露工具。
+上游源码归档位于 `third_party/sources/ghidra-12.1.4`、`ghidra-master`、`x64dbg-development` 与 `x64dbg-runtime`，来源、固定提交/gitlinks、逐文件 SHA-256、符号链接 materialize 记录及已知缺件见 [源码清单](third_party/sources/manifest.json)。随包 Ghidra 来自固定 `Ghidra_12.1.4_build` 源码的本地完整 DEV 构建，包含 Java 分析框架、PyGhidra 与自编译 native 核心；`ghidra_12.1.4_PUBLIC` 目录名仅为兼容别名。桌面原档 `ghidra-master` 是单独保留的 12.3 DEV 研究资料。x64dbg 的 x86/x64 无头核心、bridge、dbg、loaddll 与 TitanEngine 已按固定修订及维护补丁重建；GUI 与列明的链接依赖仍为预编译资产。development 原档缺少提交信息，其补充子模块采用清单中明确记录的固定运行版修订，不冒称原 development gitlinks。构建步骤和证据见 [BUILD](docs/BUILD.md)；用户运行包不承诺包含全部编译器、SDK、Qt 开发环境和传递依赖的离线重编工具链。引擎源码中的功能也不自动成为 IG5 已暴露工具。
 
 分发保留 [第三方许可清单](THIRD_PARTY_NOTICES.txt) 与各组件许可证；第三方代码、运行件和依赖按自身许可分发，不受项目自有代码的 NC 条款覆盖。
 

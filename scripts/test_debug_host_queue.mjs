@@ -8,6 +8,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { createHash } from 'node:crypto';
 import { engineId } from '../engine_runtime.js';
+import { attachWorker, doctorWorker } from '../source/worker_transport.js';
 
 const source = fs.readFileSync(new URL('../index.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const classSource = source.match(/class WorkerManager \{[\s\S]*?\n\}\n/)?.[0];
@@ -25,7 +26,7 @@ class MemoryProjects {
 }
 const terminated = [];
 const WorkerManager = vm.runInNewContext(classSource + '\nWorkerManager;', {
-  path, fs, createHash, AsyncLocalStorage, ProjectStore: MemoryProjects, engineId,
+  path, fs, createHash, AsyncLocalStorage, attachWorker, doctorWorker, ProjectStore: MemoryProjects, engineId,
   process, setTimeout, clearTimeout, Buffer, publicEngineError,
   terminateTree: proc => { terminated.push(proc); proc.exitCode = -1; }, diagAppend() {},
 });

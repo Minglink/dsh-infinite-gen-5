@@ -19,7 +19,7 @@ pinned to https://raw.githubusercontent.com/jpype-project/jpype/v1.5.2/native/ja
 The original support JAR from the pinned official wheel has SHA-256
 a8c993bccb81392102fca126d4d716605cbda2c6df2846d42c92dc3672bfd4f2.
 The patched JAR has SHA-256
-2d5b87593c100e1e5d6dd8cd69cb498b10439676d3e4d0058d0abf6c73f81daf.
+ba2b5ce10f5e3ccd4dd92979f044ddc9067b4e40052349748dda296f6c38e700.
 The IG5-specific bootstrap permits one fixed native extension filename and
 resolves it through Java's Unicode working directory. Without that property,
 upstream path handling is retained. The native extension is not rebuilt.
@@ -53,8 +53,25 @@ archive and per-file SHA-256, materialized symlink records and known omissions.
 Ghidra LICENSE/NOTICE/licenses and GPL/licenses, x64dbg LICENSE/docs/licenses.md,
 and all included submodule notices are preserved. Ghidra's desktop 12.3 DEV
 snapshot is not asserted to be the corresponding source of runtime 12.1.4.
-The official prebuilt debugger/runtime distributions are not claimed to have
-been rebuilt from these desktop archives. Source snapshots do not establish a
+The maintained source-build entries are distinct from those desktop archives:
+  ghidra-12.1.4: official Ghidra_12.1.4_build at
+    8b6bbb857accdfa20dc5b2f5dea471178c2e9fbc, with verified Git blob inventory.
+    The complete Java framework/PyGhidra distribution, native decompiler/Sleigh
+    products and IG5 C ABI library are built from this input. This is the local
+    12.1.4 DEV build, not an unmodified official PUBLIC release. runtime.json's
+    source build records reference licenses/ig5-source-build/build-proof.json
+    and full-build-proof.json, containing scope, product hashes, dependency
+    locks and retained prebuilt dependency boundaries. The OpenJDK TCP pipe
+    shim is build-only; its source/classes/hash and upstream license are retained
+    with those proofs. The distributed runtime JDK is not patched by that shim.
+  x64dbg-runtime: the pinned source above is built with two maintained patches:
+    a headless-only CMake/TitanEngine build overlay and a hardware-breakpoint
+    callback replacement fix. The original source inventory is unchanged.
+    third_party/x64dbg-build retains patch inputs, lock hashes and provenance;
+    runtimes/x64dbg/source-build-proof.json records x86/x64 products and the
+    pinned prebuilt dependencies still linked. The upstream GUI was not rebuilt.
+Those components retain their upstream licenses. The other runtime components
+are not claimed to have been rebuilt from the desktop archives. Source snapshots do not establish a
 complete offline build toolchain or exact corresponding sources for every
 transitive prebuilt dependency; retain component-specific source obligations
 and verify them for any redistributed binaries. No general license

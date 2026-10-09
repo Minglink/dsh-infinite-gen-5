@@ -157,116 +157,24 @@ def m_semantics(params):
 
 
 def m_emulate(params):
-    """Run copied memory in Unicorn; never executes native code or modifies the IDB."""
+    """Collect engine memory; execution belongs to the portable CPU core."""
     import ida_bytes
     import ida_segment
     import ida_ida
-    vendor = os.path.join(os.path.dirname(__file__), 'vendor')
-    if vendor not in sys.path:
-        sys.path.insert(0, vendor)
-    from unicorn import Uc, UcError, UC_ARCH_X86, UC_MODE_32, UC_MODE_64, UC_HOOK_CODE, UC_HOOK_MEM_INVALID
-    import unicorn.x86_const as regs
+    from memory_image import MemoryImage, MemoryRegion
+    from cpu_emulator import emulate_image
     if ida_ida.inf_get_procname() != 'metapc':
-        raise ValueError('isolated emulation currently supports x86/x64 targets only')
+        raise ValueError('Reverse memory provider currently supports x86/x64 targets only')
     fn = _function(params)
-    bits = 64 if ida_ida.inf_is_64bit() else 32
-    abi = str(params.get('abi') or ('win64' if bits == 64 else 'cdecl'))
-    if abi not in (('win64', 'sysv64') if bits == 64 else ('cdecl', 'stdcall')):
-        raise ValueError('unsupported ABI for target bitness')
-    args = params.get('args') or []
-    if not isinstance(args, list) or len(args) > 32:
-        raise ValueError('args must be an array of at most 32 integers')
-    args = [_number(value) for value in args]
-    max_instructions = max(1, min(int(params.get('max_instructions') or 100000), 1000000))
-    timeout_ms = max(1, min(int(params.get('timeout_ms') or 1000), 10000))
-    mu = Uc(UC_ARCH_X86, UC_MODE_64 if bits == 64 else UC_MODE_32)
-    pages = set()
-    mapped_bytes = 0
-    def map_range(address, size):
-        nonlocal mapped_bytes
-        if address < 0 or size <= 0 or address + size > (1 << bits):
-            raise ValueError('memory range outside target address space')
-        first, end = address & ~0xfff, (address + size + 0xfff) & ~0xfff
-        for page in range(first, end, 4096):
-            if page not in pages:
-                mapped_bytes += 4096
-                if mapped_bytes > 64 * 1024 * 1024:
-                    raise ValueError('emulation memory budget exceeded (64 MiB)')
-                mu.mem_map(page, 4096)
-                pages.add(page)
+    regions = []
     for index in range(ida_segment.get_segm_qty()):
         segment = ida_segment.getnseg(index)
-        size = segment.end_ea - segment.start_ea
+        base, size = segment.start_ea, segment.end_ea - segment.start_ea
         if size <= 0:
             continue
-        map_range(segment.start_ea, size)
-        for address in range(segment.start_ea, segment.end_ea, 0x10000):
-            data = ida_bytes.get_bytes(address, min(0x10000, segment.end_ea - address))
-            if data:
-                mu.mem_write(address, data)
-    stack_base, stack_size = (0x700000000000 if bits == 64 else 0x70000000), 0x100000
-    sentinel = stack_base - 0x1000
-    if any(page in pages for page in range(sentinel, stack_base + stack_size, 4096)):
-        raise ValueError('synthetic stack collides with target memory')
-    map_range(sentinel, stack_size + 0x1000)
-    pointer_size = bits // 8
-    sp = stack_base + stack_size - 0x2008 if bits == 64 else stack_base + stack_size - 0x1004
-    mu.mem_write(sp, sentinel.to_bytes(pointer_size, 'little'))
-    arg_registers = ('rcx', 'rdx', 'r8', 'r9') if abi == 'win64' else (('rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9') if abi == 'sysv64' else ())
-    for index, value in enumerate(args):
-        if not 0 <= value < (1 << bits):
-            raise ValueError('argument does not fit target register width')
-        if index < len(arg_registers):
-            mu.reg_write(getattr(regs, 'UC_X86_REG_' + arg_registers[index].upper()), value)
-        else:
-            slot = sp + pointer_size + (32 if abi == 'win64' else 0) + (index - len(arg_registers)) * pointer_size
-            mu.mem_write(slot, value.to_bytes(pointer_size, 'little'))
-    mu.reg_write(regs.UC_X86_REG_RSP if bits == 64 else regs.UC_X86_REG_ESP, sp)
-    allowed_regs = ('rax rbx rcx rdx rsi rdi rbp r8 r9 r10 r11 r12 r13 r14 r15' if bits == 64 else 'eax ebx ecx edx esi edi ebp').split()
-    for name, value in (params.get('registers') or {}).items():
-        if name.lower() not in allowed_regs:
-            raise ValueError('unsupported initial register: ' + name)
-        mu.reg_write(getattr(regs, 'UC_X86_REG_' + name.upper()), _number(value))
-    memory = params.get('memory') or []
-    if not isinstance(memory, list) or len(memory) > 32:
-        raise ValueError('memory must contain at most 32 buffers')
-    for item in memory:
-        address, data = _number(item['ea']), bytes.fromhex(item.get('hex', ''))
-        if not data or len(data) > 65536:
-            raise ValueError('memory payload must contain 1..65536 bytes')
-        map_range(address, len(data))
-        mu.mem_write(address, data)
-    state = {'instructions': 0, 'reason': None, 'fault': None}
-    def trace(uc, address, size, _):
-        state['instructions'] += 1
-    def invalid(uc, access, address, size, value, _):
-        state['reason'] = 'unmapped-memory'
-        state['fault'] = {'access': access, 'ea': hex(address), 'size': size}
-        return False
-    mu.hook_add(UC_HOOK_CODE, trace)
-    mu.hook_add(UC_HOOK_MEM_INVALID, invalid)
-    started = time.monotonic()
-    error = None
-    try:
-        mu.emu_start(fn.start_ea, sentinel, timeout=timeout_ms * 1000, count=max_instructions)
-    except UcError as exc:
-        error = str(exc)
-    ip = mu.reg_read(regs.UC_X86_REG_RIP if bits == 64 else regs.UC_X86_REG_EIP)
-    returned = ip == sentinel
-    reason = 'returned' if returned else (state['reason'] or ('instruction-limit' if state['instructions'] >= max_instructions else ('emulator-error' if error else 'timeout')))
-    capture_requests = params.get('capture') or []
-    if not isinstance(capture_requests, list) or len(capture_requests) > 32:
-        raise ValueError('capture must contain at most 32 memory ranges')
-    captures = []
-    for item in capture_requests:
-        address, size = _number(item['ea']), max(1, min(int(item.get('size') or 64), 65536))
-        try:
-            captures.append({'ea': hex(address), 'size': size, 'hex': bytes(mu.mem_read(address, size)).hex()})
-        except UcError as exc:
-            captures.append({'ea': hex(address), 'error': str(exc)})
-    return {'ok': returned, 'engine': 'Unicorn', 'isolated': True, 'ea': hex(fn.start_ea), 'bits': bits,
-            'abi': abi, 'reason': reason, 'return_value': hex(mu.reg_read(regs.UC_X86_REG_RAX if bits == 64 else regs.UC_X86_REG_EAX)),
-            'ip': hex(ip), 'instructions': state['instructions'], 'elapsedMs': int((time.monotonic() - started) * 1000),
-            'registers': {name: hex(mu.reg_read(getattr(regs, 'UC_X86_REG_' + name.upper()))) for name in allowed_regs},
-            'memory': captures, 'fault': state['fault'], 'error': error,
-            'limitations': ['CPU and copied memory only; no OS APIs, TLS setup, or imported function emulation']}
+        # Preserve the previous provider's zero-filled uninitialized ranges, now reported explicitly.
+        regions.append(MemoryRegion(base, size,
+            lambda offset, length, base=base: ida_bytes.get_bytes(base + offset, length),
+            name=ida_segment.get_segm_name(segment), zero_fill=True))
+    image = MemoryImage('x86', 64 if ida_ida.inf_is_64bit() else 32, fn.start_ea, regions, source='reverse')
+    return emulate_image(image, params)

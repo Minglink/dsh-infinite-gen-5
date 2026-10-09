@@ -80,6 +80,44 @@ class AdapterTests(unittest.TestCase):
             with self.assertRaises((ValueError, TypeError)): mod.integer(value)
         self.assertEqual(mod.integer("0x123"), 0x123)
 
+    def test_native_thread_stack_and_hardware_contract(self):
+        class FakeNative(FakeClient, mod.NativeClient):
+            def close(self): pass
+            def module_info(self, ea): return {"found": True, "base": "0x140000000", "size": 0x4000, "name": "fake.exe", "path": "fake.exe"}
+            def get_threads(self): return {"threads": [{"threadId": 9, "current": True}], "total": 1, "truncated": False}
+            def get_callstack(self): return {"frames": [{"index": 0, "from": "0x140001000"}], "threadId": 9, "heuristic": True}
+            def set_breakpoint(self, ea, kind, access, size):
+                self.writes.append((ea, kind, access, size)); return {"ok": True, "exists": True, "slot": 2, "size": size}
+            def clear_breakpoint(self, ea, kind, access, size): return {"ok": True, "exists": False}
+        self.client = self.adapter.client = FakeNative(self.adapter)
+        self.assertTrue(self.dbg("threads")["native"])
+        self.assertTrue(self.dbg("callstack")["heuristic"])
+        result = self.dbg("bpt", rva="0x1000", kind="hardware", access="write", size=4)
+        self.assertEqual(result["breakpoint"]["slot"], 2)
+        self.assertEqual(self.client.writes, [(0x140001000, "hardware", "write", 4)])
+        self.assertTrue(self.dbg("unbpt", rva="0x1000", kind="hardware")["ok"])
+        self.client.running = True
+        for op in ("threads", "callstack"):
+            with self.assertRaises(mod.RpcError) as error: self.dbg(op)
+            self.assertEqual(error.exception.code, "ESTATE")
+
+    def test_hardware_rejects_before_native_side_effect(self):
+        for params in ({"kind": "hardware", "access": "execute", "size": 4},
+                       {"kind": "hardware", "access": "write", "size": 2, "rva": "0x1001"},
+                       {"kind": "hardware", "access": "write;quit"},
+                       {"kind": "software", "access": "write"}, {"kind": "other"}):
+            with self.assertRaises(mod.RpcError) as error: self.dbg("bpt", **{"rva": "0x1000", **params})
+            self.assertEqual(error.exception.code, "EINVAL")
+        self.adapter.target["bits"] = 32
+        with self.assertRaises(mod.RpcError): self.dbg("bpt", ea="0x401000", kind="hardware", access="write", size=8)
+        self.assertEqual(self.client.writes, [])
+
+    def test_native_only_features_do_not_guess_legacy_transport(self):
+        for op, params in (("threads", {}), ("callstack", {}), ("bpt", {"kind": "hardware", "rva": "0x1000"})):
+            with self.assertRaises(mod.RpcError) as error: self.dbg(op, **params)
+            self.assertEqual(error.exception.code, "ENOTSUPPORTED")
+        self.assertEqual(self.client.writes, [])
+
     def test_expected_memory_rejects_without_write(self):
         result = self.dbg("writemem", ea="0x140001000", hex="ffff", expected="0000")
         self.assertFalse(result["ok"]); self.assertEqual(self.client.writes, [])

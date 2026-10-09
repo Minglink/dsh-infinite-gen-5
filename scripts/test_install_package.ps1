@@ -70,8 +70,8 @@ try {
     Put (Join-Path $fixture 'index.js') 'export default {};'
     Put (Join-Path $fixture 'client.js') 'export default {};'
     foreach ($file in @('engine_runtime.js','advanced_tools.js','integration_tools.js','workflow.js','semantic_diff.js','semantic_diff_async.js','semantic_diff_worker.js',
-        'source/project_store.js','source/address_ref.js','worker/ig5_worker.py','worker/advanced_analysis.py','worker/execution_analysis.py','worker/vendor/NOTICE.txt',
-        'adapters/ghidra/worker.py','adapters/ghidra/jpype-patch/JPypeContext.java','adapters/ghidra/jpype-patch/upstream/org.jpype.jar',
+        'source/project_store.js','source/address_ref.js','source/host_platform.js','source/worker_transport.js','worker/ig5_worker.py','worker/advanced_analysis.py','worker/execution_analysis.py','worker/memory_image.py','worker/cpu_emulator.py','worker/vendor/NOTICE.txt',
+        'adapters/ghidra/worker.py','adapters/ghidra/pcode_view.py','adapters/ghidra/jpype-patch/JPypeContext.java','adapters/ghidra/jpype-patch/upstream/org.jpype.jar',
         'adapters/ghidra/jpype-patch/LICENSE','adapters/ghidra/jpype-patch/UPSTREAM-NOTICE','adapters/ghidra/jpype-patch/NOTICE.txt','adapters/ghidra/jpype-patch/unicode-bootstrap.patch',
         'scripts/patch_ghidra_jpype.ps1','adapters/x64dbg/adapter.py','adapters/x64dbg/native/ig5-bridge.dp32','adapters/x64dbg/native/ig5-bridge.dp64','adapters/x64dbg/native/sha256.json',
         'cordis.patch.yml','README.md','HARNESS_PLUGIN.md','LICENSE','THIRD_PARTY_NOTICES.txt')) { Put (Join-Path $fixture $file) }
@@ -95,6 +95,10 @@ try {
     New-Runtime $runtime
     $install = Join-Path $fixture 'install.ps1'
     $packager = Join-Path $fixture 'scripts\package_portable.ps1'
+    Assert-IG5PluginSource $fixture
+    [IO.File]::WriteAllText((Join-Path $fixture 'third_party\sources\provenance\upstream.files.json'), ($sourceFiles | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
+    Assert-IG5PluginSource $fixture
+    Pass 'source inventories accept both strict envelope and raw row formats'
     $dsh = Join-Path $testRoot 'mock-dsh'
     New-Profile $dsh
     $null = Run-Script $install @('-DshRoot',$dsh)

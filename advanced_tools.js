@@ -55,8 +55,8 @@ export function defineAdvancedTools(mgr, cfg, render) {
         return { left: args.left, right: args.right, ...await compareSemanticsAsync(left, right, args, mgr.scope?.getStore()?.signal) };
       },
     },
-    rpcTool('ig5_emulate', 'emulate', 'Isolated x86/x64 function CPU emulation using copied target memory and a synthetic stack. Provide integer arguments, registers and memory buffers; capture return values and memory. No native process or OS/import emulation. Approval-gated; bounded time/instruction/memory budgets.',
-      { ea, name, abi: { type: 'string', enum: ['win64', 'sysv64', 'cdecl', 'stdcall'] },
+    rpcTool('ig5_emulate', 'emulate', 'Isolated x86/x64 or ARM64 function CPU emulation from an engine-provided MemoryImage. Supported target architectures depend on the active engine. Provide integer arguments, registers and memory buffers; capture return values and memory. No native process or OS/import emulation. Approval-gated; bounded time/instruction/memory budgets.',
+      { ea, name, abi: { type: 'string', enum: ['win64', 'sysv64', 'cdecl', 'stdcall', 'aapcs64'] },
         args: { type: 'array', items: { type: 'string' }, description: 'Integer arguments encoded as decimal or hex strings' },
         registers: { type: 'object', additionalProperties: { type: 'string' } },
         memory: { type: 'array', items: { type: 'object', properties: { ea, hex: { type: 'string' } }, required: ['ea', 'hex'], additionalProperties: false } },
