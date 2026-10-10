@@ -538,10 +538,11 @@ def m_listing(params: dict) -> dict:
     elif kind == "exports":
         total = int(ida_entry.get_entry_qty())
         for i in range(offset, min(total, offset + limit)):
+            ordinal = int(ida_entry.get_entry_ordinal(i))
             rows.append({
-                "ordinal": int(ida_entry.get_entry_ordinal(i)),
-                "ea": hex(ida_entry.get_entry(i)),
-                "name": ida_entry.get_entry_name(i),
+                "ordinal": ordinal,
+                "ea": hex(ida_entry.get_entry(ordinal)),
+                "name": ida_entry.get_entry_name(ordinal),
             })
     else:
         raise ValueError(f"unknown kind: {kind!r}")

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "pluginVersion": "1.0.0",
+  "repository": "Minglink/dsh-infinite-gen-5",
+  "releaseTag": "v1.0.0-dsh021-20261010",
+  "assetName": "IG5-1.0.0-Windows-x64-dsh021-full-20261010.zip",
+  "runtimeManifestSha256": "8fc4ae42f775f0139aa5f184c912db71f77e68d661c14564ab6f4820d434abea",
+  "sourceManifestSha256": "1cf887f344882ebcf053fba43527eae696f1dbb418c5dd8f9a6c2b6038fdc7b5",
+  "sourceInventorySha256": {
+    "provenance/ghidra-master.files.json": "61b8fd5907a4390f877052b1f80e38ee6b15d38d8b94a05e5384e9d995031490",
+    "provenance/x64dbg-development.files.json": "c8311d203102be4cc5f6ce16fcb4d088eeeea6b64707a5e4aef79c66943a91c1",
+    "provenance/x64dbg-runtime.files.json": "b9d43ac4d69d5b6cc8719fa7e408677cb8ad127158dbc1e69d7d8411d30e683a",
+    "provenance/ghidra-12.1.4.files.json": "cbf147c417961bde3e383b7d8260ec5e4bf1d0391b976310016824100bcd454d"
+  },
+  "nativeBridgeSha256": {
+    "ig5-bridge.dp64": "99209ec4db3adfe1bc8fbd97897dd2427d2080e7bcd927943efcdbb8d71a762e",
+    "ig5-bridge.dp32": "fea30cb41c487eea92bc1b525d61f6b49158297c79516932f3d65024d7ddb855"
+  }
+}

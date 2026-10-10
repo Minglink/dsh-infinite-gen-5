@@ -13,6 +13,7 @@ import { defineIntegrationTools } from './integration_tools.js';
 import { defineAnalysisTools } from './analysis_tools.js';
 import { exportPatchDiff } from './source/patch_export.js';
 import { readAuditPage, targetIdentity } from './source/audit_history.js';
+import { jsonToolOutput } from './source/json_output.js';
 
 // ── 无限五代（IG5）v1.0.0 ──────────────────────────────────────────────────
 // DeepSeek Harness 逆向插件：隔离多引擎 Worker 池 + ig5_* 工具面 + ig5dash 投影。
@@ -767,14 +768,32 @@ function installApprovalGate(ctx, cfg) {
     if (!IG5_WRITE_TOOLS.has(exec?.name)) return next();
     const args = exec?.arguments ?? {};
     const what = args?.plan_id ?? args?.ea ?? args?.name ?? args?.target ?? '';
-    return {
-      kind: 'ask',
+    const request = {
       reason: `IG5 写操作待批准: ${exec.name} @ ${what}`,
       displayReason: {
         en: `IG5 operation "${exec.name}" needs one-time approval before mutation or execution.`,
         zh: `IG5 操作「${exec.name}」（${what}）涉及修改或执行，需要你批准一次。`,
       },
     };
+    // Resolve the public approval seam here. Some host builds turn a rejected
+    // `ask` into an allow; a plugin-owned deny must remain a deny.
+    if (exec?.signal?.aborted) return { kind: 'cancel' };
+    let approval;
+    try { approval = ctx.get('approval'); } catch { /* uncomposed host */ }
+    if (!exec?.agent || typeof approval?.request !== 'function')
+      return { kind: 'deny', reason: `IG5 ${exec.name} requires an active agent and an available approval service.` };
+    let outcome;
+    try {
+      outcome = await approval.request({ agent: exec.agent, toolName: exec.name,
+        callId: exec.callId, ...request, signal: exec.signal });
+    } catch {
+      if (exec?.signal?.aborted) return { kind: 'cancel' };
+      return { kind: 'deny', reason: `IG5 ${exec.name} approval could not be confirmed; operation was not dispatched.` };
+    }
+    if (exec?.signal?.aborted || outcome === 'cancelled') return { kind: 'cancel' };
+    if (outcome !== 'allowed-once')
+      return { kind: 'deny', reason: `IG5 ${exec.name} approval was ${outcome === 'rejected' ? 'rejected' : 'unavailable'}; operation was not dispatched.` };
+    return next();
   });
   ctx.on('tools/post-execute', async (exec, result, next) => {
     if (!IG5_WRITE_TOOLS.has(exec?.name)) return next();
@@ -1903,8 +1922,8 @@ export function apply(ctx, config = {}) {
           throw new Error('Database revision changed; read current evidence and review the operation again');
         }
         const result = await execute(args, execution);
-        return result && typeof result === 'object' && !Array.isArray(result) && session && !isGlobal
-          ? { ...result, _ig5: result._ig5 || mgr.evidence(session) } : result;
+        return jsonToolOutput(result && typeof result === 'object' && !Array.isArray(result) && session && !isGlobal
+          ? { ...result, _ig5: result._ig5 || mgr.evidence(session) } : result);
         };
         if (!session || !(IG5_WRITE_TOOLS.has(definition.name) || definition.name === 'ig5_export_diff') || ['ig5_sync', 'ig5_dbg'].includes(definition.name)) return perform();
         return mgr.withSessions([session], perform);

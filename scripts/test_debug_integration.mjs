@@ -20,7 +20,10 @@ try {
   apply(ctx, { reverse: false, toolset: 'full', artifactDir: path.join(scratch, 'artifacts'), requestTimeoutMs: 120000 });
   await call('ig5_open', { path: target, background: false });
   assert.equal((await call('ig5_doctor', { engine: 'x64dbg' })).ok, true);
-  assert.equal((await hooks.get('tools/pre-execute')({ name: 'ig5_dbg', arguments: { target, op: 'start', backend: 'x64dbg' } }, () => ({ kind: 'allow' }))).kind, 'ask');
+  let approvalDispatch = false;
+  const unapproved = await hooks.get('tools/pre-execute')({ name: 'ig5_dbg', arguments: { target, op: 'start', backend: 'x64dbg' } }, () => { approvalDispatch = true; return { kind: 'allow' }; });
+  assert.equal(unapproved.kind, 'deny', 'Missing agent/approval service must deny debugger execution');
+  assert.equal(approvalDispatch, false);
   assert.equal((await dbg('load')).targetExecuted, false);
   const started = await dbg('start');
   assert.equal(started.ok, true); assert.equal(started.mode, 'headless'); assert.equal(started.state, 'suspended');

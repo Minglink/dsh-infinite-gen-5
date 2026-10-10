@@ -44,6 +44,17 @@ function Get-IG5Hash {
 }
 function Read-IG5Text { param([string]$Path) return [IO.File]::ReadAllText((ConvertTo-IG5IOPath $Path), [Text.Encoding]::UTF8) }
 
+function Assert-IG5NoReparsePath {
+    param([string]$Path)
+    $candidate = Get-IG5FullPath $Path
+    while ($candidate) {
+        if ((Test-IG5Path $candidate) -and ([IO.File]::GetAttributes((ConvertTo-IG5IOPath $candidate)) -band [IO.FileAttributes]::ReparsePoint)) { throw "Path ancestor cannot be a link: $candidate" }
+        $parent = Split-Path $candidate -Parent
+        if (-not $parent -or $parent -eq $candidate) { break }
+        $candidate = $parent
+    }
+}
+
 function Remove-IG5Tree {
     param([Parameter(Mandatory)][string]$Path)
     $io = ConvertTo-IG5IOPath $Path
@@ -88,7 +99,7 @@ function Test-IG5ExcludedPath {
 }
 
 function Get-IG5PackFiles {
-    param([Parameter(Mandatory)][string]$Root)
+    param([Parameter(Mandatory)][string]$Root, [switch]$IncludeExcluded)
     $base = Get-IG5FullPath $Root
     $isRuntime = (Test-IG5Path (Join-Path $base 'ghidra\runtime.json')) -or (Test-IG5Path (Join-Path $base 'x64dbg\runtime.json'))
     $isSourceTree = $base -match '(^|[\\/])third_party[\\/]sources(?:[\\/]|$)'
@@ -100,7 +111,7 @@ function Get-IG5PackFiles {
         foreach ($entry in $directoryInfo.GetFileSystemInfos()) {
             $relative = Get-IG5RelativePath $base $entry.FullName
             $filterPath = if ($isSourceTree) { 'third_party/sources/' + $relative } else { $relative }
-            if (Test-IG5ExcludedPath $filterPath -RuntimeRoot:$isRuntime) { continue }
+            if (-not $IncludeExcluded -and (Test-IG5ExcludedPath $filterPath -RuntimeRoot:$isRuntime)) { continue }
             if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "发行目录不能含链接: $($entry.FullName)" }
             if ($entry -is [IO.DirectoryInfo]) { $pending.Push((Get-IG5FullPath $entry.FullName)) }
             else { [pscustomobject]@{Name=$entry.Name;FullName=(Get-IG5FullPath $entry.FullName);Length=$entry.Length;Attributes=$entry.Attributes} }
@@ -134,6 +145,9 @@ function Assert-IG5RuntimePack {
     try { $manifest = Read-IG5Text $manifestPath | ConvertFrom-Json }
     catch { throw "运行包清单 JSON 无效: $manifestPath ($($_.Exception.Message))" }
     if ($manifest.schemaVersion -ne 1 -or $manifest.platform -ne 'win32-x64' -or -not $manifest.files) { throw "运行包清单 schema/platform/files 无效: $manifestPath" }
+    $runtimeTotal = @($manifest.files).Count
+    $runtimeProgress = $runtimeTotal -ge 4096
+    if ($runtimeProgress) { Write-Host "[VERIFY] runtime: $runtimeTotal inventory entries; checking required components and hashes..." }
     foreach ($engine in @('ghidra', 'x64dbg')) { if (@($manifest.engines) -notcontains $engine) { throw "清单缺少引擎: $engine" } }
     $records = @{}
     foreach ($record in $manifest.files) {
@@ -195,14 +209,18 @@ function Assert-IG5RuntimePack {
         }
     }
     $actual = @(Get-IG5PackFiles $base)
+    $runtimeChecked = 0
     foreach ($file in $actual) {
         $relative = Get-IG5RelativePath $base $file.FullName
         if ($relative -eq 'manifest.json') { continue }
         if (-not $records.ContainsKey($relative)) { throw "运行包含未登记文件: $relative" }
         $hash = Get-IG5Hash $file.FullName
         if (-not $hash.Equals([string]$records[$relative].sha256, [StringComparison]::OrdinalIgnoreCase)) { throw "运行包 SHA-256 不符: $relative" }
+        $runtimeChecked++
+        if ($runtimeProgress -and $runtimeChecked % 4096 -eq 0) { Write-Host "[VERIFY] runtime SHA-256: $runtimeChecked / $($records.Count)" }
     }
     if (($actual.Count - $(if (Test-IG5Path (Join-Path $base 'manifest.json')) { 1 } else { 0 })) -ne $records.Count) { throw '运行包清单与实际文件数量不符' }
+    if ($runtimeProgress) { Write-Host "[OK] runtime SHA-256: $runtimeChecked files verified" }
     return [pscustomobject]@{ Root = $base; Manifest = $manifest; ManifestPath = $manifestPath; Records = $records; Legacy = [bool]$prefix; Files = $records.Count }
 }
 
@@ -231,8 +249,13 @@ function Write-IG5RuntimeManifest {
 }
 
 function Assert-IG5FileInventory {
-    param([string]$Root, [object[]]$Files, [string]$Label)
+    param([string]$Root, [object[]]$Files, [string]$Label, [switch]$IncludeExcluded)
     if (-not $Files.Count) { throw "文件清单为空: $Label" }
+    $progress = $Files.Count -ge 4096
+    $progressLabel = [regex]::Replace([string]$Label, '[^A-Za-z0-9._/-]', '_')
+    if ($progressLabel.Length -gt 80) { $progressLabel = $progressLabel.Substring(0,80) }
+    if ($progress) { Write-Host "[VERIFY] ${progressLabel}: $($Files.Count) inventory entries; checking sizes/paths..." }
+    $registered = 0
     $records = @{}
     foreach ($record in $Files) {
         $relative = ([string]$record.path).Replace('\', '/')
@@ -241,22 +264,30 @@ function Assert-IG5FileInventory {
         if (-not (Test-IG5Path $full Leaf)) { throw "安装源缺少文件: $Label/$relative" }
         if ((New-Object IO.FileInfo (ConvertTo-IG5IOPath $full)).Length -ne [long]$record.bytes) { throw "安装源文件长度不符: $Label/$relative" }
         $records[$relative] = $record
+        $registered++
+        if ($progress -and $registered % 4096 -eq 0) { Write-Host "[VERIFY] $progressLabel sizes/paths: $registered / $($Files.Count)" }
     }
-    $actual = @(Get-IG5PackFiles $Root)
+    $actual = @(Get-IG5PackFiles $Root -IncludeExcluded:$IncludeExcluded)
+    $checked = 0
     foreach ($file in $actual) {
         $relative = Get-IG5RelativePath $Root $file.FullName
         if (-not $records.ContainsKey($relative)) { throw "安装源含未登记文件: $Label/$relative" }
         if ((Get-IG5Hash $file.FullName) -ne [string]$records[$relative].sha256) { throw "安装源 SHA-256 不符: $Label/$relative" }
+        $checked++
+        if ($progress -and $checked % 4096 -eq 0) { Write-Host "[VERIFY] $progressLabel SHA-256: $checked / $($Files.Count)" }
     }
     if ($actual.Count -ne $records.Count) { throw "安装源清单数量不符: $Label" }
+    if ($progress) { Write-Host "[OK] $progressLabel SHA-256: $checked files verified" }
 }
 
 function Assert-IG5PluginSource {
-    param([string]$Root)
+    param([string]$Root, [switch]$CoreOnly)
+    Assert-IG5NoReparsePath $Root
+    if (-not (Test-IG5Path $Root Container) -or ([IO.File]::GetAttributes((ConvertTo-IG5IOPath $Root)) -band [IO.FileAttributes]::ReparsePoint)) { throw 'Plugin source must be a real directory' }
     # Keep this list aligned with the modules loaded by index.js, workers and the profile entry points.
     $required = @('package.json','index.js','client.js','engine_runtime.js','advanced_tools.js','integration_tools.js','analysis_tools.js','workflow.js',
         'semantic_diff.js','semantic_diff_async.js','semantic_diff_worker.js','source/project_store.js','source/attachment_lease.js','source/address_ref.js','source/host_platform.js','source/worker_transport.js',
-        'source/audit_history.js','source/patch_export.js','source/history_index.js',
+        'source/audit_history.js','source/patch_export.js','source/history_index.js','source/json_output.js',
         'source/analysis_artifacts.js','source/analysis_jobs.js','source/analysis_worker.js','source/crypto_analysis.js','source/crypto_recovery.js','source/protocol_analysis.js','source/protocol_inference.js',
         'worker/ig5_worker.py','worker/scan_analysis.py','worker/advanced_analysis.py','worker/execution_analysis.py','worker/memory_image.py','worker/cpu_emulator.py','worker/vendor/NOTICE.txt',
         'worker/vendor/unicorn/__init__.py','worker/vendor/unicorn/lib/unicorn.dll',
@@ -265,9 +296,13 @@ function Assert-IG5PluginSource {
         'scripts/patch_ghidra_jpype.ps1','scripts/patch_ghidra_project_paths.ps1','adapters/ghidra/local-project-path/build_patch.py',
         'adapters/ghidra/local-project-path/local-project-path.patch','adapters/ghidra/local-project-path/NOTICE.txt','adapters/ghidra/local-project-path/README.md',
         'adapters/x64dbg/adapter.py','adapters/x64dbg/native/ig5-bridge.dp32','adapters/x64dbg/native/ig5-bridge.dp64','adapters/x64dbg/native/sha256.json',
-        'scripts/runtime_pack.ps1','install.ps1','uninstall.ps1','cordis.patch.yml','README.md','HARNESS_PLUGIN.md','LICENSE','THIRD_PARTY_NOTICES.txt','third_party/sources/manifest.json')
+        'scripts/runtime_pack.ps1','scripts/bootstrap_distribution.ps1','scripts/distribution.json','install.ps1','uninstall.ps1','cordis.patch.yml','README.md','HARNESS_PLUGIN.md','LICENSE','THIRD_PARTY_NOTICES.txt')
+    if (-not $CoreOnly) { $required += 'third_party/sources/manifest.json' }
     foreach ($skill in @('ig5-triage','ig5-deep-dive','ig5-patch-and-sign','ig5-diff','ig5-debug-live','ig5-crypto','ig5-protocol')) { $required += "skills/$skill/SKILL.md" }
     foreach ($relative in $required) { if (-not (Test-IG5Path (Resolve-IG5PackPath $Root $relative) Leaf)) { throw "安装源缺少插件文件: $relative" } }
+    # Enumerate before network or profile writes; reject links in the source code.
+    foreach ($unused in Get-IG5PackFiles $Root) { }
+    if ($CoreOnly) { return }
     $parentManifest = Join-Path (Split-Path $Root -Parent) 'manifest.json'
     if (Test-IG5Path $parentManifest Leaf) {
         try { $release = Read-IG5Text $parentManifest | ConvertFrom-Json }
@@ -279,6 +314,11 @@ function Assert-IG5PluginSource {
         })
         Assert-IG5FileInventory $Root $files 'plugin'
     }
+    Assert-IG5SourceAssets $Root
+}
+
+function Assert-IG5SourceAssets {
+    param([string]$Root)
     $sourcesRoot = Join-Path $Root 'third_party\sources'
     try { $sources = Read-IG5Text (Join-Path $sourcesRoot 'manifest.json') | ConvertFrom-Json }
     catch { throw '第三方源码清单 JSON 无效' }

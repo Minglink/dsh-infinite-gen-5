@@ -5,10 +5,11 @@
 
 解密/配置提取与协议分析使用 `ig5_crypto`、`ig5_protocol`、独立有界数据 worker 和可复用 SHA-256 产物引用，完整工具面为 **38 项**、原生技能为 **7 个**。新增 `recover` 自动恢复 XOR 密钥、检索并验证 AES 候选材料；新增 `infer` 推断未知报文的分帧、长度与字段候选。统计候选与认证/独立验证分开记录，预算、歧义和未识别部分明确保留。
 
-首次使用：进入 [Windows x64 完整包发布页](https://github.com/Minglink/dsh-infinite-gen-5/releases/tag/v1.0.0-remediation-20261010)，下载 `IG5-1.0.0-Windows-x64-full-20261010.zip` → 完整解压 → 在解压根目录运行 `& .\plugin\install.ps1` → 重启 DSH → `/ig5 engines` → `/ig5 open --engine ghidra <路径>`。高级功能通过 `/ig5 toolset full` 展开。GitHub 自动生成的 **Source code ZIP** 与 `git clone` 是维护源码，未包含随包运行时和完整上游源码资产，不能直接作为完整安装包。当前已验证的发行平台为 **Windows x64**；手机原生执行包仍需独立移植与验收。
+首次使用：进入 [Windows x64 完整包发布页](https://github.com/Minglink/dsh-infinite-gen-5/releases/tag/v1.0.0-dsh021-20261010)，下载 `IG5-1.0.0-Windows-x64-dsh021-full-20261010.zip` → 完整解压 → 在解压根目录运行 `& .\plugin\install.ps1` → 重启 DSH → `/ig5 engines` → `/ig5 open --engine ghidra <路径>`。高级功能通过 `/ig5 toolset full` 展开。使用 GitHub **Source code ZIP** 或 `git clone` 时，也可在源码根目录运行 `& .\install.ps1`：安装器先检查源码和 DSH profile，再自动下载并验证固定发行包，仅补齐运行时与完整上游源码资产，保留本次下载的插件代码；完整包安装无需联网。当前已验证的发行平台为 **Windows x64**；手机原生执行包仍需独立移植与验收。
 
 - [重构后的模块与能力边界](docs/ARCHITECTURE.md)
 - [本轮缺陷修复与验收对账](docs/REMEDIATION.md)
+- [DSH 0.2 宿主兼容、审批与验收范围](docs/DSH_COMPATIBILITY.md)
 - [固定源码构建、验证与部署](docs/BUILD.md)
 - [Android / iOS 本地离线运行的实际进度](docs/MOBILE.md)
 - [解密、配置提取与协议分析工作流](docs/CRYPTO_PROTOCOL.md)
@@ -49,7 +50,7 @@
 * **零提示词常驻占领**：不侵占全局系统提示词，彻底杜绝大模型在日常对话中的偏见与输出畸变；
 * **38 项专业逆向工具面**：覆盖二进制侦察、CFG、符号与类型、真实 IR、受限仿真、原生调试、跨引擎修改计划，以及显式解密和报文解析；
 * **双模式动态降噪**：默认仅加载 **Core 8 核心工具**，减少常驻工具描述开销；高级场景按需展开为 **Full 38 全景工具**；
-* **人机协作安全审批门**：写操作（打补丁、重命名、写回数据库）强制弹窗由人工确认，自建操作日志覆盖部分数据库修改，具体 Undo 范围以各后端为准；
+* **人机协作安全审批门**：12 个写入或执行工具通过宿主公共审批服务请求一次批准，仅明确的 `allowed-once` 才交给后续工具策略；拒绝、缺少活跃 agent 或审批服务时不执行。自建操作日志覆盖部分数据库修改，具体 Undo 范围以各后端为准；
 * **现代化交互式工作台**：原生注入 DSH 桌面端，包含富交互 SVG CFG（平移/缩放/双击汇编跳转）、局部变量切片高亮、在线 C 结构体声明草稿箱与真实审计时间线。
 
 ---
@@ -76,7 +77,7 @@
 | 类别 | 数量 | 工具清单 | 典型功能说明 |
 | :--- | :---: | :--- | :--- |
 | **只读分析面** | 24 | `ig5_doctor`, `ig5_open`, `ig5_status`, `ig5_funcs`, `ig5_strings`, `ig5_decompile`, `ig5_xrefs`, `ig5_calls`, `ig5_bytes`, `ig5_search`, `ig5_listing`, `ig5_scan`, `ig5_export_diff`, `ig5_cfg`, `ig5_slice`, `ig5_fingerprint`, `ig5_stack`, `ig5_switches`, `ig5_vtables`, `ig5_microcode`, `ig5_bindiff`, `ig5_ir`, `ig5_crypto`, `ig5_protocol` | 静态证据、启发式差异、显式参数数据变换、捕获文件解析与明确 schema 解码；分析产物单独保存，不修改原始输入或引擎数据库 |
-| **写操作审批门** | 12 | `ig5_rename`, `ig5_patch_bytes`, `ig5_comment`, `ig5_analyze`, `ig5_set_type`, `ig5_undo`, `ig5_run_idapython`, `ig5_dbg`, `ig5_struct`, `ig5_switch_repair`, `ig5_emulate`, `ig5_sync` | 上述工具按名称经过宿主审批（含 sync preview），执行后登记审计；拒绝或无审批通道时不执行；包含 NOP/字节补丁、C 结构体应用、内存仿真与调试交互 |
+| **写操作审批门** | 12 | `ig5_rename`, `ig5_patch_bytes`, `ig5_comment`, `ig5_analyze`, `ig5_set_type`, `ig5_undo`, `ig5_run_idapython`, `ig5_dbg`, `ig5_struct`, `ig5_switch_repair`, `ig5_emulate`, `ig5_sync` | 按工具名称请求公共 `approval.request`（含 sync preview）；仅 `allowed-once` 继续后续策略。拒绝、不可用、未知结果或请求异常均拒绝执行，取消保持取消；实际执行后登记审计 |
 | **生命周期/配置** | 2 | `ig5_close`, `ig5_profile` | 会话安全关闭与工具集热切换（Core 8 ↔ Full 38） |
 
 ### 💡 Core 8 与 Full 38 动态降噪架构
@@ -88,6 +89,10 @@
   ```
 
 支持 scoped API 的 DSH 全局保留 Core8，Full 只展开到当前智能体会话，其他会话不受影响；`ig5_profile` 返回 `toolsetScope=agent`。旧宿主保留插件实例模式并明确返回 `plugin-instance`。切换不持久化，重载按配置初始化；不会授予运行或写权限。
+
+本轮已用本机实际安装的 **DSH `0.2.1-alpha.1`** SDK 验证工具 registry、两个 agent 的 Core/Full 隔离、七技能、命令、投影、审批拒绝及卸载。插件声明 `@deepseek-ai/dsh: >=0.2.0-rc.1 <0.3.0-0`，宿主按 `includePrerelease: true` 判断版本；这个范围接受 0.2 的相应预发布版，排除 0.3（含预发布版），不等于每个版本均已完成运行验收。用户所说的“0.2.1 re1”应以安装包实际 runtime 版本对账，详见 [兼容记录](docs/DSH_COMPATIBILITY.md)。
+
+工具返回严格 JSON：可选对象字段的 `undefined` 被省略，`null` 保留；数字必须有限，零必须为正零，64 位地址使用十六进制字符串。常量样本的扫描熵返回 `0.0`，未读取到字节的熵仍为 `null`。无效数组项、BigInt、循环对象或非 JSON 值会明确拒绝，避免宿主在展示结果前校验失败。
 
 ---
 
@@ -125,7 +130,7 @@
 
 ## ⚡ 本地自包含安装
 
-需要 Windows x64 和已安装的 DeepSeek Harness profile。普通用户从 [完整包发布页](https://github.com/Minglink/dsh-infinite-gen-5/releases/tag/v1.0.0-remediation-20261010) 下载附件 **`IG5-1.0.0-Windows-x64-full-20261010.zip`**，其中包含插件、两套开源运行依赖和上游源码。GitHub 自动生成的 **Source code ZIP / tar.gz** 或 `git clone` 仅提供维护源码，缺少 `third_party/sources/manifest.json`、它引用的完整上游源码与 `runtimes/` 资产；不能将这些源码下载直接用于普通安装，也不能仅补一个 JSON 代替完整包。
+需要 Windows x64 和已安装的 DeepSeek Harness profile。普通用户从 [完整包发布页](https://github.com/Minglink/dsh-infinite-gen-5/releases/tag/v1.0.0-dsh021-20261010) 下载附件 **`IG5-1.0.0-Windows-x64-dsh021-full-20261010.zip`**，其中包含插件、两套开源运行依赖和上游源码。GitHub 自动生成的 **Source code ZIP / tar.gz** 或 `git clone` 提供维护源码；运行源码根目录的 `install.ps1` 时，安装器检测缺少的完整资产，展示固定发行附件、大小和下载进度，流式下载并核验 ZIP 校验文件、GitHub 资产摘要（如有）及逐文件 SHA-256 清单，最后只补齐 `runtimes/` 和 `third_party/sources/`，不会用发行包中的旧代码覆盖本次源码。
 
 1. 完整解压下载的 ZIP，保留包内 `plugin/runtimes/`、`plugin/third_party/sources/` 与各清单文件，不单独复制安装脚本；
 2. 打开 PowerShell，进入 ZIP 解压根目录；
@@ -136,7 +141,13 @@
 4. 脚本离线核验完整运行包，暂存插件及内置依赖，备份已有插件并配置 profile；缺件或校验失败时拒绝安装；
 5. 重启 DeepSeek Harness；使用 `/ig5 engines` 或 `ig5_doctor` 检查实际引擎可用性。
 
-维护者从 Git 源码重建完整资产的步骤见 [BUILD](docs/BUILD.md)；该流程与普通用户的离线安装入口不同。
+源码安装需要首次联网获取完整资产，网络失败时不会更改 DSH profile。已下载完整 ZIP 的用户可完全离线复用其资产，在源码根目录执行：
+
+```powershell
+& .\install.ps1 -DistributionRoot 'C:\已解压的完整发行包根目录' -Offline
+```
+
+`-DistributionRoot` 指向含 `manifest.json` 与 `plugin/` 的完整解压根目录。只用 `-Offline` 而没有完整资产时，安装器给出对应发布页与上述命令。缺件、损坏或资产版本/固定哈希不符的完整包会拒绝安装，不会自动掩盖损坏；不能仅补一个 JSON 代替完整资产。维护者重建完整资产的步骤见 [BUILD](docs/BUILD.md)。
 
 ---
 
@@ -234,7 +245,10 @@ Get-Content -LiteralPath (Join-Path $env:USERPROFILE '.dsh\ig5\artifacts\ig5-dia
 |---|---|
 | `npm run harness:check`、`npm run test:new-tools` | 基础 JS 检查与真实样本工具烟测；不替代 SOP 全项目检查 |
 | `npm run test:host`、`npm run test:data-route`、`npm run test:workflow`、`npm run test:client` | 宿主、只读路由、Core8/Full38 与七技能生命周期、renderer/引擎竞态/原生焦点 |
-| `npm run test:crypto`、`npm run test:protocol`、`npm run test:scan` | 解密 24 项、协议 37 项、扫描 17 项：已知向量、认证失败、真实字节与明确预算 |
+| `npm run test:host-sdk` | 从实际安装的 DSH `app.asar` 加载真实 Cordis / tools / skills / commands / projection 服务，在隔离 context 验证兼容与审批；不启动桌面界面或原生分析引擎 |
+| `npm run test:json-output`、`node scripts/test_approval_gate.mjs` | 严格 JSON 输出、12 工具审批允许/拒绝/取消及下游策略；独立 gate 检查不执行样本 |
+| `npm run test:public-tools` | 生成样本上逐项断言 38 个公开工具的真实执行结果，单独记录后端不支持项；本轮完整结果以生成的 catalog 报告为准，不以注册数量判定通过 |
+| `npm run test:crypto`、`npm run test:protocol`、`npm run test:scan` | 解密 24 项、协议 37 项、扫描 18 项：已知向量、认证失败、真实字节、正零 JSON 与明确预算 |
 | `npm run test:crypto-recovery`、`npm run test:protocol-inference`、`npm run test:discovery-runtime` | 自动恢复与误报/预算；未知 framing/字段/holdout；真实静态字节→候选密钥检索→敏感 key ref 解密→推断解码，不执行样本 |
 | `npm run test:analysis-host`、`npm run test:analysis-runtime` | 数据宿主 20 项、两真实静态引擎 12 项：来源引用、只读读取、AES-GCM→gzip→验证→协议帧、取消恢复；不执行样本 |
 | `npm run test:projects` | 持久身份、崩溃锁恢复/真进程竞争、物理数据库别名/修订、64 位地址及双向歧义拒绝 |

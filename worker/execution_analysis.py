@@ -183,4 +183,4 @@ def m_emulate(params):
             lambda offset, length, base=base: ida_bytes.get_bytes(base + offset, length),
             name=ida_segment.get_segm_name(segment), zero_fill=True, permissions=permissions))
     image = MemoryImage('x86', 64 if ida_ida.inf_is_64bit() else 32, fn.start_ea, regions, source='reverse')
-    return emulate_image(image, params)
+    return {**emulate_image(image, params), 'idb_modified': False}

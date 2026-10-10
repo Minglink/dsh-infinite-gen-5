@@ -6,7 +6,9 @@
 - 使用 PowerShell；后台启动宿主或助手进程时指定隐藏窗口。Robocopy `/MIR` 前核实源码与目的目录的绝对路径，退出码 0–7 可接受。
 - 对外界面、工具说明、诊断响应及错误消息商业引擎统一使用 Reverse 称谓，开源来源明确标 Ghidra/x64dbg，不泄露商业引擎版本或带版本的安装路径。内部配置/API 标识保留兼容。
 - Function Calling Schema 的必填项必须写在父级 `required: [...]` 数组，不能在 property 中写 `required: true`。
-- 完整目录为 38 工具：24 只读、12 审批、2 生命周期/配置。新增 `ig5_crypto` / `ig5_protocol` 是仅数据分析工具，不执行样本、不修改原始输入或引擎数据库；分析产物独立保存。12 个审批工具必须经过 `installApprovalGate`，包含 `ig5_switch_repair`、`ig5_emulate` 与 `ig5_sync`；不得通过脚本、HTTP 或直接 Worker RPC 给产品用户建立写入旁路。
+- DSH 兼容声明为可选 peer `@deepseek-ai/dsh: >=0.2.0-rc.1 <0.3.0-0`，实际宿主使用 `includePrerelease: true`；0.3 预发布版也必须排除，不得以 `<0.3.0` 误放行。本轮实际验证 `@deepseek-ai/dsh-app-boot` 与桌面包 `0.2.1-alpha.1`，不能以用户口头“0.2.1 re1”代替安装包版本，不能把 semver 接受范围说成所有版本均已实测。证据与重验入口见 [DSH_COMPATIBILITY](docs/DSH_COMPATIBILITY.md)。
+- 公开工具通过 `source/json_output.js` 输出严格 JSON：仅省略可选对象字段的 undefined，null 保留；必须拒绝负零、非有限数字、BigInt、循环引用、数组空位/undefined、非普通对象及 accessor，不静默丢失含义。64 位地址保持十六进制字符串；扫描熵生产者将数学零转为正 0.0，无观测数据为 None/null，不能用输出序列化掩盖算法问题。
+- 完整目录为 38 工具：24 只读、12 审批、2 生命周期/配置。新增 `ig5_crypto` / `ig5_protocol` 是仅数据分析工具，不执行样本、不修改原始输入或引擎数据库；分析产物独立保存。12 个审批工具必须经过 `installApprovalGate`，包含 `ig5_switch_repair`、`ig5_emulate` 与 `ig5_sync`；直接调用宿主公共 approval.request，携带真实 agent/toolName/callId/signal，仅 allowed-once 才 next，保留下游 deny；缺 agent/服务、rejected/unavailable/未知/throw 默认 deny，cancelled/abort 为 cancel。不得依赖 ask 经宿主折算为 allow，不缓存批准，不通过脚本、HTTP 或直接 Worker RPC 给产品用户建立写入旁路。
 - 默认 Core 8 为 `doctor/open/status/funcs/strings/decompile/close/profile`（均带 `ig5_` 前缀）。需要高级能力时先调用 `ig5_profile toolset=full`；`toolset=core` 恢复 8 个入口，不传参数只查询。支持 scoped API 时全局只注册 Core8，其余工具经 `agent.ctx` 注册到当前 agent；profile 和命令必须传真实执行 agent，不按字符串 id 猜作用域，缺少 agent context 时拒绝变更。既有/新建 agent 按 `config.toolset` 初始化，agent/disposed 与插件卸载清理 exact disposers，同 id 替换不能串扰。旧宿主保留 instance 模式并明确返回 `toolsetScope=plugin-instance`。两种切换都不持久化、不授予样本执行或写权限；回归覆盖两个真实 scope 的 schemas/get/execute 隔离、失败回滚及卸载重载。
 - 七个原生技能（原五个加 `ig5-crypto` / `ig5-protocol`）与 `/ig5` commands 已实现，由 `workflow.js` 随服务可用注册并在卸载时清理；修改注册代码必须验证 Core/Full 切换、工具/技能/命令注册失败回滚与生命周期。
 - 工作台 `/ig5-data` 仅允许显式只读类型，结构体仅允许 `list/get`；结构体编辑只生成可编辑 composer 草稿，插入后仍由用户发送并通过宿主审批。不得自动 submit 或覆盖现有草稿；无原生接口时保留复制入口。
@@ -16,6 +18,7 @@
 - `expected` 是可选参数；提供时必须前置比较并在不匹配时拒绝，补丁工作流应优先显式提供。必须拒绝未加载区域；导出应读取当前数据库状态、尊重已执行 Undo，不能盲目重放历史审批日志。
 - CFG SVG、焦点切片、结构体草稿与审计分页已完成 renderer 和真实浏览器 fixture 验证。异步读取须隔离函数/目标/引擎/样本身份/修订切换的旧响应；审计使用真实 `args/detail/ts/isError` 字段并按目标与引擎过滤（sync 归属目的引擎）；文本不得作为 HTML 注入。
 - 开发回归使用样本副本并断言返回值，不将“调用未抛异常”视为功能通过。默认样本为上级 `_research\fixtures\notepad.exe` 文件。
+- 验收须区分实际安装包 SDK/registry、可控服务 gate、VM renderer、真实浏览器 HTTP fixture、真实原生 worker/目标执行和下载附件校验。`test_host_sdk.mjs` 使用实际 app.asar 服务但不启动 GUI/原生引擎；`test_client.mjs` 是 renderer fixture，`preview_client.mjs` 是使用 DSH React 的模拟数据浏览器。注册 38 工具、load 成功、fake/mock 通过或旧报告均不能代替本轮逐功能原生断言；记录受测源码/安装副本、宿主实际版本、支持/不支持项及独立证据。
 - 调试器 `load` 成功不代表运行态通过；成功响应必须依据实际事件与进程状态。真实调试烟测是显式运行的 `scripts/test_debug_runtime.mjs`。
 - 原生 win32 已在 notepad 副本通过 start→ASLR 断点→寄存器读写→step→注释回写/Undo→故意访问违规的结构化异常上下文→恢复→stop。Bochs 仍仅 load/bpt 成功，start 曾返回 `rc=0/no-task`，不能把原生后端证据外推为 Bochs 运行态通过；外部模拟器路径未确认不是已证实的唯一根因。
 - 微码原生 filter 管线、多级真实 IR、临时 IR optimize 与受限 `xor-self/sub-self` optinsn 规则已验证。隔离构造真实临时 MBA 时两种规则各命中 1 次，`mov #0`/源清空/目的保留及原生 optimize、verify、finally remove 通过，IDB 字节不变；自然夹具自定义规则仍 `rule_hits=0`，不得声称自然函数发生规则改写。未实现通用去平坦化。

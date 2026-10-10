@@ -139,9 +139,17 @@ const preList = ctx.listeners.get('tools/pre-execute') || [];
 if (preList.length !== 1) throw new Error('expected exactly one pre-execute listener');
 const gate = preList[0];
 const next = async () => ({ kind: 'allow' });
-const denied = await gate({ name: 'ig5_patch_bytes', arguments: { ea: '0x140001000', hex: '90' } }, next);
-console.log('  gate asks for patch =', denied.kind === 'ask', '| reason:', (denied.reason || '').slice(0, 60));
+async function deniedWithoutApproval(name, args) {
+  let dispatched = false;
+  const decision = await gate({ name, arguments: args }, async () => { dispatched = true; return { kind: 'allow' }; });
+  assert.equal(decision.kind, 'deny', 'Missing agent/approval service must deny ' + name);
+  assert.equal(dispatched, false);
+  return decision;
+}
+const denied = await deniedWithoutApproval('ig5_patch_bytes', { ea: '0x140001000', hex: '90' });
+console.log('  gate denies unapproved patch =', denied.kind === 'deny', '| reason:', (denied.reason || '').slice(0, 60));
 const passed = await gate({ name: 'ig5_funcs', arguments: {} }, next);
+assert.equal(passed.kind, 'allow');
 console.log('  gate delegates reads =', passed.kind === 'allow');
 
 const f0 = (await call('ig5_funcs', { target: TARGET, limit: 1 })).funcs[0];
@@ -163,10 +171,10 @@ await postListEarly[0](
 );
 
 // ── M1-D：调用图 + 分析控制 + 类型 + decompile llm 微调 ──
-const gatedAnalyze = await gate({ name: 'ig5_analyze', arguments: { action: 'undefine', ea: f0.ea } }, next);
-console.log('  gate asks for analyze =', gatedAnalyze.kind === 'ask');
-const gatedType = await gate({ name: 'ig5_set_type', arguments: { decl: 'int f(void)' } }, next);
-console.log('  gate asks for set_type =', gatedType.kind === 'ask');
+const gatedAnalyze = await deniedWithoutApproval('ig5_analyze', { action: 'undefine', ea: f0.ea });
+console.log('  gate denies unapproved analyze =', gatedAnalyze.kind === 'deny');
+const gatedType = await deniedWithoutApproval('ig5_set_type', { decl: 'int f(void)' });
+console.log('  gate denies unapproved set_type =', gatedType.kind === 'deny');
 
 const cl = await call('ig5_calls', { target: TARGET, name: 'ig5_test_fn', direction: 'callees' });
 console.log('  calls(callees) total =', cl.total);
@@ -178,10 +186,10 @@ const decl = await call('ig5_decompile', { target: TARGET, name: 'ig5_test_fn', 
 console.log('  decompile llm: callees =', JSON.stringify(decl.meta?.callees ?? null), 'strings =', (decl.meta?.strings || []).length);
 
 // ── M2/M3：搜索 / 枚举 / 字节 / 撤销 / 情报 / 逃生舱 / diff 导出 / 调试车道 ──
-const gatedPy = await gate({ name: 'ig5_run_idapython', arguments: { code: 'print(1)' } }, next);
-const gatedUndo = await gate({ name: 'ig5_undo', arguments: {} }, next);
-const gatedDbg = await gate({ name: 'ig5_dbg', arguments: { op: 'start' } }, next);
-console.log('  gate asks idapython/undo/dbg =', gatedPy.kind === 'ask', gatedUndo.kind === 'ask', gatedDbg.kind === 'ask');
+const gatedPy = await deniedWithoutApproval('ig5_run_idapython', { code: 'print(1)' });
+const gatedUndo = await deniedWithoutApproval('ig5_undo', {});
+const gatedDbg = await deniedWithoutApproval('ig5_dbg', { op: 'start' });
+console.log('  gate denies unapproved idapython/undo/dbg =', gatedPy.kind === 'deny', gatedUndo.kind === 'deny', gatedDbg.kind === 'deny');
 
 const sr = await call('ig5_search', { target: TARGET, pattern: '90 90', limit: 5 });
 console.log('  search 90 90 total =', sr.total, 'hits =', JSON.stringify(sr.hits));
@@ -192,6 +200,7 @@ console.log('  segments total =', seg.total, 'first =', seg.items[0]?.name);
 const imps = await call('ig5_listing', { target: TARGET, kind: 'imports', limit: 5 });
 console.log('  imports total =', imps.total, 'first =', imps.items[0]?.name);
 const exps = await call('ig5_listing', { target: TARGET, kind: 'exports', limit: 3 });
+assert(exps.items.every(row => row.ea !== '0xffffffffffffffff' && row.name), 'entry ordinals must resolve to named native addresses');
 console.log('  exports total =', exps.total);
 const scan = await call('ig5_scan', { target: TARGET });
 console.log('  scan: crypto =', JSON.stringify(scan.crypto), 'entropy segs =', scan.entropy?.length, 'strings =', JSON.stringify(scan.stringFamilies));

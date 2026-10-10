@@ -70,7 +70,10 @@ try {
     selections: [{ kind: 'rename', rva: '0x1000' }, { kind: 'comment', rva: '0x1000' }] };
   const plan = await call('ig5_sync', { action: 'preview', ...params });
   assert.equal(plan.rows.length, 2);
-  assert.equal((await events.get('tools/pre-execute')({ name: 'ig5_sync', arguments: { ...params, action: 'apply', plan_id: plan.plan_id } }, () => ({ kind: 'allow' }))).kind, 'ask');
+  let approvalDispatch = false;
+  const unapproved = await events.get('tools/pre-execute')({ name: 'ig5_sync', arguments: { ...params, action: 'apply', plan_id: plan.plan_id } }, () => { approvalDispatch = true; return { kind: 'allow' }; });
+  assert.equal(unapproved.kind, 'deny', 'Missing agent/approval service must deny cross-engine writes');
+  assert.equal(approvalDispatch, false);
   await assert.rejects(call('ig5_sync', { action: 'apply', plan_id: plan.plan_id, plan_digest: 'wrong' }), /digest/);
   const applyArgs = { action: 'apply', plan_id: plan.plan_id, plan_digest: plan.plan_digest };
   const contenders = await Promise.allSettled([call('ig5_sync', applyArgs), call('ig5_sync', applyArgs)]);

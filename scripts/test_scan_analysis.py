@@ -167,6 +167,22 @@ class ScanTests(unittest.TestCase):
         self.assertFalse(short['flag'])
         self.assertIn('only', high['interpretation'])
 
+    def test_constant_entropy_has_positive_zero_json(self):
+        for byte, size in ((0, 1), (0, 1024), (0xff, 1024)):
+            with self.subTest(byte=byte, size=size):
+                output = self.scan(bytes([byte]) * size)
+                entropy = output['entropies'][0]['entropy']
+                self.assertEqual(entropy, 0.0)
+                self.assertEqual(math.copysign(1.0, entropy), 1.0)
+                # JSON round trips preserve the sign, so equality with 0 alone
+                # would miss the strict host validator's negative-zero failure.
+                restored = json.loads(json.dumps(output))['entropies'][0]['entropy']
+                self.assertEqual(math.copysign(1.0, restored), 1.0)
+        # No observed bytes remains unknown rather than fabricated zero entropy.
+        empty = self.scan(b'')['entropies'][0]
+        self.assertEqual(empty['sampledBytes'], 0)
+        self.assertIsNone(empty['entropy'])
+
     def test_contract_imports_and_legacy_aliases(self):
         imports = [{'module': 'bcrypt.dll', 'api': '__imp_BCryptDecrypt@24', 'ea': '0x1234', 'addressSpace': 'memory'},
                    {'module': 'libssl', 'api': 'SSL_read'}, {'module': 'winsock', 'api': 'recv'},

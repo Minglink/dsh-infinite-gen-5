@@ -1,21 +1,27 @@
 ﻿<#
-  IG5 self-contained installer. No downloads, setup scripts or PATH changes.
+  IG5 self-contained installer. Full releases install offline.
+  Source ZIPs supplement pinned distribution assets without replacing source code.
   Validate the complete runtime before changing the plugin or profile files.
 #>
 [CmdletBinding()]
 param(
     [string]$RuntimeSource,
+    [string]$DistributionRoot,
+    [switch]$Offline,
     [string]$DshRoot = (Join-Path $env:USERPROFILE '.dsh')
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'scripts\runtime_pack.ps1')
+. (Join-Path $PSScriptRoot 'scripts\bootstrap_distribution.ps1')
 $pluginName = 'dsh-infinite-gen-5'
 $srcDir = Get-IG5FullPath $PSScriptRoot
+$sourceInput = $srcDir
 $dshRootPath = Get-IG5FullPath $DshRoot
 $pluginsDir = Join-Path $dshRootPath 'plugins'
 $destDir = Join-Path $pluginsDir $pluginName
 $package = Get-Content -LiteralPath (Join-Path $srcDir 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $pluginVersion = [string]$package.version
+if ($package.name -cne $pluginName -or -not $pluginVersion) { throw 'Plugin package identity/version is invalid' }
 $legacyGens = @('dsh-infinite-gen-1', 'dsh-infinite-gen-2')
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
@@ -35,12 +41,17 @@ function Remove-Staging {
     }
 }
 
+$bootstrap = $null
+try {
 Write-Host "`n无限五代（IG5）v$pluginVersion · 自包含安装" -ForegroundColor Cyan
-$runtimeInput = if ($RuntimeSource) { Get-IG5FullPath $RuntimeSource } else { Join-Path $srcDir 'runtimes' }
+Assert-IG5NoReparsePath $dshRootPath
+Assert-IG5NoReparsePath (Join-Path $dshRootPath 'profiles')
+Assert-IG5NoReparsePath $pluginsDir
+Assert-IG5NoReparsePath (Join-Path $dshRootPath 'ig5\artifacts')
+Assert-IG5PluginSource $srcDir -CoreOnly
+# Bootstrap only a clean source-only tree. A partial/damaged full pack must fail closed.
+$sourceOnly = -not (Test-IG5Path (Join-Path $srcDir 'runtimes')) -and -not (Test-IG5Path (Join-Path $srcDir 'third_party\sources')) -and -not (Test-IG5Path (Join-Path (Split-Path $srcDir -Parent) 'manifest.json'))
 # Every source and profile check here is read-only. A missing/corrupt pack cannot leave a partial install.
-Assert-IG5PluginSource $srcDir
-$validated = Assert-IG5RuntimePack $runtimeInput
-if ($validated.Manifest.pluginVersion -and [string]$validated.Manifest.pluginVersion -ne $pluginVersion) { throw "运行包版本与插件不符: $($validated.Manifest.pluginVersion) / $pluginVersion" }
 $profilesRoot = Join-Path $dshRootPath 'profiles'
 if (-not (Test-Path -LiteralPath $profilesRoot -PathType Container)) { throw "未找到 DSH profiles: $profilesRoot" }
 $profileDirs = @(Get-ChildItem -LiteralPath $profilesRoot -Directory -Force | Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'package.json') -PathType Leaf })
@@ -50,7 +61,13 @@ foreach ($profile in $profileDirs) {
     if ($profile.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "profile 目录不能为链接: $($profile.FullName)" }
     $pkgPath = Join-Path $profile.FullName 'package.json'
     if ([IO.File]::GetAttributes((ConvertTo-IG5IOPath $pkgPath)) -band [IO.FileAttributes]::ReparsePoint) { throw "profile package.json 不能为链接: $pkgPath" }
-    $original = [IO.File]::ReadAllText($pkgPath)
+    $originalBytes = [IO.File]::ReadAllBytes($pkgPath)
+    $reader = [IO.StreamReader]::new([IO.MemoryStream]::new($originalBytes), [Text.Encoding]::UTF8, $true)
+    try { $original = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $originalHash = [BitConverter]::ToString($sha.ComputeHash($originalBytes)).Replace('-','').ToLowerInvariant() }
+    finally { $sha.Dispose() }
+    if ((Get-IG5Hash $pkgPath) -ne $originalHash) { throw "Profile changed during preflight: $pkgPath" }
     $pkg = $original | ConvertFrom-Json
     if (-not $pkg.dependencies) { $pkg | Add-Member -NotePropertyName dependencies -NotePropertyValue ([pscustomobject]@{}) -Force }
     foreach ($old in $legacyGens) { $pkg.dependencies.PSObject.Properties.Remove($old) }
@@ -58,16 +75,26 @@ foreach ($profile in $profileDirs) {
     if ($pkg.dsh -and $pkg.dsh.profile -and $null -ne $pkg.dsh.profile.bundles) {
         $pkg.dsh.profile.bundles = @(@($pkg.dsh.profile.bundles) | Where-Object { $_ -notin ($legacyGens + @($pluginName)) }) + @($pluginName)
     }
-    $plans += [pscustomobject]@{ Directory=$profile.FullName; Path=$pkgPath; Original=$original; Json=($pkg | ConvertTo-Json -Depth 100 -WarningAction Stop) + [Environment]::NewLine }
+    $plans += [pscustomobject]@{ Directory=$profile.FullName; Path=$pkgPath; Original=$original; OriginalBytes=$originalBytes; OriginalHash=$originalHash; Json=($pkg | ConvertTo-Json -Depth 100 -WarningAction Stop) + [Environment]::NewLine }
 }
 $destDir = Assert-Child $destDir $pluginsDir
-if ($srcDir -eq $destDir -or $srcDir.StartsWith($destDir + '\', [StringComparison]::OrdinalIgnoreCase) -or $destDir.StartsWith($srcDir + '\', [StringComparison]::OrdinalIgnoreCase)) { throw '安装源与插件目的目录不能相同或相互包含' }
+foreach ($inputDir in @($srcDir, $sourceInput)) {
+    if ($inputDir -eq $destDir -or $inputDir.StartsWith($destDir + '\', [StringComparison]::OrdinalIgnoreCase) -or $destDir.StartsWith($inputDir + '\', [StringComparison]::OrdinalIgnoreCase)) { throw '安装源与插件目的目录不能相同或相互包含' }
+}
 if (Test-Path -LiteralPath $pluginsDir) { if ((Get-Item -LiteralPath $pluginsDir).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'plugins 目录不能为链接' } }
 if (Test-Path -LiteralPath $destDir) { if ((Get-Item -LiteralPath $destDir).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw '插件目的目录不能为链接' } }
 foreach ($plan in $plans) {
     $nm = Join-Path $plan.Directory 'node_modules'
     if ((Test-Path -LiteralPath $nm) -and ((Get-Item -LiteralPath $nm).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw "node_modules 不能为链接: $nm" }
 }
+if ($sourceOnly) {
+    $bootstrap = New-IG5SourceDistribution $srcDir $pluginVersion $DistributionRoot -Offline:$Offline
+    $srcDir = $bootstrap.Root
+} elseif ($DistributionRoot) { throw '-DistributionRoot is only used to supplement a source-only tree; incomplete full packages must be replaced with a complete release.' }
+$runtimeInput = if ($RuntimeSource) { Get-IG5FullPath $RuntimeSource } else { Join-Path $srcDir 'runtimes' }
+Assert-IG5PluginSource $srcDir
+$validated = Assert-IG5RuntimePack $runtimeInput
+if ($validated.Manifest.pluginVersion -and [string]$validated.Manifest.pluginVersion -ne $pluginVersion) { throw "运行包版本与插件不符: $($validated.Manifest.pluginVersion) / $pluginVersion" }
 Write-Host "[OK] 两引擎完整性验证通过：$($validated.Files) 个文件" -ForegroundColor Green
 
 $token = [Guid]::NewGuid().ToString('N')
@@ -83,6 +110,14 @@ try {
     Copy-IG5Pack $runtimeInput (Join-Path $stage 'runtimes')
     Write-IG5RuntimeManifest $validated (Join-Path $stage 'runtimes') $pluginVersion
     $null = Assert-IG5RuntimePack (Join-Path $stage 'runtimes')
+    # Downloads, extraction and staging can take minutes. Never overwrite a changed profile plan.
+    Assert-IG5NoReparsePath $destDir
+    Assert-IG5NoReparsePath (Join-Path $dshRootPath 'ig5\artifacts')
+    foreach ($plan in $plans) {
+        Assert-IG5NoReparsePath $plan.Path
+        Assert-IG5NoReparsePath (Join-Path $plan.Directory 'node_modules')
+        if (-not (Test-IG5Path $plan.Path Leaf) -or (Get-IG5Hash $plan.Path) -ne $plan.OriginalHash) { throw "Profile changed during preparation; rerun installation: $($plan.Path)" }
+    }
     if (Test-Path -LiteralPath $destDir) { Move-Item -LiteralPath $destDir -Destination $previous; $movedPrevious = $true }
     Move-Item -LiteralPath $stage -Destination $destDir
     $switched = $true
@@ -93,7 +128,8 @@ try {
         $backup = "$($plan.Path).bak-$token"
         $record = [pscustomobject]@{ Plan=$plan; Entry=$entry; Saved=$savedEntry; OldEntry=$false; NewEntry=$false; Written=$false }
         $records += $record
-        Copy-Item -LiteralPath $plan.Path -Destination $backup
+        if ((Get-IG5Hash $plan.Path) -ne $plan.OriginalHash) { throw "Profile changed during commit; rerun installation: $($plan.Path)" }
+        [IO.File]::WriteAllBytes($backup, $plan.OriginalBytes)
         New-Item -ItemType Directory -Path $nm -Force | Out-Null
         if (Get-Item -LiteralPath $entry -Force -ErrorAction SilentlyContinue) { Move-Item -LiteralPath $entry -Destination $savedEntry; $record.OldEntry = $true }
         New-Item -ItemType Junction -Path $entry -Target $destDir | Out-Null
@@ -113,7 +149,7 @@ try {
 } catch {
     $failure = $_
     foreach ($record in $records) {
-        if ($record.Written) { [IO.File]::WriteAllText($record.Plan.Path, $record.Plan.Original, $utf8NoBom) }
+        if ($record.Written) { [IO.File]::WriteAllBytes($record.Plan.Path, $record.Plan.OriginalBytes) }
         if ($record.NewEntry -and (Get-Item -LiteralPath $record.Entry -Force -ErrorAction SilentlyContinue)) { [IO.Directory]::Delete($record.Entry) }
         if ($record.OldEntry -and (Get-Item -LiteralPath $record.Saved -Force -ErrorAction SilentlyContinue)) { Move-Item -LiteralPath $record.Saved -Destination $record.Entry }
     }
@@ -131,3 +167,6 @@ foreach ($record in $records) {
 Write-Host "`n[OK] 无限五代（IG5）已安装：$destDir" -ForegroundColor Green
 Write-Host '完整 Ghidra / x64dbg 能力随插件就位；无需运行 setup 脚本或修改系统 PATH。'
 Write-Host '完全退出并重启 DeepSeek Harness，然后调用 ig5_doctor 检查。'
+} finally {
+    if ($bootstrap) { Remove-IG5BootstrapWorkspace $bootstrap.Workspace }
+}

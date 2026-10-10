@@ -63,7 +63,10 @@ try {
   assert.ok(page.body.data.rows.every(value => value.args.target === target));
   const gate = listeners.get('tools/pre-execute');
   for (const name of ['ig5_patch_bytes', 'ig5_switch_repair', 'ig5_emulate', 'ig5_dbg', 'ig5_struct']) {
-    assert.equal((await gate({ name, arguments: { target } }, async () => ({ kind: 'allow' }))).kind, 'ask');
+    let dispatched = false;
+    const decision = await gate({ name, arguments: { target } }, async () => { dispatched = true; return { kind: 'allow' }; });
+    assert.equal(decision.kind, 'deny', 'Missing agent/approval service must deny ' + name);
+    assert.equal(dispatched, false);
   }
   for (const name of ['ig5_stack', 'ig5_switches', 'ig5_vtables', 'ig5_microcode', 'ig5_bindiff']) {
     assert.equal((await gate({ name, arguments: { target } }, async () => ({ kind: 'allow' }))).kind, 'allow');

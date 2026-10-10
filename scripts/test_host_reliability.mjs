@@ -50,7 +50,12 @@ function harness(label, config = {}) {
       return definition.execute(args, { agent: { id: 'host-reliability' }, ...execution });
     },
     async gated(name, args) {
-      assert.equal((await events.get('tools/pre-execute')({ name, arguments: args }, async () => ({ kind: 'allow' }))).kind, 'ask');
+      let dispatched = false;
+      const before = (await result.call('ig5_status')).sessions.map(session => [session.key, session.dbRevision]);
+      const decision = await events.get('tools/pre-execute')({ name, arguments: args }, async () => { dispatched = true; return { kind: 'allow' }; });
+      assert.equal(decision.kind, 'deny', 'Missing agent/approval service must deny ' + name);
+      assert.equal(dispatched, false);
+      assert.deepEqual((await result.call('ig5_status')).sessions.map(session => [session.key, session.dbRevision]), before);
     },
     async dispose() { for (const remove of effects.splice(0).reverse()) await remove(); },
   };

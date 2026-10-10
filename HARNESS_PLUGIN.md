@@ -25,11 +25,17 @@
 | 审批（12） | `ig5_rename`、`ig5_patch_bytes`、`ig5_comment`、`ig5_analyze`、`ig5_set_type`、`ig5_undo`、`ig5_run_idapython`、`ig5_dbg`、`ig5_struct`、`ig5_switch_repair`、`ig5_emulate`、`ig5_sync` |
 | 生命周期/配置（2） | `ig5_close`、`ig5_profile` |
 
-Core 8 为 `doctor/open/status/funcs/strings/decompile/close/profile`（均带 `ig5_` 前缀）。模型按需调用 `ig5_profile toolset=full`，用 `toolset=core` 恢复；不传参数只查询。用户入口 `/ig5 toolset full|core` 保持。切换是**插件实例级、非持久**，影响该实例所有会话；重载回到 `config.toolset`（默认 core）。不能把它当成按会话工具隔离或执行授权。
+Core 8 为 `doctor/open/status/funcs/strings/decompile/close/profile`（均带 `ig5_` 前缀）。模型按需调用 `ig5_profile toolset=full`，用 `toolset=core` 恢复；不传参数只查询。用户入口 `/ig5 toolset full|core` 保持。支持 scoped API 时全局保留 Core8，其余 30 工具注册到调用者真实 `agent.ctx`，只展开当前 agent，返回 `toolsetScope=agent`；缺少可用 agent context 时拒绝变更，不按 agent 字符串 id 猜测作用域。旧宿主才回退并报告 `toolsetScope=plugin-instance`。两种模式均非持久，重载与新 agent 按 `config.toolset` 初始化；工具可见性不授予执行或写权限。
 
-审批按工具名称拦截，要求真实活跃 agent/turn 审批通道；无通道或拒绝时不执行，成功调用后记录 `approvals.jsonl`。因此 `ig5_struct action=get|list`、`ig5_sync action=preview` 仍走工具级审批。工作台 HTTP 不构成写入通道。
+审批按工具名称拦截，要求真实活跃 agent 和宿主公共 `approval.request` 服务。请求携带 agent、toolName、callId、signal 及双语理由，仅明确返回 `allowed-once` 才调用下一项策略；后续拒绝仍生效。`rejected`、`unavailable`、未知结果、缺服务/agent 或请求异常均终止为 deny，`cancelled` 与已中止的 signal 保持 cancel，不依赖宿主将 `ask` 转为 allow 的路径。实际执行后记录 `approvals.jsonl`。因此 `ig5_struct action=get|list`、`ig5_sync action=preview` 仍走工具级审批。工作台 HTTP 不构成写入通道。
 
 `ig5_struct` 参数名是 **action**，调试器是 **op**。写工具可用 `expected_revision` 拒绝过期数据库计划。补丁 `expected` 是可选原字节条件，提供时前置比较并拒绝不匹配，工作流优先显式提供；拒绝未加载区域。Undo 依赖各后端操作日志，不能假设任意写入都有 Undo；switch repair 不在 Reverse `_op_journal` 范围内。导出读取当前数据库，尊重已执行 Undo。
+
+## DSH 版本与输出契约
+
+本轮实际 SDK 验证对象为安装包内的 `@deepseek-ai/dsh-app-boot` **`0.2.1-alpha.1`**，桌面外壳版本也为 `0.2.1-alpha.1`。用户或分发页的“0.2.1 re1”称呼不能替代 runtime 包版本。`package.json` 声明可选宿主 peer `@deepseek-ai/dsh: >=0.2.0-rc.1 <0.3.0-0`；实际 app-boot 兼容判断使用 `includePrerelease: true`，接受范围内的 0.2 预发布版并排除 0.3 的预发布版。版本范围核验与某一安装包的服务实测是两种证据，完整说明见 [DSH_COMPATIBILITY](docs/DSH_COMPATIBILITY.md)。
+
+`source/json_output.js` 在公开工具输出边界生成严格 JSON：省略可选对象字段的 `undefined`，保留 `null`，拒绝非有限数、负零、BigInt、循环引用、数组空位及非普通 JSON 对象；不把这些值通过隐式 stringify 静默改成另一含义。64 位地址保留字符串。扫描常量样本熵在 Python 生产者处规范为正 `0.0`，无观测字节保留 `None`/JSON `null`。`test_host_sdk.mjs` 另通过实际 DSH 工具 registry 验证 status/profile 输出校验。
 
 ## 三引擎使用与证据身份
 
@@ -89,7 +95,7 @@ apply 锁定两个参与数据库的修改队列，逐条记录目的后端操�
 
 完整发行包默认在插件根目录包含 `runtimes/ghidra`、`runtimes/x64dbg`，运行不依赖外部 `.dsh/ig5/runtimes`。直接执行 `.\install.ps1` 离线校验、暂存并安装整包，备份已有插件和更新 profile；缺件或哈希不符时拒绝安装。`-RuntimeSource` 保留为显式导入其他已校验包的维护入口，用户无需另跑 setup。`.\uninstall.ps1` 卸载插件。
 
-Ghidra runtime 包含自身 Ghidra/JDK/Python，x64dbg runtime 包含 x86/x64 debugger/Python/native bridge；不修改 Reverse 安装、全局 Python 或引擎 site-packages。`scripts/setup_ghidra_runtime.ps1`、`scripts/setup_x64dbg_runtime.ps1` 是维护者联网重建资产的脚本，不是默认安装前置依赖。`scripts/package_portable.ps1` 生成自包含目录及文件大小/SHA-256 清单；不附带 DSH、商业 Reverse 程序、用户项目或缓存，用户项目需单独备份；`-IncludeProjects` 明确拒绝。当前远端仓库尚未发布这些本轮资产，不能把原 GitHub 下载当作已包含完整运行件的发行包。
+Ghidra runtime 包含自身 Ghidra/JDK/Python，x64dbg runtime 包含 x86/x64 debugger/Python/native bridge；不修改 Reverse 安装、全局 Python 或引擎 site-packages。`scripts/setup_ghidra_runtime.ps1`、`scripts/setup_x64dbg_runtime.ps1` 是维护者联网重建资产的脚本，不是默认安装前置依赖。`scripts/package_portable.ps1` 生成自包含目录及文件大小/SHA-256 清单；不附带 DSH、商业 Reverse 程序、用户项目或缓存，用户项目需单独备份；`-IncludeProjects` 明确拒绝。GitHub 已有 v1.0.0 完整包发布基线，本轮已下载并核验其归档及完整资产；当前兼容、审批和输出修正仍需在完成验收后更新发行附件，不能把本地修正说成旧附件已经包含。
 
 `third_party/sources/ghidra-master`、`x64dbg-development` 保留桌面原档主体，`ghidra-12.1.4` 与 `x64dbg-runtime` 另存运行版固定源码及递归 gitlinks。来源、archive/hash、逐文件校验、materialize 的相对链接和已知缺件见 [源码清单](third_party/sources/manifest.json)。Ghidra 运行版是固定 12.1.4 tag 完整 Java/PyGhidra/native 本地 DEV 构建，PUBLIC 目录名仅兼容别名；12.3 DEV 桌面原档独立保留。x64dbg x86/x64 headless/dbg/bridge/loaddll/TitanEngine 已按固定修订及维护补丁重建，GUI 与列明的链接依赖仍预编译。development 原档的提交/gitlinks 未知，其固定补充来源明确记录，不冒称原 gitlinks。IG5 维护上游 Java/C++ 引擎及桥接协议，完整源码归档不意味着随包包含全部离线重编工具链、构建缓存或已暴露上游每项功能，详见 [BUILD](docs/BUILD.md)。
 
@@ -117,12 +123,13 @@ Ghidra runtime 包含自身 Ghidra/JDK/Python，x64dbg runtime 包含 x86/x64 de
 
 ## 已验证范围
 
+- **实际 DSH SDK**：本轮已从安装版 `app.asar` 加载 `0.2.1-alpha.1` 的实际 Cordis、tools、skills、commands、projection 与 SlotCore，验证两 agent 的 Core/Full 隔离、七技能加载、命令执行/卸载、status/profile 严格 JSON 校验及 12 个审批工具拒绝无 dispatch。取消、不可用、未知、异常、缺 agent/服务均拒绝或取消；明确一次批准到达无目标的工具体。该验证使用隔离 context 与可控审批服务，不启动桌面 GUI 或原生引擎，也不证明人工审批弹窗已可视验收。本轮下载副本的完整 38 工具原生结果仍以完成后的独立报告为准，见 [兼容与证据范围](docs/DSH_COMPATIBILITY.md)。
 - **Ghidra/集成**：真实 Ghidra-only doctor/open/函数/只读 HTTP/p-code、写入持久化/缓存失效、过期修订拒绝、同修订并发写入与重开数据库修订；同 hash 双引擎独立数据库，changeset 名称/注释/字节、digest/重复/过期拒绝、导出及 Undo 回归通过。真实 notepad interactive 分析约 85 秒、853 函数、无超时，分析后 decompile 子进程数为 0；不是任意样本性能保证。分析预算到期时明确标记 partial，仍可读取已完成结果；没有 BSim 集成或跨引擎语义等价证明。
 - **解密／协议**：原有解密 24 项、协议 37 项、数据宿主 20 项及双静态引擎 12 项闭环有独立验收；新增恢复/推断由 `test:crypto-recovery`、`test:protocol-inference`、`test:analysis-discovery-host` 和 `test:discovery-runtime` 分层验收。认证、独立比对、统计候选与捕获完整性分别保留，不把局部恢复当作通用破解。
 - **x64dbg**：原生 SDK+NamedPipe headless bridge 已通过中文路径生成 PE 的 start、ASLR/RVA 断点、regs/readmem/modules、step/setreg、5 步受限 trace、RIP=0 的结构化访问违规；公开工具链已通过 owner/takeover/过期 run/stop 拒绝、缓存 HTTP、stop/dispose。x64/x86 均已分别通过真实 headless 完整闭环；24 项 fake 回归、命名管道 DACL、取消/超时/强杀清理均通过。生成 PE 的证据不外推任意样本。
 - **Reverse 调试**：native win32 在 notepad 副本完成 start→ASLR 入口断点→寄存器读写→step→注释/Undo→故意访问违规→恢复→stop。Bochs 仍仅 load/bpt 通过，不能声称真实运行闭环通过。
 - **微码**：原生 filter 管线与构造真实临时 MBA 的受限 xor-self/sub-self 改写已验证；自然夹具仍 rule_hits=0，未实现通用去平坦化。
 - **RTTI/diff/仿真**：MSVC64 与 Itanium class/SI/VMI 字节布局已在生成 PE 验证，非原生 Linux ELF 验证；虚槽要求显式 table+offset。bindiff 为带歧义/截断的启发式与变更块，不是语义等价/漏洞证明。Unicorn 2.1.4 支持 provider 提供的 x86/x64 与 Ghidra ARM64/AAPCS64，最多复制 64 MiB，无 OS/import/TLS；ARM64 已在 Windows 宿主验证，不代表手机原生运行。报告返回/内存/超时/fault，保留 [NOTICE](worker/vendor/NOTICE.txt) 及 [依赖锁定](worker/requirements-emulation.txt)。
-- **身份/前端**：store 20 项、address 11 项与 client 40 项回归通过，含真进程活锁/崩溃/竞争恢复、确定性延迟恢复、硬链接/目录别名、双向映射重叠与运行态快照切换；三项恢复竞争用例连续五轮通过，真实 Ghidra-only 与双静态引擎集成回归通过。既有工作台使用安装版 DSH React 的浏览器 fixture 已通过；本轮新增解密／协议界面通过 renderer 与 HTTP fixture 回归，当前环境无可用浏览器，未额外完成真实宽窄屏可视验收。fixture 不替代真实调试证据。
+- **身份/前端**：store 20 项、address 11 项与 client 47 项回归通过，含真进程活锁/崩溃/竞争恢复、确定性延迟恢复、硬链接/目录别名、双向映射重叠与运行态快照切换；三项恢复竞争用例连续五轮通过，真实 Ghidra-only 与双静态引擎集成回归通过。本轮使用安装版 DSH React 的实际浏览器 fixture 完成 8 页、16 项检查：CFG 缩放/拖动/双击跳转、标识符高亮、类型草稿与已有 composer 内容保留、审计两页、解密/协议视图及 390×844 窄屏滚动宽度 390，控制台无错误或警告；报告为 `workbench-browser.json`。该浏览器使用模拟 HTTP 分析数据，不证明实时引擎、桌面模型 API、人工审批弹窗或 Android/iOS 原生运行；迟到响应竞争另由 renderer 回归覆盖。
 
 对外商业引擎统一称 **Reverse**，不输出其版本或带版本安装路径；保留 `ig5_run_idapython`、`IG5_IDA_DIR` 等兼容 API/配置名。Schema 必填放父级 `required: [...]`，不得在 property 写 `required: true`。

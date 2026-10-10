@@ -2202,7 +2202,7 @@
                 el("span", { className: "ig5-card-title-text" }, "↩ 自管操作日志与逐级回滚 (Undo Controller)")
               ),
               el("p", { className: "ig5-card-sub", style: { marginBottom: 12 } },
-                "无限五代内置确定性操作回滚日志，支持还原重命名、打补丁字节、注释及结构体类型定义。"
+                "可回滚范围由当前引擎的操作日志决定。重命名、字节补丁和注释可逐步撤销；类型与结构体修改请先核对后端返回的 Undo 和持久化状态。"
               ),
               el("button", {
                 className: "ig5-btn",

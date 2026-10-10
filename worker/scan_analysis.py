@@ -222,6 +222,10 @@ def scan_image(segments, imports=(), strings=(), *, source_engine, params=None):
                 cursor += requested
         sampled = sum(counts.values())
         entropy = -sum((count / sampled) * math.log2(count / sampled) for count in counts.values()) if sampled else None
+        # A constant sample has zero information, but the leading minus above
+        # yields IEEE -0.0. Host tool JSON accepts positive zero only.
+        if entropy == 0:
+            entropy = 0.0
         truncated = sampled < size
         flags['bytes'] |= truncated
         entropy_rows.append({'name': name, 'segment': name, 'ea': hex(start) if address_space == 'memory' else None,

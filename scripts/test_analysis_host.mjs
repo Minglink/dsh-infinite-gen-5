@@ -83,7 +83,12 @@ await test('Full38 → Core8 → Full38 and 12 original approval tools', async (
   await fixtureHost.call('ig5_profile', { toolset: 'full' }); assert.equal(fixtureHost.tools.size, 38);
   const writeNames = ['rename', 'patch_bytes', 'comment', 'analyze', 'set_type', 'undo', 'run_idapython', 'dbg', 'struct', 'switch_repair', 'emulate', 'sync'].map(name => 'ig5_' + name);
   const pre = fixtureHost.hooks.get('tools/pre-execute');
-  for (const name of writeNames) assert.equal((await pre({ name, arguments: {} }, () => 'continued')).kind, 'ask');
+  for (const name of writeNames) {
+    let dispatched = false;
+    const decision = await pre({ name, arguments: {} }, () => { dispatched = true; return 'continued'; });
+    assert.equal(decision.kind, 'deny', 'No agent/approval service must deny ' + name);
+    assert.equal(dispatched, false, 'Denied ' + name + ' must not delegate dispatch');
+  }
   for (const name of ['ig5_crypto', 'ig5_protocol']) assert.equal(await pre({ name, arguments: {} }, () => 'continued'), 'continued');
 });
 
