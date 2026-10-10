@@ -826,7 +826,7 @@ class Worker:
         return {'ok': True, 'ea': addrstr(function.getEntryPoint()), 'name': str(function.getName()),
                 'locals': variables, 'variables': variables, 'lines': lines, 'code': code,
                 'total_variables': len(variables), 'slice_variable': variable,
-                'slice_lines': [{'line_no': row['line'], 'code': row['text']} for row in lines],
+                'slice_lines': [{'line_no': row['line'], 'code': row['text']} for row in lines] if variable else None,
                 'scope': 'HighFunction symbols and lexical C-line filtering; not a dependency-complete program slice'}
 
     def m_semantics(self, params):

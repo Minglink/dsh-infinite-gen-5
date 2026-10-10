@@ -221,7 +221,7 @@ try {
       assert.equal(value.total_blocks, value.blocks.length); assert.equal(value.total_edges, value.edges.length); assert.match(value.mermaid, /flowchart TD/); return { blocks: value.blocks.length, edges: value.edges.length };
     });
     await check('ig5_slice', engine, 'symbols and focused variable lines', async () => {
-      const value = await call('ig5_slice', { ea }, engine); assert(value.variables.length > 0); const name = value.variables[0].name;
+      const value = await call('ig5_slice', { ea }, engine); assert(value.variables.length > 0); assert.equal(value.slice_lines, null); const name = value.variables[0].name;
       const focused = await call('ig5_slice', { ea, var: name }, engine); assert.equal(focused.slice_variable, name); assert(focused.slice_lines.length > 0); return { variables: value.variables.length, focusedLines: focused.slice_lines.length };
     });
     await check('ig5_fingerprint', engine, 'architecture and function counts', async () => {
