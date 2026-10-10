@@ -176,6 +176,24 @@ test('environment explains optional Reverse and distinguishes discovery from nat
   assert.match(text(h.tree), /Reverse · 可用/); assert.doesNotMatch(text(h.tree), /待验证/); h.unmount();
 });
 
+test('bundled Reverse reports its actual provider and startup readiness without requiring an external installation', () => {
+  const core = { id: 'reverse', label: 'Reverse · 内置', provider: 'ghidra', distribution: 'bundled', source: 'bundled', available: true, runtimeReady: null, readiness: 'ready-to-start' };
+  const config = engine => ({ host: { id: 'win32-x64', supported: true }, engines: [engine] });
+  const h = harness(ui.EnvironmentCard, { config: config(core) }); h.render();
+  assert.match(text(h.tree), /Reverse · 内置 · 待启动验证/);
+  assert.match(text(h.tree), /五代核心与 Ghidra 提供/);
+  assert.doesNotMatch(text(h.tree), /Reverse · 不可用|未发现本机安装|已发现，待验证/);
+  assert.ok(nodes(h.tree, n => n.type === 'span' && n.props.className === 'ig5-chip warn').some(n => text(n).includes('Reverse')));
+  h.render({ config: config({ ...core, runtimeReady: true, readiness: 'startup-verified' }) });
+  assert.match(text(h.tree), /Reverse · 内置 · 可用/);
+  assert.ok(nodes(h.tree, n => n.type === 'span' && n.props.className === 'ig5-chip read').some(n => text(n).includes('Reverse')));
+  h.render({ config: config({ ...core, runtimeReady: false, readiness: 'startup-failed', reason: '内置进程未成功启动' }) });
+  assert.match(text(h.tree), /Reverse · 内置 · 启动失败/); assert.doesNotMatch(text(h.tree), /Reverse · 内置 · 可用/);
+  h.render({ config: config({ ...core, available: false, readiness: 'missing-runtime', reason: '<runtime.json 缺失>' }) });
+  assert.match(text(h.tree), /Reverse · 内置 · 不可用/);
+  assert.ok(markup(h.tree).includes('&lt;runtime.json 缺失&gt;')); h.unmount();
+});
+
 test('pending lazy CFG reads cannot replace a newer function or survive same-function reload', async () => {
   const cfgReads = [];
   request = url => {
@@ -312,6 +330,21 @@ test('Ghidra IR selection requests explicit level and keeps source distinct', as
   assert.match(text(h.tree), /不对应 Reverse/); assert.match(text(h.tree), /COPY r0/); h.unmount();
 });
 
+test('bundled Reverse exposes p-code using the Reverse session route and actual Ghidra provider', async () => {
+  request = url => {
+    const q = new URL(url, 'http://test').searchParams;
+    assert.equal(q.get('engine'), 'reverse');
+    return Promise.resolve(response(q.get('type') === 'funcs' ? { funcs: [{ ea: '0x1000', name: 'main' }], total: 1 } : q.get('type') === 'decompile' ? { ea: '0x1000', code: 'return 1;' } : { rows: [] }));
+  };
+  const props = { target: 'a.exe', engine: 'reverse', session: { provider: 'ghidra' } };
+  const h = harness(ui.FunctionsView, props); h.render(); await settle(); h.render();
+  row(h.tree, 'main').props.onClick(); h.render(); await settle(); h.render();
+  button(h.tree, 'Ghidra p-code').props.onClick(); h.render();
+  const ir = nodes(h.tree, n => n.type === ui.IrView)[0]; assert.ok(ir); assert.equal(ir.props.engine, 'reverse');
+  h.render({ ...props, session: { provider: 'commercial' } });
+  assert.equal(nodes(h.tree, n => n.type === 'button' && text(n) === 'Ghidra p-code').length, 0); h.unmount();
+});
+
 test('audit view includes only selected engine at the same target', async () => {
   const rows = [
     { tool: 'ghidra-note', args: { target: 'a.exe', engine: 'ghidra' } },
@@ -350,7 +383,10 @@ test('empty workbench uses the configured default and does not imply Reverse ana
   overview.render(); assert.match(text(overview.tree), /尚无分析结果/); assert.doesNotMatch(text(overview.tree), /Reverse 分析结果/); overview.unmount();
   const catalog = harness(ui.ToolsMatrixView, {}); catalog.render();
   for (const name of ['ig5_microcode', 'ig5_run_idapython', 'ig5_switches', 'ig5_switch_repair', 'ig5_vtables', 'ig5_sync']) assert.match(text(catalog.tree), new RegExp(name));
-  assert.match(text(catalog.tree), /仍需已有本机 Reverse/);
+  assert.match(text(catalog.tree), /默认 Reverse 内置核心/);
+  assert.match(text(catalog.tree), /ig5_microcode 返回实际 IG5\/Ghidra IR/);
+  assert.match(text(catalog.tree), /ig5_run_idapython 提供有界兼容 API/);
+  assert.doesNotMatch(text(catalog.tree), /仍需已有本机 Reverse/);
   assert.match(text(catalog.tree), /ig5_sync 需要两个静态数据库/);
   assert.match(text(catalog.tree), /ig5_ir level=kernel 无需启动 Java 或商业引擎/);
   assert.match(text(catalog.tree), /跳转表读取、修复与虚表分析也支持 Ghidra/); catalog.unmount();

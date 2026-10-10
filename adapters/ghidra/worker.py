@@ -316,7 +316,7 @@ class Worker:
                 'jvmBootstrap': self.jvm_bootstrap,
                 'analysisProfiles': {'default': 'interactive', 'interactive': {'skippedAnalyzers': ['Decompiler Parameter ID']}, 'full': {'skippedAnalyzers': []}},
                 'childProcessCleanup': 'Windows kill-on-job-close' if self.job_handle else 'host process-tree termination required',
-                'unsupported': ['dbg', 'microcode', 'idapython'] + ([] if os.name == 'nt' else ['emulate']),
+                'unsupported': ['dbg'] + ([] if os.name == 'nt' else ['emulate']),
                 'emulation': {'available': os.name == 'nt', 'targetArchitectures': ['x86', 'x64', 'ARM64'],
                               'scope': 'CPU-only copied memory; no operating system, imports, TLS or native process'},
                 'journal': 'rename/comment/patch saved immediately with session inverse undo; other writes remain session-only with native undo until a save/close; intent and database markers reconcile interrupted persistence',
@@ -997,8 +997,11 @@ class Worker:
         try:
             with self.pyghidra.transaction(self.program, record['description']):
                 result = body()
-        except Exception:
+        except Exception as error:
             self.intent_path().unlink(missing_ok=True)
+            from script_api import ScriptExecutionError
+            if isinstance(error, ScriptExecutionError):
+                error.details['transactionRolledBack'] = True
             raise
         self.revision = record['revision']
         record.update(result=result, committed=True)
@@ -1019,6 +1022,15 @@ class Worker:
                 'committed': True, 'saved': inverse is not None, 'undoMode': record['undoMode'],
                 'durableRevision': self.durable_revision, 'recoveryRequired': False,
                 'persistence': 'saved' if inverse is not None else 'session-only'}
+
+    def m_microcode(self, params):
+        from microcode_analysis import run_microcode
+        return run_microcode(self, params)
+
+    def m_idapython(self, params):
+        from script_api import run_script
+        self.require()
+        return self.commit('idapython', params, lambda: run_script(self, params))
 
     def m_rename(self, params):
         from ghidra.program.model.symbol import SourceType
@@ -1243,7 +1255,8 @@ class Worker:
                 if not isinstance(datatype, Composite):
                     raise ValueError('declaration must define a structure or union')
                 resolved = manager.resolve(datatype, DataTypeConflictHandler.REPLACE_HANDLER)
-                return {'ok': True, 'action': action, 'name': str(resolved.getName()), 'size': int(resolved.getLength())}
+                return {'ok': True, 'status': 'ok', 'action': action, 'name': str(resolved.getName()), 'size': int(resolved.getLength()),
+                        'details': {'size': int(resolved.getLength())}}
             return self.commit('struct_define', params, write)
         if action == 'apply':
             datatype, address = lookup(), self.address(params)
@@ -1251,7 +1264,7 @@ class Worker:
             def write():
                 self.program.getListing().clearCodeUnits(address, address.add(int(datatype.getLength()) - 1), False)
                 self.program.getListing().createData(address, datatype)
-                return {'ok': True, 'action': action, 'ea': addrstr(address), 'name': name}
+                return {'ok': True, 'status': 'ok', 'applied': True, 'action': action, 'ea': addrstr(address), 'name': name}
             return self.commit('struct_apply', params, write)
         raise UnsupportedError('unsupported struct action: ' + str(action))
 
@@ -1326,7 +1339,7 @@ def main():
                 traceback.print_exc(file=sys.stderr)
                 emit({'id': request.get('id'), 'error': {'message': str(error),
                       'code': 'unsupported' if isinstance(error, UnsupportedError) else 'operation_failed',
-                      **(error.details if isinstance(error, PersistenceError) else {})}})
+                      **(error.details if isinstance(error, PersistenceError) or error.__class__.__name__ == 'ScriptExecutionError' else {})}})
             finally:
                 worker.cancel_monitors()
     finally:

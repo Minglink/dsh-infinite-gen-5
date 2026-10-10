@@ -46,20 +46,21 @@ try {
   verifyRuntime();
   apply(ctx, { reverse: false, toolset: 'full', requestTimeoutMs: 120000 });
   const profile = await call('ig5_profile');
-  assert.equal(profile.engine, 'ghidra');
+  assert.equal(profile.engine, 'reverse');
   assert.equal(profile.engineConfigured, true); assert.equal(profile.pythonConfigured, true);
-  assert.equal(profile.engines.find(e => e.id === 'reverse').available, false);
-  for (const engine of ['ghidra', 'x64dbg']) assert.equal((await call('ig5_doctor', { engine })).ok, true);
+  const builtin = profile.engines.find(e => e.id === 'reverse');
+  assert.equal(builtin.available, true); assert.equal(builtin.provider, 'ghidra'); assert.equal(builtin.distribution, 'bundled');
+  for (const engine of ['reverse', 'ghidra', 'x64dbg']) assert.equal((await call('ig5_doctor', { engine })).ok, true);
   const opened = await call('ig5_open', { path: target, background: false });
-  assert.equal(opened.engine, 'ghidra'); assert.ok(opened.n_funcs >= 16);
+  assert.equal(opened.engine, 'reverse'); assert.equal(opened.provider, 'ghidra'); assert.ok(opened.n_funcs >= 16);
   const ea = fixture.addresses.add;
   assert.ok((await call('ig5_decompile', { ea })).code.length > 10);
-  assert.ok((await call('ig5_ir', { ea, level: 'high' })).instructions.length);
+  assert.ok((await call('ig5_ir', { engine: 'reverse', ea, level: 'high' })).instructions.length);
   await call('ig5_rename', { ea, new_name: 'OfflineBundledAdd', expected_revision: 0 });
   await call('ig5_close');
   await call('ig5_open', { path: target, background: false });
   assert.equal((await call('ig5_decompile', { ea })).name, 'OfflineBundledAdd');
-  const dbg = (op, args = {}) => call('ig5_dbg', { engine: 'ghidra', backend: 'x64dbg', op, timeout: 15, ...args });
+  const dbg = (op, args = {}) => call('ig5_dbg', { engine: 'reverse', backend: 'x64dbg', op, timeout: 15, ...args });
   const started = await dbg('start'); assert.equal(started.ok, true);
   assert.equal(started.mode, 'headless'); assert.equal(started.state, 'suspended');
   await dbg('bpt', { rva: '0x1000' });
@@ -78,7 +79,7 @@ try {
   assert.deepEqual(fs.readFileSync(target), fixture.image);
   for (const dispose of effects.splice(0).reverse()) await dispose();
   verifyRuntime();
-  console.log(JSON.stringify({ ok: true, pluginRoot: root, runtimes: 'bundled', reverse: false,
+  console.log(JSON.stringify({ ok: true, pluginRoot: root, runtimes: 'bundled', reverse: 'built-in', commercialDiscovery: false,
     runtimeFilesUnchanged: runtimeManifest.files.length, cleanEnvironment: true,
     ghidra: 'doctor/open/decompile/IR/persisted rename', x64dbg: 'headless start/breakpoint/registers/memory/step/stop' }));
 } finally {

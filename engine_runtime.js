@@ -220,6 +220,8 @@ export function readRuntime(root, engine, override, options = {}) {
 }
 
 export function runtimeConfiguration(cfg = {}, options = {}) {
+  const reverseProvider = cfg.reverseProvider === undefined ? 'bundled' : cfg.reverseProvider;
+  if (reverseProvider !== 'bundled' && reverseProvider !== 'commercial') throw new Error('reverseProvider must be bundled or commercial');
   const host = options.host || hostPlatform();
   const defaultRuntimeRoot = host.id === 'win32-x64' ? BUNDLED_RUNTIME_ROOT : path.join(BUNDLED_RUNTIME_ROOT, host.id);
   const home = path.resolve(cfg.home || process.env.IG5_HOME || path.join(os.homedir(), '.dsh', 'ig5'));
@@ -230,7 +232,7 @@ export function runtimeConfiguration(cfg = {}, options = {}) {
     const source = cfg[engine + 'Runtime'] ? 'config' : value ? 'environment' : rootSource;
     return readRuntime(runtimeRoot, engine, value, { source, bundleRoot: runtimeRoot, host });
   };
-  return { host, home, runtimeRoot, projectRoot: path.resolve(cfg.projectRoot || path.join(home, 'projects')),
+  return { host, home, runtimeRoot, reverseProvider, projectRoot: path.resolve(cfg.projectRoot || path.join(home, 'projects')),
     ghidra: select('ghidra'), x64dbg: select('x64dbg') };
 }
 

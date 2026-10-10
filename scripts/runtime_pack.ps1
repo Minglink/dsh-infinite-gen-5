@@ -333,7 +333,7 @@ function Assert-IG5PluginSource {
         'worker/ig5_worker.py','worker/scan_analysis.py','worker/advanced_analysis.py','worker/execution_analysis.py','worker/memory_image.py','worker/cpu_emulator.py','worker/vendor/NOTICE.txt',
         'worker/ig5_kernel.py','worker/kernel_image.py','worker/kernel_analysis.py','worker/kernel_rtti.py','worker/kernel_decompile.py',
         'worker/vendor/unicorn/__init__.py','worker/vendor/unicorn/lib/unicorn.dll',
-        'adapters/ghidra/worker.py','adapters/ghidra/pcode_view.py','adapters/ghidra/switch_analysis.py','adapters/ghidra/jpype-patch/JPypeContext.java','adapters/ghidra/jpype-patch/upstream/org.jpype.jar',
+        'adapters/ghidra/worker.py','adapters/ghidra/pcode_view.py','adapters/ghidra/switch_analysis.py','adapters/ghidra/microcode_analysis.py','adapters/ghidra/script_api.py','adapters/ghidra/jpype-patch/JPypeContext.java','adapters/ghidra/jpype-patch/upstream/org.jpype.jar',
         'adapters/kernel/native/ig5_decompiler.dll','adapters/kernel/native/build-proof.json','adapters/kernel/native/Ghidra-LICENSE.txt','adapters/kernel/native/NOTICE','adapters/kernel/native/zlib-README.txt',
         'adapters/ghidra/jpype-patch/LICENSE','adapters/ghidra/jpype-patch/UPSTREAM-NOTICE','adapters/ghidra/jpype-patch/NOTICE.txt','adapters/ghidra/jpype-patch/unicode-bootstrap.patch',
         'scripts/patch_ghidra_jpype.ps1','scripts/patch_ghidra_project_paths.ps1','adapters/ghidra/local-project-path/build_patch.py',

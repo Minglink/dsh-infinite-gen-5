@@ -15,19 +15,22 @@ function receiveLimits(value = {}) {
 export function workerLaunch(cfg, engine, pluginRoot) {
   const paths = cfg.host?.platform === 'linux' ? path.posix : path;
   const env = { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' };
+  const builtinReverse = engine === 'reverse' && cfg.reverseProvider === 'bundled';
+  const provider = builtinReverse ? 'ghidra' : engine;
   let executable, args;
-  if (engine === 'reverse') {
+  if (provider === 'reverse') {
     if (!cfg.reverseAvailable) throw new Error('Reverse runtime is unavailable; configure it or use engine=ghidra');
     executable = cfg.pythonExe;
     args = ['-X', 'utf8', paths.join(pluginRoot, 'worker', 'ig5_worker.py'), '--ida-dir', cfg.idaDir];
   } else {
-    const pack = cfg[engine];
-    if (!pack?.available) throw new Error(`${engine} runtime is unavailable: ${pack?.reason || 'not configured'}`);
+    const pack = cfg[provider];
+    if (!pack?.available) throw new Error(`${builtinReverse ? 'Bundled Reverse' : engine} runtime is unavailable: ${pack?.reason || 'not configured'}`);
     executable = pack.pythonExe;
-    args = ['-I', '-B', paths.join(pluginRoot, 'adapters', engine, engine === 'ghidra' ? 'worker.py' : 'adapter.py')];
-    if (engine === 'ghidra') Object.assign(env, {
+    args = ['-I', '-B', paths.join(pluginRoot, 'adapters', provider, provider === 'ghidra' ? 'worker.py' : 'adapter.py')];
+    if (provider === 'ghidra') Object.assign(env, {
       IG5_GHIDRA_HOME: pack.ghidraHome, IG5_JAVA_HOME: pack.javaHome,
-      IG5_GHIDRA_PROJECT_ROOT: paths.join(cfg.projectRoot, 'ghidra-databases'),
+      IG5_GHIDRA_PROJECT_ROOT: paths.join(cfg.projectRoot, builtinReverse ? 'reverse-databases' : 'ghidra-databases'),
+      IG5_GHIDRA_ROUTE: engine,
     });
     else Object.assign(env, {
       IG5_X64DBG_RUNTIME: pack.manifest,

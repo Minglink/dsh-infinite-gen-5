@@ -32,6 +32,7 @@ try {
     inject() { return { dispose() {} }; },
     effect(fn) { const dispose = fn(); if (typeof dispose === 'function') effects.push(dispose); },
   }, {
+    reverseProvider: 'commercial', defaultEngine: 'reverse',
     artifactDir: path.join(scratch, 'artifacts'),
     requestTimeoutMs: 15_000,
     openTimeoutMs: 15_000,

@@ -30,7 +30,8 @@ try {
   apply(ctx, { reverse: false, defaultEngine: 'ghidra', toolset: 'full', artifactDir: path.join(scratch, 'artifacts'), requestTimeoutMs: 120000 });
   assert.equal(tools.size, 38);
   const profile = await call('ig5_profile');
-  assert.equal(profile.engines.find((item) => item.id === 'reverse').available, false);
+  const builtin = profile.engines.find((item) => item.id === 'reverse');
+  assert.equal(builtin.available, true); assert.equal(builtin.provider, 'ghidra'); assert.equal(builtin.distribution, 'bundled');
   assert.equal((await call('ig5_doctor')).engine, 'ghidra');
   await assert.rejects(call('ig5_open', { path: target, background: false, analysis_profile: 'invalid' }), /analysis_profile/);
   const first = await call('ig5_open', { path: target, background: false });
@@ -41,7 +42,12 @@ try {
   const before = await call('ig5_decompile', { ea });
   assert.ok(before.code.length > 10); assert.equal(before._ig5.engine, 'ghidra');
   assert.equal((await read('funcs', 'ghidra')).engine, 'ghidra');
-  await assert.rejects(call('ig5_microcode', { ea }), /does not support microcode/);
+  const intermediate = await call('ig5_microcode', { ea, maturity: 'generated' });
+  assert.equal(intermediate.ok, true); assert.equal(intermediate.graph_built, true);
+  assert.equal(intermediate.representation, 'Ghidra p-code'); assert.equal(intermediate.hexRaysEquivalent, false);
+  assert.equal(intermediate.idb_modified, false); assert.equal(intermediate.actualStage, 'firstpass');
+  assert.ok(intermediate.returned_instructions > 0); assert.ok(intermediate.blocks.some(block => block.instructions.length));
+  assert.equal(intermediate._ig5.engine, 'ghidra');
   assert.ok((await call('ig5_ir', { engine: 'ghidra', ea, level: 'high' })).instructions.length > 0);
   await call('ig5_rename', { ea, new_name: 'IG5Renamed', expected_revision: 0 });
   const after = await call('ig5_decompile', { ea });
@@ -63,9 +69,12 @@ try {
   const reverse = await call('ig5_open', { path: target, engine: 'reverse', background: false });
   const ghidra = await call('ig5_open', { path: target, engine: 'ghidra', background: false });
   assert.equal(reverse.artifactId, ghidra.artifactId); assert.equal(reverse.projectId, ghidra.projectId);
+  assert.equal(reverse.engine, 'reverse'); assert.equal(reverse.provider, 'ghidra');
+  assert.ok(reverse.databasePath); assert.ok(ghidra.databasePath); assert.notEqual(reverse.databasePath, ghidra.databasePath);
   assert.equal((await call('ig5_ir', { ea, level: 'raw' }))._ig5.engine, 'ghidra', 'IR retains Ghidra evidence when the primary engine is Reverse');
   await call('ig5_rename', { engine: 'reverse', ea, new_name: 'UnifiedAdd' });
   await call('ig5_comment', { engine: 'reverse', ea, text: 'Cross-engine evidence' });
+  assert.notEqual((await call('ig5_decompile', { engine: 'ghidra', ea })).name, 'UnifiedAdd', 'the destination database must remain unchanged before the explicit sync');
   const params = { target, source_engine: 'reverse', destination_engine: 'ghidra',
     selections: [{ kind: 'rename', rva: '0x1000' }, { kind: 'comment', rva: '0x1000' }] };
   const plan = await call('ig5_sync', { action: 'preview', ...params });

@@ -47,6 +47,7 @@ try {
   targets.forEach((target, index) => fs.writeFileSync(target, fixtures[index].image));
   const plugin = await import(pathToFileURL(path.join(root, 'index.js')).href);
   plugin.apply(ctx, {
+    reverseProvider: 'commercial', defaultEngine: 'reverse',
     ...(process.env.IG5_IDA_DIR ? { idaDir: process.env.IG5_IDA_DIR } : {}),
     ...(process.env.IG5_PYTHON ? { pythonExe: process.env.IG5_PYTHON } : {}),
     toolset: 'full', artifactDir: path.join(scratch, 'artifacts'), requestTimeoutMs: 120_000,

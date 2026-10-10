@@ -7,7 +7,7 @@
 | 层 | 内容 |
 |---|---|
 | 宿主 | `index.js` 基于 Cordis 注册工具、独立引擎会话和后台分析作业；`installApprovalGate` 统一写操作审批及审计 |
-| Reverse | `worker/ig5_worker.py`：独立 Python 子进程，stdio 单行 JSON-RPC、UTF-8 及日志隔离；仅使用用户已有本机授权商业安装，不随包、不称自研 |
+| Reverse | 默认内置分析车道：随包 Ghidra 数据库 + IG5 原生通道；独立 `reverse-databases` 与来源署名。`reverseProvider=commercial` 显式使用旧 `worker/ig5_worker.py` 本机兼容扩展 |
 | Ghidra | `adapters/ghidra/worker.py`：插件内 `runtimes/ghidra` 提供 Ghidra/JDK/Python；可写持久项目另存，提供真实 raw/high p-code |
 | IG5 Kernel | `ig5_ir level=kernel`：自有 PE/ELF/CFG/IR/RTTI 与源码构建的原生 C 反编译管线，隔离只读，无数据库/JVM/商业引擎；详见 [内核说明](docs/SELF_CONTAINED_KERNEL.md) |
 | x64dbg | `adapters/x64dbg/adapter.py` 与自建 `ig5-native` SDK/NamedPipe bridge：headless 调试；不依赖 automate/ZeroMQ |
@@ -40,7 +40,7 @@ Core 8 为 `doctor/open/status/funcs/strings/decompile/close/profile`（均带 `
 
 ## 三引擎使用与证据身份
 
-静态工具通过 `engine=reverse|ghidra` 路由同一工具 schema；默认优先可用的 Ghidra，完整安装直接使用随包运行时。Ghidra 不可用而本机 Reverse 通过文件检查时可回退 Reverse；`defaultEngine` 和调用时 `engine` 保留显式选择。`ig5_ir level=raw|high` 使用 Ghidra 项目，`level=kernel` 使用无数据库独立通道；Reverse 使用 `ig5_microcode`，这些表示不当成相同成熟度。后端能力以 `doctor/status` 的实际 capabilities 为准，不支持的能力明确拒绝。Ghidra 默认 `analysis_profile=interactive`，仅跳过批量 Decompiler Parameter ID 分析器，函数反编译仍可用；`full` 需显式选择。`ig5_open analysis_timeout` 设置 1–600 秒分析预算；超时返回 partial，不伪称分析完成。
+静态工具通过 `engine=reverse|ghidra` 路由同一 schema；默认 Reverse 内置核心直接使用随包运行时，无商业安装要求。两个车道分别保存独立数据库、attachment 与修订，`provider=ghidra` 明确实际来源。`ig5_ir level=raw|high` 在两车道读取真实 p-code，`level=kernel` 使用无数据库独立通道。`ig5_microcode` 提供明确 actualStage 的 p-code 阶段及临时优化，不冒称专属微码成熟度等价；脚本入口提供 Ghidra API 与文档化兼容子集。后端能力以实际 capabilities 为准。默认 `analysis_profile=interactive` 仅跳过批量 Decompiler Parameter ID，函数反编译仍可用；`full` 显式选择。`ig5_open analysis_timeout` 为 1–600 秒，超时返回 partial。
 
 ```text
 ig5_open path="C:\samples\app.exe" engine=ghidra analysis_profile=interactive analysis_timeout=120
@@ -110,7 +110,7 @@ apply 锁定两个参与数据库的修改队列，逐条记录目的后端操�
 
 Ghidra runtime 包含自身 Ghidra/JDK/Python，x64dbg runtime 包含 x86/x64 debugger/Python/native bridge；不修改 Reverse 安装、全局 Python 或引擎 site-packages。`scripts/setup_ghidra_runtime.ps1`、`scripts/setup_x64dbg_runtime.ps1` 是维护者联网重建资产的脚本，不是默认安装前置依赖。`scripts/package_portable.ps1` 生成自包含目录及文件大小/SHA-256 清单；不附带 DSH、商业 Reverse 程序、用户项目或缓存，用户工程需单独备份，`-IncludeProjects` 明确拒绝。
 
-Reverse 的重构范围是 IG5 适配器、worker 和工具通道，不是商业内核的独立替代实现。需用户已有本机授权安装、完整无头 Python 接口以及兼容的 Windows x64 Python；纯源码目录、图形程序或空 `idalib/` 目录均不足。`source/reverse_runtime.js` 读取现有激活配置与有界 Desktop/OneDrive Desktop/Program Files 候选，校验小型 PE 头及必要文件，不启动程序；自定义位置用 `idaDir` / `IG5_IDA_DIR`，Python 可用 `pythonExe` / `IG5_PYTHON`，错误的明确配置不被另一个解释器替代。`readiness=detected` / 工作台“已发现，待验证”表示文件检查通过，`runtimeReady` 和 `startupVerified` 需实际 `ig5_doctor engine=reverse` 成功才成立；目标架构所需反编译能力另按实际返回判断。
+默认 Reverse 是五代内置服务，具有实际随包执行链，不依赖商业安装。独立 C 通道不启动 Java，数据库车道使用明确署名的 Ghidra 服务。它不是商业 API 的完整重实现。仅 `reverseProvider=commercial` 才启用已有本机授权安装的兼容适配器；`source/reverse_runtime.js` 做有界路径和必要文件检查，自定义目录/解释器仍可配置且错误不会偷偷替换。内置包文件检查显示“内置核心已就绪”，实际 doctor 成功后 `startupVerified=true`；真正的缺件或启动失败仍保留原因。
 
 `third_party/sources/ghidra-master`、`x64dbg-development` 保留桌面原档主体，`ghidra-12.1.4` 与 `x64dbg-runtime` 另存运行版固定源码及递归 gitlinks。来源、archive/hash、逐文件校验、materialize 的相对链接和已知缺件见 [源码清单](third_party/sources/manifest.json)。Ghidra 运行版是固定 12.1.4 tag 完整 Java/PyGhidra/native 本地 DEV 构建，PUBLIC 目录名仅兼容别名；12.3 DEV 桌面原档独立保留。x64dbg x86/x64 headless/dbg/bridge/loaddll/TitanEngine 已按固定修订及维护补丁重建，GUI 与列明的链接依赖仍预编译。development 原档的提交/gitlinks 未知，其固定补充来源明确记录，不冒称原 gitlinks。IG5 维护上游 Java/C++ 引擎及桥接协议，完整源码归档不意味着随包包含全部离线重编工具链、构建缓存或已暴露上游每项功能，详见 [BUILD](docs/BUILD.md)。
 
@@ -118,8 +118,9 @@ Reverse 的重构范围是 IG5 适配器、worker 和工具通道，不是商业
 
 | 配置 | 用途 |
 |---|---|
-| `reverse` | `false` 可关闭 Reverse，Ghidra-only 模式无需商业安装 |
-| `defaultEngine` | 显式默认静态后端 `reverse` 或 `ghidra`；未配置优先可用 Ghidra |
+| `reverseProvider` | 默认 `bundled`；显式 `commercial` 才启用本机商业兼容扩展 |
+| `reverse` | `false` 关闭商业探测，不关闭内置 Reverse |
+| `defaultEngine` | 默认 `reverse`；可显式选择 `ghidra` 独立数据库车道 |
 | `defaultDebugger` | 默认调试路由，可显式选 `x64dbg`；不隐式运行样本 |
 | `runtimeRoot` / `IG5_RUNTIME_ROOT` | 显式覆盖 runtimes 根目录；未覆盖时使用已加载插件物理目录内 `runtimes` |
 | `ghidraRuntime` / `IG5_GHIDRA_RUNTIME` | Ghidra runtime.json 路径 |

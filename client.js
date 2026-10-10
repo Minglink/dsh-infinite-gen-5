@@ -845,7 +845,7 @@
           var setSelectedIdentity = currentTargetState[1];
           var currentSession = sessions.find(function (s) { return sessionIdentity(s) === selectedIdentity; }) || sessions[0] || null;
           var selectedTarget = currentSession && currentSession.target;
-          var engine = (currentSession && currentSession.engine) || (feed && feed.config && feed.config.engine) || "ghidra";
+          var engine = (currentSession && currentSession.engine) || (feed && feed.config && feed.config.engine) || "reverse";
           var currentIdentity = currentSession ? sessionIdentity(currentSession) : "none";
           var viewKey = currentIdentity + ":" + ((currentSession && currentSession.artifactId) || "legacy") + ":" + ((currentSession && currentSession.dbRevision) || 0);
           var focusPair = react.useState(null), focus = focusPair[0], setFocus = focusPair[1];
@@ -932,11 +932,14 @@
             el("p", { className: "ig5-card-sub" }, host.supported ? "分析引擎在当前宿主设备执行；能力以下列实际可用状态为准。" : "当前宿主尚无匹配的本地引擎执行方案。移动界面可用不代表引擎已移植。"),
             el("div", { className: "ig5-form-row" }, engines.map(function (engine) {
               var failed = engine.id === "reverse" && engine.readiness === "startup-failed";
-              return el("span", { key: engine.id, className: "ig5-chip " + (engine.available && !failed ? "read" : "warn") },
-                engineName(engine.id) + " · " + (failed ? "启动失败" : engine.available ? (engine.id === "reverse" && engine.runtimeReady !== true ? "已发现，待验证" : "可用") : "不可用") + (engine.source === "bundled" ? " · 随包" : ""));
+              var builtin = engine.id === "reverse" && engine.provider === "ghidra" && engine.distribution === "bundled";
+              var pending = engine.id === "reverse" && engine.available && engine.runtimeReady !== true;
+              return el("span", { key: engine.id, className: "ig5-chip " + (engine.available && !failed && !pending ? "read" : "warn") },
+                (engine.label || engineName(engine.id)) + " · " + (failed ? "启动失败" : engine.available ? (pending ? builtin ? "待启动验证" : "已发现，待验证" : "可用") : "不可用") + (engine.source === "bundled" && !builtin ? " · 随包" : ""));
             })),
+            engines.some(function (engine) { return engine.id === "reverse" && engine.provider === "ghidra" && engine.distribution === "bundled"; }) ? el("p", { className: "ig5-card-sub" }, "Reverse 内置分析由五代核心与 Ghidra 提供；本机扩展可按配置单独启用。") : null,
             engines.filter(function (engine) { return engine.reason && (!engine.available || engine.id === "reverse"); }).map(function (engine) {
-              return el("p", { key: engine.id, className: "ig5-card-sub" }, engineName(engine.id) + ": " + String(engine.reason).slice(0, 300));
+              return el("p", { key: engine.id, className: "ig5-card-sub" }, (engine.label || engineName(engine.id)) + ": " + String(engine.reason).slice(0, 300));
             }));
         }
 
@@ -1383,7 +1386,7 @@
                       { id: "cfg", label: "控制流 (CFG)" },
                       { id: "slice", label: "变量与切片" },
                       { id: "ir", label: "Ghidra p-code" },
-                    ].filter(function (m) { return m.id !== "ir" || engine === "ghidra"; }).map(function (m) {
+                    ].filter(function (m) { return m.id !== "ir" || engine === "ghidra" || props.session && props.session.provider === "ghidra"; }).map(function (m) {
                       return el("button", {
                         key: m.id,
                         className: "ig5-gran-btn" + (viewMode === m.id ? " ig5-gran-on" : ""),
@@ -2270,7 +2273,7 @@
                 el("span", { className: "ig5-chip read ig5-mono" }, totalTools + " Tools · 完整目录")
               ),
               el("p", { className: "ig5-card-sub" }, "工具注册遵循宿主配置：core 默认提供 8 个入口，full 提供完整工具面。目录数量不代表当前会话已注册数量；请以 ig5_profile 返回的实际工具列表为准。"),
-              el("p", { className: "ig5-card-sub" }, "随包 Ghidra / x64dbg 提供静态分析与调试。五代核心已提供独立文件加载、原生 IR/CFG、RTTI 与真实 C 反编译；使用 ig5_ir level=kernel 无需启动 Java 或商业引擎，action=decompile 选择 C 输出。原生解码与反编译保留开源 Ghidra 核心来源。跳转表读取、修复与虚表分析也支持 Ghidra。ig5_microcode、ig5_run_idapython 仍需已有本机 Reverse；ig5_sync 需要两个静态数据库。实际支持以当前后端 capabilities 为准。"),
+              el("p", { className: "ig5-card-sub" }, "默认 Reverse 内置核心与随包 Ghidra / x64dbg 提供静态分析与调试。五代核心已提供独立文件加载、原生 IR/CFG、RTTI 与真实 C 反编译；使用 ig5_ir level=kernel 无需启动 Java 或商业引擎，action=decompile 选择 C 输出。原生解码与反编译保留开源 Ghidra 核心来源。跳转表读取、修复与虚表分析也支持 Ghidra。ig5_microcode 返回实际 IG5/Ghidra IR 与优化记录；ig5_run_idapython 提供有界兼容 API，支持范围见返回结果。ig5_sync 需要两个静态数据库，Reverse 与 Ghidra 会话分别持有独立数据库。实际支持以当前后端 capabilities 为准。"),
               el(
                 "div",
                 { style: { marginBottom: 12 } },

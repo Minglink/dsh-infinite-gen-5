@@ -1,6 +1,6 @@
 # 五代独立内核
 
-本轮为 IG5 增加随源码和完整包分发的原生分析通道。IG5 自有 PE/ELF 加载、地址映射、任务隔离、CFG、局部 IR 优化和 RTTI 算法，接入固定 Ghidra 源码构建的 SLEIGH 解码器与原生 C 反编译管线。商业 Reverse 是另外保留的兼容后端；独立通道不调用它，也不启动 JVM。
+本轮为 IG5 增加随源码和完整包分发的原生分析通道。IG5 自有 PE/ELF 加载、地址映射、任务隔离、CFG、局部 IR 优化和 RTTI 算法，接入固定 Ghidra 源码构建的 SLEIGH 解码器与原生 C 反编译管线。默认 `Reverse · 内置` 使用该通道与随包 Ghidra 数据库服务，结果标明真实开源来源；商业兼容扩展仅由 `reverseProvider=commercial` 显式启用。下面的无数据库独立通道不启动 JVM。
 
 ## 使用
 
@@ -40,7 +40,17 @@ DLL 为 Windows x64 `/MT` 构建，仅依赖 `KERNEL32.dll`。随包 Python 和�
 
 `adapters/kernel/build_native_decompiler.ps1` 使用固定 Ghidra 12.1.4 修订 `8b6bbb857accdfa20dc5b2f5dea471178c2e9fbc` 的未改源码，在独立构建目录生成 `adapters/kernel/native/ig5_decompiler.dll`。不链接 BFD、Java 通信壳或商业内核，不改已封存 `third_party/sources` 和 `runtimes` pins。DLL 的逐源文件 hash、产物大小和 SHA 保存在 `native/build-proof.json`；该证明记录编译事实，实际执行由验收报告另外记录。
 
-自有 C ABI/加载与分析代码遵循项目 CC BY-NC-SA 4.0；Ghidra、zlib 及其它第三方部分保留各自许可，详见 `adapters/kernel/NOTICE` 和随 DLL 安装的许可文本。独立内核不实现 IDAPython 或专属微码 API，`ig5_run_idapython` 与 `ig5_microcode` 仍属于可选商业后端。
+自有 C ABI/加载与分析代码遵循项目 CC BY-NC-SA 4.0；Ghidra、zlib 及其它第三方部分保留各自许可，详见 `adapters/kernel/NOTICE` 和随 DLL 安装的许可文本。
+
+## 数据库、微码、脚本与同步
+
+默认 `engine=reverse` 和显式 `engine=ghidra` 使用分别位于 `reverse-databases` / `ghidra-databases` 的独立数据库。两者的 worker 都来自随包 Ghidra，`provider=ghidra`、`backendEngine` 保留事实；不同数据库从不暗中共享实时写入。`ig5_sync` 按同文件 hash、明确 RVA、digest、两个 attachment/revision 和当前值进行预览、审批及复制，支持名称/行尾注释/有限字节，保留部分失败证据。
+
+`ig5_microcode` 每次创建私有 DecompInterface，实际运行 `firstpass`、`normalize` 或 `decompile` 并读取 HighFunction 的 SSA 操作和基本块。旧 maturity 名称保留为调用兼容参数，返回 actualStage 和映射；不是专属微码八级成熟度等价。临时 `xor-self/sub-self` 规则修改真实 HighFunction 操作，并返回前后图、实际命中和裁剪，不回写数据库，也不把临时变化冒称影响 native C printer。
+
+`ig5_run_idapython` 在一个审批后事务中执行有界 Python，提供真实 `currentProgram`、`flat_api`、`monitor` 及兼容模块。`ida_bytes` 读/补字节、`ida_name` 读/设名称、`ida_funcs` 函数、`idautils` 枚举与引用、`idc` 名称/字节/注释、`ida_ida` 架构及地址范围、`ida_idaapi.BADADDR` 为明确子集；成功响应列出实际成员，未知模块/属性明确拒绝。异常退出事务回滚数据库并返回 transactionRolledBack；成功写入使用 session-only 原生 Undo，后续保存可能使 Undo 失效。这是受审批的 Python 执行，不是安全沙箱；脚本自己的外部文件/进程作用不承诺回滚，阻塞 native 调用由宿主硬超时回收自有 worker。
+
+实际成员、参数约定与例子见 [脚本 API](SCRIPT_API.md)。
 
 ## 验证
 
@@ -55,4 +65,4 @@ node scripts/test_kernel_runtime.mjs
 
 本轮已通过：加载器 17 组（含 480 次确定性变异）、RTTI 36 项、IR/CFG 40 项、进程生命周期 16 组、公开独立入口 15 项及原生 C ABI 22 项。C ABI 用例分别置于带独立超时的子进程，实际检查未加载 JVM/JPype/商业模块，未执行样本。
 
-完整 Ghidra/x64dbg 公开目录回归通过 35/38 入口及 12 个审批夹具。未通过范围是未实现/未提供的专属微码、IDAPython 与需另一静态数据库的跨引擎同步，不用注册数量冒充功能通过。现有完整包与源码 ZIP 的安装路径均须保留独立内核 DLL、构建证明和许可；旧发行附件不会自动获得本轮实现。
+`node scripts/test_public_tool_catalog.mjs` 默认以随包 Reverse/Ghidra 独立数据库和 x64dbg 逐个执行 38 入口，包含脚本读取/写入/Undo/异常回滚、全部兼容 maturity、同步 digest 拒绝/复制/重放拒绝，以及 12 个审批门；测试会因缺项失败。实际结果由本次验收报告记录，不用注册数量代替功能通过。现有完整包与源码 ZIP 的安装路径均须保留新模块、独立内核 DLL、构建证明和许可；旧发行附件不会自动获得本轮实现。

@@ -74,7 +74,7 @@ async function waitFor(label, condition, timeout = 5000) {
 }
 
 try {
-  const reverse = harness('reverse', { defaultEngine: 'reverse', maxSessions: 2 });
+  const reverse = harness('reverse', { reverseProvider: 'commercial', defaultEngine: 'reverse', maxSessions: 2 });
   const call = (name, args = {}, execution = {}) => reverse.call(name, { target: reverseTarget, engine: 'reverse', ...args }, execution);
   const opened = await call('ig5_open', { path: reverseTarget, background: false });
   assert.equal(opened.bits, 64); assert(opened.n_funcs >= 16);
@@ -171,7 +171,7 @@ try {
   const notepadBytes = fs.readFileSync(notepadSource);
   const notepadTarget = path.join(scratch, '记事本导入回归.exe');
   fs.writeFileSync(notepadTarget, notepadBytes);
-  const imports = harness('imports', { defaultEngine: 'reverse', maxSessions: 1 });
+  const imports = harness('imports', { reverseProvider: 'commercial', defaultEngine: 'reverse', maxSessions: 1 });
   const importCall = (name, args = {}) => imports.call(name, { target: notepadTarget, engine: 'reverse', ...args });
   await importCall('ig5_open', { path: notepadTarget, background: false });
   const truth = await importCall('ig5_run_idapython', { code: [

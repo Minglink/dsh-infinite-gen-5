@@ -15,6 +15,9 @@ const requestedEngines = (process.env.IG5_PUBLIC_CATALOG_ENGINES || 'reverse,ghi
 assert(requestedEngines.length && requestedEngines.every(v => ['reverse', 'ghidra'].includes(v)));
 assert.equal(new Set(requestedEngines).size, requestedEngines.length);
 const executeDebugger = process.env.IG5_PUBLIC_CATALOG_DEBUG !== '0';
+const reverseProvider = process.env.IG5_PUBLIC_CATALOG_REVERSE_PROVIDER || 'bundled';
+assert(['bundled', 'commercial'].includes(reverseProvider));
+const commercial = engine => engine === 'reverse' && reverseProvider === 'commercial';
 const reportDirectory = path.resolve(process.env.IG5_PUBLIC_CATALOG_REPORT_DIR || path.join(os.homedir(), '.dsh', 'ig5', 'artifacts', 'github-consumer-validation-20261010'));
 assert(!isChild(reportDirectory, pluginRoot), 'Reports must be outside the tested plugin');
 const reportFile = path.join(reportDirectory, 'public-tool-catalog-' + randomUUID() + '.json');
@@ -130,7 +133,7 @@ try {
     const target = path.join(scratch, '生成版本 ' + version + '.exe'); fs.writeFileSync(target, fixture.image, { flag: 'wx' });
     fixtures.push(fixture); targets.push(target);
   }
-  apply(context, { toolset: 'full', defaultEngine: requestedEngines[0], reverse: requestedEngines.includes('reverse'),
+  apply(context, { toolset: 'full', defaultEngine: requestedEngines[0], reverseProvider, reverse: requestedEngines.includes('reverse'),
     artifactDir: path.join(scratch, 'artifacts'), projectRoot: path.join(scratch, 'home', 'projects'),
     requestTimeoutMs: 120000, openTimeoutMs: 180000, maxSessions: 8,
     ...(configuredReverse.idaDir ? { idaDir: configuredReverse.idaDir } : {}),
@@ -155,6 +158,10 @@ try {
     assert.equal((await call('ig5_profile', { toolset: 'core' })).activeTools.length, 8); assert.equal(tools.size, 8);
     const full = await call('ig5_profile', { toolset: 'full' }); assert.equal(full.activeTools.length, 38); assert.equal(tools.size, 38);
     for (const engine of requestedEngines) assert.equal(full.engines.find(e => e.id === engine)?.available, true, engine + ' must actually be available');
+    if (reverseProvider === 'bundled') {
+      const reverse = full.engines.find(e => e.id === 'reverse');
+      assert.equal(reverse.available, true); assert.equal(reverse.provider, 'ghidra'); assert.match(reverse.label, /内置/);
+    }
     return { core: 8, full: 38, approvalTools: approvalChecks.length };
   });
   for (const engine of requestedEngines) {
@@ -163,6 +170,10 @@ try {
       const value = await call('ig5_open', { path: target, background: false, analysis_timeout: 60 }, engine, target);
       assert.equal(value.engine, engine); assert.equal(value.bits, 64); assert(value.n_funcs >= 16); assert.equal(value.partial, false);
       opened.push({ engine, target }); return { functions: value.n_funcs, artifactId: value.artifactId };
+    });
+    if (engine === requestedEngines[0] && !commercial(engine)) await check('ig5_ir', engine, 'implicit primary core route works before another lane is opened', async () => {
+      const value = await call('ig5_ir', { ea: fixtures[0].addresses.add, level: 'high' }, undefined, targets[0]);
+      assert(value.instructions.length > 0); assert.equal(value._ig5.engine, engine); return { provider: value._ig5.provider };
     });
   }
   const fixture = fixtures[0], ea = fixture.addresses.add;
@@ -200,7 +211,7 @@ try {
       return { segments: segments.total, exports: exports.total, imports: imports.total };
     });
     await check('ig5_scan', engine, 'canonical AES marker at exact generated address; bounded reads', async () => {
-      const value = await call('ig5_scan', { max_bytes: 65536 }, engine); assert.equal(value.schemaVersion, 2); assert.equal(value.sourceEngine, engine);
+      const value = await call('ig5_scan', { max_bytes: 65536 }, engine); assert.equal(value.schemaVersion, 2); assert.equal(value.sourceEngine, commercial(engine) ? 'reverse' : 'ghidra');
       assert.equal(value.idb_modified, false); assert(value.crypto_markers.some(row => row.name === 'AES S-box' && row.ea === '0x140003400'));
       const bounded = await call('ig5_scan', { max_bytes: 128, max_segment_bytes: 64 }, engine); assert(bounded.truncated); assert(bounded.coverage.bytesAttempted <= 128);
       return { markers: value.crypto_markers.length, boundedBytes: bounded.coverage.bytesAttempted };
@@ -266,7 +277,7 @@ try {
       assert((await call('ig5_struct', { action: 'list', filter: name }, engine)).items.some(row => row.name === name));
       const before = await revision(engine);
       const applied = await call('ig5_struct', { action: 'apply', name, ea: '0x140003e00' }, engine);
-      if (engine === 'reverse') assert.equal(applied.applied, true);
+      if (commercial(engine)) assert.equal(applied.applied, true);
       else { assert.equal(applied.ok, true); assert.equal(applied.ea, '0x140003e00'); }
       assert.equal(await revision(engine), before + 1); return { name, size: layout.size, applicationRevisionAdvanced: true };
     });
@@ -287,11 +298,36 @@ try {
       assert.equal((await call('ig5_bytes', { ea, size: 5 }, engine)).hex, '488d0411c3'); const value = await call('ig5_export_diff', {}, engine); assert.equal(value.patches, 0);
       assert.deepEqual(fs.readFileSync(value.patchedBinary), fixture.image); return { patchesAfterUndo: 0 };
     });
-    if (engine === 'reverse') {
-      await check('ig5_run_idapython', engine, 'native API byte/name result exactly matches public tools', async () => {
-        const value = await call('ig5_run_idapython', { code: 'import json, ida_bytes, ida_name\nprint(json.dumps({"hex": ida_bytes.get_bytes(' + BigInt(ea) + ', 5).hex(), "name": ida_name.get_name(' + BigInt(ea) + ')}))' }, engine);
-        assert.equal(value.ok, true); const result = JSON.parse(value.output); assert.equal(result.hex, '488d0411c3'); assert.equal(result.name, 'IG5Catalog_reverse_add'); return result;
-      });
+    await check('ig5_run_idapython', engine, 'real API reads, transactional script writes, session Undo and exception rollback', async () => {
+      const prefix = 'import json, ida_bytes, ida_name\n';
+      const value = await call('ig5_run_idapython', { code: prefix + 'print(json.dumps({"hex": ida_bytes.get_bytes(' + BigInt(ea) + ', 5).hex(), "name": ida_name.get_name(' + BigInt(ea) + ')}))' }, engine);
+      assert.equal(value.ok, true); const result = JSON.parse(value.output); assert.equal(result.hex, '488d0411c3'); assert.equal(result.name, 'IG5Catalog_' + engine + '_add');
+      if (!commercial(engine)) {
+        assert.equal(value.saved, false); assert.equal(value.committed, true); assert.equal(value.source.engine, 'Ghidra');
+        const changed = 'IG5Script_' + engine + '_add';
+        const write = await call('ig5_run_idapython', { code: prefix + 'assert ida_name.set_name(' + BigInt(ea) + ', ' + JSON.stringify(changed) + ')\nprint("changed")' }, engine);
+        assert.equal(write.committed, true); assert.equal((await call('ig5_decompile', { ea }, engine)).name, changed);
+        assert.equal((await call('ig5_undo', {}, engine)).ok, true);
+        assert.equal((await call('ig5_decompile', { ea }, engine)).name, result.name);
+        const patched = await call('ig5_run_idapython', { code: 'import ida_bytes\nassert ida_bytes.patch_bytes(' + BigInt(ea) + ', bytes.fromhex("90"))' }, engine);
+        assert.equal(patched.committed, true); assert.equal((await call('ig5_bytes', { ea, size: 1 }, engine)).hex, '90');
+        assert.equal((await call('ig5_undo', {}, engine)).ok, true);
+        assert.equal((await call('ig5_bytes', { ea, size: 5 }, engine)).hex, result.hex);
+        let rollback;
+        try { await call('ig5_run_idapython', { code: prefix + 'ida_name.set_name(' + BigInt(ea) + ', "SHOULD_ROLL_BACK")\nraise ValueError("catalog scripted failure")' }, engine); }
+        catch (error) { rollback = error; }
+        assert(rollback); assert.equal(rollback.transactionRolledBack, true);
+        assert.equal(rollback.source.engine, 'Ghidra'); assert(rollback.budget.used.apiCalls > 0);
+        assert.equal((await call('ig5_decompile', { ea }, engine)).name, result.name);
+        await assert.rejects(call('ig5_run_idapython', { code: 'import ida_bytes\nida_bytes.patch_bytes(' + BigInt(ea) + ', bytes.fromhex("90"))\nraise RuntimeError("rollback scripted patch")' }, engine), /rollback scripted patch/);
+        assert.equal((await call('ig5_bytes', { ea, size: 5 }, engine)).hex, result.hex);
+        await assert.rejects(call('ig5_run_idapython', { code: 'import ida_bytes\nfrom array import array\nida_bytes.patch_bytes(' + BigInt(ea) + ', memoryview(array("I", range(1025))))' }, engine), /4096/);
+        assert.equal((await call('ig5_bytes', { ea, size: 5 }, engine)).hex, result.hex);
+        await assert.rejects(call('ig5_run_idapython', { code: 'import ida_hexrays' }, engine), /Unsupported|unsupported|not supported/i);
+      }
+      return { ...result, transactionalWritesVerified: !commercial(engine) };
+    });
+    if (commercial(engine)) {
       await check('ig5_vtables', engine, 'RTTI class plus explicit virtual slot', async () => {
         const value = await call('ig5_vtables', { ea: fixture.vtable, abi: 'msvc', offset: 8 }, engine); assert.equal(value.total, 1); const table = value.tables[0];
         assert.equal(table.slots.length, 2); assert.equal(table.selected_slot.target, fixture.addresses.buffer); assert.equal(table.rtti.type.raw_name, '.?AVIG5Derived@@'); return { class: table.rtti.type.raw_name, slots: table.slots.length };
@@ -312,8 +348,19 @@ try {
       });
       if (requestedEngines.includes('ghidra')) await unsupported('ig5_ir', engine, { ea }, 'ir');
     } else {
-      for (const [tool, method] of [['ig5_run_idapython', 'idapython'], ['ig5_microcode', 'microcode']])
-        await unsupported(tool, engine, tool === 'ig5_run_idapython' ? { code: 'pass' } : { ea }, method);
+      await check('ig5_microcode', engine, 'real bounded staged p-code, temporary optimization and unchanged database', async () => {
+        const before = await revision(engine), bytes = (await call('ig5_bytes', { ea, size: 5 }, engine)).hex;
+        const stages = {};
+        for (const maturity of ['generated', 'preoptimized', 'locopt', 'calls', 'glbopt1', 'glbopt2', 'glbopt3', 'lvars']) {
+          const value = await call('ig5_microcode', { ea, maturity, max_blocks: 30, max_instructions: 200 }, engine);
+          assert.equal(value.ok, true); assert.equal(value.graph_built, true); assert.equal(value.representation, 'Ghidra p-code');
+          assert.equal(value.hexRaysEquivalent, false); assert(value.returned_instructions > 0); stages[maturity] = value.actualStage;
+        }
+        const optimized = await call('ig5_microcode', { ea: fixture.addresses.xor_self, action: 'optimize', maturity: 'generated', rules: ['xor-self', 'sub-self'], max_instructions: 200 }, engine);
+        assert.equal(optimized.ok, true); assert.equal(optimized.idb_modified, false); assert(optimized.optimization);
+        assert.equal(await revision(engine), before); assert.equal((await call('ig5_bytes', { ea, size: 5 }, engine)).hex, bytes);
+        return { stages, temporaryOptimization: true, databaseUnchanged: true };
+      });
       await check('ig5_vtables', engine, 'IG5 kernel RTTI over real Ghidra memory', async () => {
         const value = await call('ig5_vtables', { ea: fixture.vtable, abi: 'msvc', offset: 8 }, engine);
         assert.equal(value.total, 1); const table = value.tables[0];
@@ -417,11 +464,11 @@ finally {
     checks: checks.filter(row => row.tool === tool), approval: approvalChecks.find(row => row.tool === tool) }));
   const covered = coverage.filter(row => row.passed).length;
   const report = { schemaVersion: 1, ok: !failure && cleanupSucceeded && covered === 38, pluginRoot, sourceRoot,
-    requestedEngines, executeDebugger, toolCount: expectedNames.length, passedToolCount: covered, approvalToolCount: approvalChecks.length,
+    requestedEngines, reverseProvider, executeDebugger, toolCount: expectedNames.length, passedToolCount: covered, approvalToolCount: approvalChecks.length,
     engineReports, coverage, checks, cleanupSucceeded, ...(failure ? { error: failure } : {}),
     execution: 'Real public definition.execute → native Reverse/Ghidra workers; real bundled Unicorn; x64dbg executes only a generated PE64.',
     hostBoundary: 'A controlled public approval.request service exercises the real plugin gate with agent/callId/signal. Rejected decisions must not call next; allowed-once delegates once. The actual DSH SDK dispatch is exercised separately in isolation by test_host_sdk.mjs. The desktop consent dialog is not verified by either suite.',
-    boundaries: ['One generated PE64 pair; no arbitrary-binary guarantee.', 'Unsupported engine/tool pairs are recorded separately and do not count as successful execution.', 'No Android/iOS native runtime claim.', 'Full38 success requires both licensed Reverse and bundled Ghidra plus enabled x64dbg.'],
+    boundaries: ['One generated PE64 pair; no arbitrary-binary guarantee.', 'Unsupported engine/tool pairs are recorded separately and do not count as successful execution.', 'No Android/iOS native runtime claim.', 'Bundled Full38 uses independent Reverse/Ghidra databases with disclosed Ghidra provider and enabled x64dbg; no commercial installation required. Python compatibility is a documented subset, p-code stages are not proprietary microcode equivalents.'],
   };
   fs.mkdirSync(reportDirectory, { recursive: true }); fs.writeFileSync(reportFile, JSON.stringify(report, null, 2) + '\n', { flag: 'wx' });
   console.log(JSON.stringify({ ok: report.ok, passedToolCount: covered, approvalToolCount: approvalChecks.length, report: reportFile }));

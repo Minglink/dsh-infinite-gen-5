@@ -28,15 +28,24 @@ const WORKER = path.join(HERE, 'worker', 'ig5_worker.py');
 // ── Config（cordis.yml 插件行可覆盖；misconfiguration fails loud） ──────────
 function resolveConfig(cfg = {}) {
   const runtime = runtimeConfiguration(cfg);
-  const reverseRuntime = resolveReverseRuntime(cfg, { host: runtime.host });
+  const reverseProvider = cfg.reverseProvider || 'bundled';
+  if (!['bundled', 'commercial'].includes(reverseProvider)) throw new Error('reverseProvider must be bundled or commercial');
+  const reverseRuntime = reverseProvider === 'commercial' ? resolveReverseRuntime(cfg, { host: runtime.host }) : {
+    available: runtime.ghidra.available, source: runtime.ghidra.source, distribution: 'bundled', provider: 'ghidra',
+    readiness: runtime.ghidra.available ? 'ready-to-start' : 'missing-runtime', runtimeReady: null,
+    startupVerified: false, validation: 'runtime-metadata-and-files',
+    reason: runtime.ghidra.available ? '五代内置 Reverse 核心已就绪；首次检查会验证实际启动。' : runtime.ghidra.reason,
+    pythonExe: runtime.ghidra.pythonExe,
+  };
   const { idaDir, pythonExe, available: reverseAvailable } = reverseRuntime;
   return {
     ...runtime,
     idaDir,
     reverseAvailable,
     reverseRuntime,
+    reverseProvider,
     pythonExe,
-    defaultEngine: cfg.defaultEngine ? engineId(cfg.defaultEngine) : runtime.ghidra.available ? 'ghidra' : reverseAvailable ? 'reverse' : 'ghidra',
+    defaultEngine: cfg.defaultEngine ? engineId(cfg.defaultEngine) : 'reverse',
     defaultDebugger: cfg.defaultDebugger || (runtime.x64dbg.available ? 'x64dbg' : 'auto'),
     projectRoot: cfg.projectRoot || (cfg.artifactDir ? path.join(cfg.artifactDir, 'projects') : runtime.projectRoot),
     stateRoot: cfg.stateRoot || (cfg.artifactDir ? path.join(cfg.artifactDir, 'runtime-state') : path.join(runtime.home, 'state')),
@@ -135,8 +144,8 @@ class WorkerManager {
         progress: null, stderrTail: '', cache: new Map(), dbRevision: 0, queuedOperations: 0, state: 'opening' };
       const identity = this.projects.open(session.target);
       Object.assign(session, { projectId: identity.projectId, artifactId: identity.artifactId, sha256: identity.sha256 });
-      if (engine === 'ghidra' && [...this.sessions.values()].some((s) => s.engine === engine && s.artifactId === identity.artifactId)) {
-        throw new Error('This artifact already has an active Ghidra database at another path; close that session before reopening its moved alias');
+      if ((engine === 'ghidra' || engine === 'reverse' && this.cfg.reverseProvider === 'bundled') && [...this.sessions.values()].some((s) => s.engine === engine && s.artifactId === identity.artifactId)) {
+        throw new Error('This artifact already has an active database in this analysis lane at another path; close that session before reopening its moved alias');
       }
       const proc = this.spawnWorker(engine);
       session.proc = proc; proc.__ig5 = session;
@@ -250,7 +259,7 @@ class WorkerManager {
       try { session.info = await this.rpc(
         session,
         'open',
-        { path: session.target, auto: !!autoAnalysis, fresh, progress: true, database_key: `${session.projectId}-${session.artifactId}`,
+        { path: session.target, auto: !!autoAnalysis, fresh, progress: true, database_key: `${engine === 'reverse' && this.cfg.reverseProvider === 'bundled' ? 'reverse-' : ''}${session.projectId}-${session.artifactId}`,
           ...(options.analysisTimeout !== undefined ? { timeout: options.analysisTimeout } : {}),
           ...(options.analysisProfile !== undefined ? { analysis_profile: options.analysisProfile } : {}) },
         this.cfg.openTimeoutMs,
@@ -263,10 +272,14 @@ class WorkerManager {
       } catch (error) { this.killSession(key); throw error; }
       session.attachmentId = attachment.attachmentId;
       session.dbRevision = attachment.dbRevision;
-      session.info = { ...session.info, ...this.evidence(session), target: session.target, engine };
+      session.info = { ...session.info, backendEngine: session.info?.engine, ...this.evidence(session), target: session.target, engine };
       session.state = 'open';
       session.lastOp = 'idle';
       session.lastStage = null;
+      if (engine === 'reverse' && this.cfg.reverseProvider === 'bundled') Object.assign(this.cfg.reverseRuntime, {
+        readiness: 'verified', runtimeReady: true, startupVerified: true, verifiedBy: 'open',
+        reason: '五代内置 Reverse 核心已启动并打开分析数据库。',
+      });
       return { ...session.info, alreadyOpen: false };
     })();
 
@@ -303,7 +316,7 @@ class WorkerManager {
 
   rpcError(value) {
     const error = new Error(publicEngineError(value, this.cfg).split('\n').slice(-3).join(' | '));
-    for (const field of ['code', 'committed', 'saved', 'partial_commit', 'recoveryRequired', 'stage', 'journalId', 'revision', 'durableRevision', 'cleanedUp', 'state', 'stateCode', 'runId', 'stopSeq', 'cancelledBeforeExecution']) {
+    for (const field of ['code', 'committed', 'saved', 'partial_commit', 'recoveryRequired', 'stage', 'journalId', 'revision', 'durableRevision', 'cleanedUp', 'state', 'stateCode', 'runId', 'stopSeq', 'cancelledBeforeExecution', 'transactionRolledBack', 'stdout', 'stderr', 'compatibility', 'exceptionType', 'budget', 'source', 'compatibilityWrites', 'limitations', 'target_executed']) {
       if (value && typeof value === 'object' && value[field] !== undefined) error[field] = value[field];
     }
     return error;
@@ -311,6 +324,7 @@ class WorkerManager {
 
   evidence(session) {
     return { target: session.target, engine: session.engine, projectId: session.projectId, artifactId: session.artifactId,
+      provider: session.engine === 'reverse' ? this.cfg.reverseProvider === 'bundled' ? 'ghidra' : 'commercial' : session.engine,
       sha256: session.sha256, dbRevision: session.dbRevision, attachmentId: session.attachmentId };
   }
 
@@ -370,8 +384,8 @@ class WorkerManager {
     if (debuggerEngine === 'x64dbg') {
       await this.open(session.target, false, { engine: 'x64dbg', internal: true });
       debugSession = this.sessions.get(this.sessionKey(session.target, 'x64dbg'));
-    } else if (session.engine !== 'reverse') {
-      throw new Error('This debugger requires a Reverse session; select backend=x64dbg for Ghidra targets');
+    } else if (session.engine !== 'reverse' || this.cfg.reverseProvider === 'bundled') {
+      throw new Error('This debugger requires the optional commercial provider; select backend=x64dbg for the bundled core');
     }
     const caller = this.scope.getStore()?.agentId || 'local';
     const readOnly = ['regs', 'readmem', 'state', 'event', 'modules', 'threads', 'callstack'].includes(params.op);
@@ -430,7 +444,8 @@ class WorkerManager {
     try {
       child = this.spawnWorker(engine);
       const result = await doctorWorker(child, { formatError: error => this.rpcError(error) });
-      if (engine === 'reverse') {
+      if (result?.ok !== true && !(engine === 'reverse' && this.cfg.reverseProvider !== 'bundled' && result?.idalib === 'loaded')) throw new Error('Analysis core did not confirm a successful startup');
+      if (engine === 'reverse' && this.cfg.reverseProvider !== 'bundled') {
         if (result?.idalib !== 'loaded') throw new Error('Reverse 原生内核没有确认启动完成。');
         if (this.cfg.reverseRuntime) Object.assign(this.cfg.reverseRuntime, { readiness: 'verified', runtimeReady: true, startupVerified: true,
           reason: 'Reverse 原生启动检查通过；具体目标架构的反编译能力仍需打开样本验证。' });
@@ -440,7 +455,10 @@ class WorkerManager {
             wait: result?.caps?.['ida_auto.auto_wait'] === true,
             makeCode: result?.caps?.['ida_auto.auto_make_code'] === true } };
       }
-      return { ...result, engine, runtimeReady: true };
+      if (engine === 'reverse') Object.assign(this.cfg.reverseRuntime, { readiness: 'verified', runtimeReady: true, startupVerified: true, verifiedBy: 'doctor',
+        reason: '五代内置 Reverse 核心启动检查通过。' });
+      return { ...result, provider: engine === 'reverse' ? this.cfg.reverseProvider === 'bundled' ? 'ghidra' : 'commercial' : engine,
+        engine, runtimeReady: true, startupVerified: true };
     } catch (error) {
       if (engine === 'reverse' && this.cfg.reverseRuntime) Object.assign(this.cfg.reverseRuntime, { readiness: 'startup-failed', runtimeReady: false,
         startupVerified: false, reason: 'Reverse 原生启动检查失败：' + publicEngineError(error, this.cfg) });
@@ -449,8 +467,9 @@ class WorkerManager {
   }
 
   engines() {
-    return [{ id: 'reverse', label: 'Reverse', available: this.cfg.reverseAvailable, default: this.cfg.defaultEngine === 'reverse',
-      source: this.cfg.reverseRuntime?.source || 'local-installation', distribution: 'local-installation',
+    return [{ id: 'reverse', label: this.cfg.reverseProvider === 'bundled' ? 'Reverse · 内置' : 'Reverse · 本机扩展', available: this.cfg.reverseAvailable, default: this.cfg.defaultEngine === 'reverse',
+      provider: this.cfg.reverseProvider === 'bundled' ? 'ghidra' : 'commercial', portable: this.cfg.reverseProvider === 'bundled' && this.cfg.ghidra?.portable,
+      source: this.cfg.reverseRuntime?.source || 'local-installation', distribution: this.cfg.reverseProvider === 'bundled' ? 'bundled' : 'local-installation',
       readiness: this.cfg.reverseRuntime?.readiness || 'detected', runtimeReady: this.cfg.reverseRuntime?.runtimeReady ?? null,
       startupVerified: this.cfg.reverseRuntime?.startupVerified === true, validation: this.cfg.reverseRuntime?.validation || 'files-only',
       reason: this.cfg.reverseRuntime?.reason, code: this.cfg.reverseRuntime?.code, discoveryPartial: this.cfg.reverseRuntime?.discoveryPartial === true },
@@ -1066,8 +1085,8 @@ function defineIg5Tools(ctx, mgr, cfg) {
           projects: mgr.projects?.listProjects?.() || [],
           ...(mgr.workflow?.snapshot(execution) || { toolset: cfg.toolset || 'core' }),
           ...(args.history ? { history: await mgr.analysis.history(args.history) } : {}),
-          engineConfigured: !cfg.defaultEngine || cfg.defaultEngine === 'reverse' ? !!cfg.idaDir : !!cfg[cfg.defaultEngine]?.available,
-          pythonConfigured: !cfg.defaultEngine || cfg.defaultEngine === 'reverse' ? !!cfg.pythonExe : !!cfg[cfg.defaultEngine]?.pythonExe,
+          engineConfigured: cfg.defaultEngine === 'reverse' ? cfg.reverseAvailable : !!cfg[cfg.defaultEngine]?.available,
+          pythonConfigured: cfg.defaultEngine === 'reverse' ? !!cfg.pythonExe : !!cfg[cfg.defaultEngine]?.pythonExe,
           requestTimeoutMs: cfg.requestTimeoutMs,
           maxSessions: cfg.maxSessions,
           tools: [
@@ -1642,12 +1661,12 @@ function defineIg5Tools(ctx, mgr, cfg) {
     {
       name: 'ig5_run_idapython',
       description:
-        'Escape hatch: execute arbitrary Reverse Python API code in the worker and capture stdout. WRITE OPERATION: approval-gated; a hanging script is killed with the worker by the RPC timeout.',
+        'Execute approved Python in the selected analysis worker and capture bounded stdout. The bundled core exposes currentProgram, flat_api and a documented common legacy Reverse Python API subset; unavailable APIs fail explicitly. Database writes use one transaction with session Undo; external Python effects are not reversible. This is not a sandbox. Hanging scripts are stopped with their owned worker by the RPC timeout.',
       parameters: {
         type: 'object',
         properties: {
           target: { type: 'string', description: 'Target path previously opened with ig5_open' },
-          code: { type: 'string', description: 'Reverse Python API source' },
+          code: { type: 'string', description: 'Python source; bundled core: Ghidra FlatProgramAPI/currentProgram or documented legacy Reverse API subset, max 64 KiB' },
         },
         required: ['target', 'code'],
       },
@@ -1902,7 +1921,7 @@ export function apply(ctx, config = {}) {
         description: isData ? 'Optional result association or static source backend; standalone byte/file/ref analysis does not require an engine.' : 'Explicit backend. Omit to use the configured primary static engine; results identify their source.' };
       if (IG5_WRITE_TOOLS.has(definition.name) && definition.name !== 'ig5_sync') definition.parameters.properties.expected_revision = {
         type: 'number', description: 'Reject this operation if the selected database revision has changed since planning' };
-      definition.execute = (args = {}, execution) => mgr.scope.run({ engine: args.engine || (definition.name === 'ig5_ir' ? 'ghidra' : cfg.defaultEngine), agentId: execution?.agent?.id || execution?.agent?.sessionId, signal: execution?.signal }, async () => {
+      definition.execute = (args = {}, execution) => mgr.scope.run({ engine: args.engine || (definition.name === 'ig5_ir' && cfg.reverseProvider !== 'bundled' ? 'ghidra' : cfg.defaultEngine), agentId: execution?.agent?.id || execution?.agent?.sessionId, signal: execution?.signal }, async () => {
         if (execution?.signal?.aborted) throw new Error('IG5 operation cancelled');
         if (args.engine) engineId(args.engine);
         const selected = !args.target && !isGlobal && !['ig5_open', 'ig5_doctor', 'ig5_bindiff', 'ig5_sync'].includes(definition.name)

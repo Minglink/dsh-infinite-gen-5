@@ -33,7 +33,7 @@ export function defineAdvancedTools(mgr, cfg, render) {
     rpcTool('ig5_vtables', 'vtables', 'Inspect MSVC and Itanium virtual tables, RTTI class names and inheritance evidence. Returns virtual slots and a reviewable structure declaration. Given a table EA and byte offset, resolve that explicit virtual slot; register provenance is not inferred.',
       { ea, abi: { type: 'string', enum: ['auto', 'msvc', 'itanium'] }, offset: { type: 'number' },
         max_slots: { type: 'number' }, limit: { type: 'number' }, max_scan_bytes: { type: 'number' }, max_bases: { type: 'number' } }),
-    rpcTool('ig5_microcode', 'microcode', 'Generate real intermediate microcode at a selected optimization maturity. Inspect blocks and instructions, or optimize a temporary early-stage IR with optional restricted xor-self/sub-self filters and inspect rule hits and before/after evidence. Does not persist IR changes or automatically remove control-flow flattening.',
+    rpcTool('ig5_microcode', 'microcode', 'Inspect real intermediate operations and CFG, or apply restricted xor-self/sub-self rules to a temporary IR. The bundled core uses Ghidra p-code with explicit actualStage/maturity mapping; those stages are not proprietary microcode equivalents. Returns before/after evidence and actual rule hits. Does not persist IR edits or automatically remove control-flow flattening.',
       { ea, name, action: { type: 'string', enum: ['inspect', 'optimize'] }, maturity: { type: 'string', enum: ['generated', 'preoptimized', 'locopt', 'calls', 'glbopt1', 'glbopt2', 'glbopt3', 'lvars'] },
         max_blocks: { type: 'number' }, max_instructions: { type: 'number' }, rules: { type: 'array', items: { type: 'string', enum: ['xor-self', 'sub-self'] } } }),
     {

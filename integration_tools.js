@@ -43,7 +43,7 @@ export function defineIntegrationTools(mgr, cfg, render = renderDefault) {
   return [
     {
       name: 'ig5_ir',
-      description: 'Inspect Ghidra raw/high p-code, or select level=kernel for IG5 owned PE/ELF loading, CFG/local IR, RTTI and native C decompilation over a target file without opening a database, starting Java or using a commercial engine. The kernel uses attributed SLEIGH and Ghidra native decompiler cores; action=decompile returns real C with an explicit ea/max_code_bytes function extent. No IDAPython compatibility. Read-only and bounded.',
+      description: 'Inspect Ghidra raw/high p-code in the bundled Reverse or Ghidra database, or select level=kernel for IG5 owned PE/ELF loading, CFG/local IR, RTTI and native C decompilation over a target file without opening a database or starting Java. The kernel uses attributed SLEIGH and Ghidra native decompiler cores; action=decompile returns real C with an explicit ea/max_code_bytes function extent. Read-only and bounded.',
       parameters: { type: 'object', properties: { target: { type: 'string' }, ea: { type: 'string' }, name: { type: 'string' },
         level: { type: 'string', enum: ['raw', 'high', 'kernel'] }, action: { type: 'string', enum: ['info', 'analyze', 'vtables', 'decompile'] },
         optimize: { type: 'boolean', description: 'Kernel-only local width-aware constant folding; does not modify target bytes' },
@@ -58,8 +58,9 @@ export function defineIntegrationTools(mgr, cfg, render = renderDefault) {
           return mgr.kernel.run(args, mgr.scope?.getStore()?.signal);
         }
         if (['action', 'optimize', 'max_code_bytes', 'abi', 'offset', 'max_slots', 'max_bases', 'max_scan_bytes', 'limit'].some(key => Object.hasOwn(args, key))) throw new Error('Kernel-only parameters require level=kernel');
-        const session = opened(mgr, args.target, 'ghidra');
-        if (args.engine && args.engine !== 'ghidra') throw new Error('ig5_ir requires engine=ghidra; use ig5_microcode for Reverse');
+        const engine = args.engine || (cfg.reverseProvider === 'bundled' ? cfg.defaultEngine : 'ghidra');
+        if (engine === 'reverse' && cfg.reverseProvider !== 'bundled') throw new Error('Ghidra p-code requires engine=ghidra or the bundled Reverse core');
+        const session = opened(mgr, args.target, engine);
         return mgr.rpc(session, 'ir', args);
       },
     },
