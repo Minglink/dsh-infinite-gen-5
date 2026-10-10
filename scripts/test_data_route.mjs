@@ -54,7 +54,8 @@ const installDataRoute = vm.runInNewContext(
 
 function makeRoute(active = true) {
   const target = 'C:\\fixtures\\sample.exe';
-  const session = { target, alive: true };
+  const session = { target, engine: 'reverse', projectId: 'p', artifactId: 'a', sha256: 'h',
+    attachmentId: 'at', dbRevision: 0, alive: true };
   const calls = [];
   let spawns = 0;
   let handler;
@@ -62,10 +63,13 @@ function makeRoute(active = true) {
     sessions: new Map(active ? [[target.toLowerCase(), session]] : []),
     sessionKey: (value) => value.toLowerCase(),
     alive: (value) => value?.alive === true,
+    evidence(value) {
+      return Object.fromEntries(['target', 'engine', 'projectId', 'artifactId', 'sha256', 'attachmentId', 'dbRevision'].map(key => [key, value[key]]).concat([['provider', 'commercial']]));
+    },
     spawnWorker() { spawns++; throw new Error('data route must never spawn a worker'); },
     async rpc(value, method, params, timeout) {
       calls.push({ target: value.target, method, params, timeout });
-      return { method };
+      return { method, _ig5: mgr.evidence(value) };
     },
   };
   const ctx = {
@@ -218,6 +222,69 @@ for (const synchronous of [false, true]) {
   assert.equal(result.status, 200);
   assertRedacted(result.body.error);
 }
+for (const data of [undefined, null, { method: 'funcs' }, { _ig5: { attachmentId: 'at' } }]) {
+  const malformed = makeRoute();
+  malformed.mgr.rpc = async () => data;
+  const result = await malformed.request('?type=funcs');
+  assert.equal(result.body.code, 'STALE_DATA_CONTEXT', 'missing or incomplete worker evidence must not become a successful data response');
+  assert.equal(result.body.data, undefined);
+}
+
+// The caller's feed snapshot must also match at request admission. Otherwise a
+// close/reopen before HTTP arrival could serve a new owner to the old view.
+const snapshotFields = ['target', 'engine', 'projectId', 'artifactId', 'sha256', 'provider', 'attachmentId', 'dbRevision'];
+const expectedQuery = (snapshot, type = 'funcs') => '?'+ new URLSearchParams({ type, expected_snapshot: JSON.stringify(snapshot) });
+const snapshotRoute = makeRoute(), expectedSnapshot = snapshotRoute.mgr.evidence(snapshotRoute.session);
+for (const type of ['funcs', 'decompile', 'xrefs', 'strings', 'listing', 'calls', 'bytes', 'search', 'scan', 'struct',
+  'cfg', 'slice', 'fingerprint', 'disasm', 'stack', 'switches', 'vtables', 'microcode', 'ir']) {
+  const result = await snapshotRoute.request(expectedQuery(expectedSnapshot, type));
+  assert.equal(result.body.error, undefined, type + ' accepts the matching full snapshot');
+  assert.equal(result.body.data.method, type);
+  assert.equal('expected_snapshot' in snapshotRoute.calls.at(-1).params, false, 'host context is not a worker parameter');
+}
+for (const field of snapshotFields) {
+  const mismatch = { ...expectedSnapshot, [field]: field === 'dbRevision' ? 1 : expectedSnapshot[field] + '-other' };
+  const before = snapshotRoute.calls.length, result = await snapshotRoute.request(expectedQuery(mismatch));
+  assert.equal(result.body.code, 'STALE_DATA_CONTEXT', 'all identity fields bind the view: ' + field);
+  assert.equal(result.body.data, undefined);
+  assert.equal(snapshotRoute.calls.length, before, field + ' mismatch must not enter a worker');
+}
+const malformedSnapshots = [null, [], false, 0, 'not-an-object', {}, { ...expectedSnapshot, unexpected: 'field' }];
+for (const field of snapshotFields) {
+  const missing = { ...expectedSnapshot }; delete missing[field]; malformedSnapshots.push(missing);
+  malformedSnapshots.push({ ...expectedSnapshot, [field]: field === 'dbRevision' ? '0' : 1 });
+  if (field !== 'dbRevision') malformedSnapshots.push({ ...expectedSnapshot, [field]: '' });
+}
+malformedSnapshots.push(...[-1, 0.5, Number.MAX_SAFE_INTEGER + 1, null].map(dbRevision => ({ ...expectedSnapshot, dbRevision })));
+const malformedQueries = malformedSnapshots.map(snapshot => expectedQuery(snapshot));
+malformedQueries.push('?type=funcs&expected_snapshot=', '?type=funcs&expected_snapshot', '?type=funcs&expected_snapshot=%7B',
+  expectedQuery(expectedSnapshot) + '&expected_snapshot=',
+  '?type=funcs&expected_snapshot=' + encodeURIComponent(JSON.stringify(expectedSnapshot).replace('"dbRevision":0', '"dbRevision":-0')));
+for (const query of malformedQueries) {
+  const before = snapshotRoute.calls.length, result = await snapshotRoute.request(query);
+  assert.equal(result.body.code, 'STALE_DATA_CONTEXT', 'empty, malformed, incomplete, duplicate and unknown snapshots fail closed: ' + query);
+  assert.equal(result.body.data, undefined); assert.equal(snapshotRoute.calls.length, before);
+}
+for (const change of [{ attachmentId: 'reopened-owner' }, { dbRevision: 1 }]) {
+  const changed = makeRoute(), planned = changed.mgr.evidence(changed.session);
+  Object.assign(changed.session, change);
+  const stale = await changed.request(expectedQuery(planned));
+  assert.equal(stale.body.code, 'STALE_DATA_CONTEXT'); assert.equal(changed.calls.length, 0);
+  assert.equal((await changed.request(expectedQuery(changed.mgr.evidence(changed.session)))).body.error, undefined, 'a refreshed snapshot still works');
+}
+const lateChange = makeRoute();
+const admitted = lateChange.request(expectedQuery(lateChange.mgr.evidence(lateChange.session)));
+lateChange.session.attachmentId = 'changed-before-rpc';
+assert.equal((await admitted).body.code, 'STALE_DATA_CONTEXT');
+assert.equal(lateChange.calls.length, 0, 'a change between handler admission and RPC also fails closed');
+const independent = makeRoute();
+independent.mgr.analysis = { list: () => ({ items: [] }), result: () => ({ result: 'stored-data' }) };
+for (const type of ['analyses', 'analysis_result', 'approvals', 'debug_state']) {
+  const result = await independent.request('?type=' + type + '&expected_snapshot=');
+  assert.equal(result.body.error, undefined, type + ' keeps its independent scope contract');
+}
+assert.equal(independent.calls.length, 0);
+console.log('Data admission snapshots: matching static reads, all eight identity mismatches, invalid context, prior reopen/revision, and pre-RPC change passed.');
 
 // Evaluate the actual tool definitions with a fake child process; doctor must
 // filter the worker result before both execute() and output.render() expose it.
@@ -293,6 +360,7 @@ const workerStart = source.indexOf('class WorkerManager');
 const workerEnd = source.indexOf('// ── 诊断回路', workerStart);
 let workerMode = 'success';
 let releaseOpening, openingArrived, writesDuringOpening = 0;
+let exchangeChild;
 const workerContext = {
   AsyncLocalStorage, engineId, attachWorker, doctorWorker,
   HERE: fileURLToPath(new URL('..', import.meta.url)),
@@ -312,8 +380,14 @@ const workerContext = {
     child.stderr = new EventEmitter();
     child.exitCode = null;
     child.kill = () => { child.exitCode = 1; };
+    child.sent = [];
     child.stdin = { write(line) {
       const request = JSON.parse(line);
+      if (workerMode === 'dataBatch') {
+        child.sent.push(request);
+        if (request.method === 'open') queueMicrotask(() => child.stdout.emit('data', JSON.stringify({ id: request.id, result: { n_funcs: 1, bits: 64 } }) + '\n'));
+        return;
+      }
       if (workerMode === 'delayedOpen') {
         if (request.method === 'open') {
           releaseOpening = () => child.stdout.emit('data', JSON.stringify({ id: request.id, result: { n_funcs: 1, bits: 64 } }) + '\n');
@@ -348,6 +422,7 @@ const workerContext = {
         if (workerMode === 'startupExit') { child.exitCode = 1; child.emit('exit', 1); }
       } else child.stdout.emit('data', '{"ig5":"ready"}\n');
     });
+    if (workerMode === 'dataBatch') exchangeChild = child;
     return child;
   },
 };
@@ -428,6 +503,126 @@ assert.equal(writesDuringOpening, 0, 'no operation may run between transport rea
 releaseOpening(); await opening; await earlyWrite;
 assert.equal(openingSession.dbRevision, 8, 'the first write must increment the attached historical revision');
 openingManager.killSession(openingSession.key);
+
+// Use the actual WorkerManager message pump and route: Promise continuations
+// must not relabel a read when the same stdout batch also settles a write.
+function dataRequest(mgr, type = 'decompile') {
+  let handler;
+  installDataRoute({ inject(_names, callback) { callback({ webServer: { register(spec) { handler = spec.handler; } } }); } }, mgr, cfg);
+  return new Promise((resolve, reject) => {
+    try {
+      handler({ method: 'GET', url: '/ig5-data?' + new URLSearchParams({ type, target: 'C:\\fixtures\\sample.exe', ea: '0x1000' }) }, {
+        writeHead(status) { assert.equal(status, 200); }, end(body) { resolve(JSON.parse(body)); },
+      });
+    } catch (error) { reject(error); }
+  });
+}
+function emitResponses(child, records) { child.stdout.emit('data', records.map(record => JSON.stringify(record) + '\n').join('')); }
+for (const order of ['normal', 'read-write', 'write-read', 'replace', 'provider-mismatch']) {
+  workerMode = 'dataBatch';
+  const batchManager = new WorkerManager(cfg);
+  let attachmentSequence = 0;
+  batchManager.projects.attachEngine = () => ({ attachmentId: 'at-' + (++attachmentSequence), dbRevision: 0 });
+  batchManager.projects.bumpRevision = () => ({ dbRevision: 1 });
+  await batchManager.open('C:\\fixtures\\sample.exe');
+  const batchSession = batchManager.get('C:\\fixtures\\sample.exe'), batchChild = exchangeChild;
+  const response = dataRequest(batchManager);
+  await new Promise(setImmediate);
+  const read = batchChild.sent.find(record => record.method === 'decompile');
+  assert(read, 'data read must reach the real message pump');
+  const readResult = { id: read.id, result: { ea: '0x1000', code: 'snapshot-zero' } };
+  if (order === 'normal') {
+    emitResponses(batchChild, [readResult]);
+    const normal = await response;
+    assert.equal(normal.error, undefined);
+    assert.equal(normal.data.code, 'snapshot-zero');
+    for (const field of ['target', 'engine', 'projectId', 'artifactId', 'sha256', 'provider', 'attachmentId', 'dbRevision']) {
+      assert.equal(normal[field], normal.data._ig5[field], 'outer identity must match the worker snapshot: ' + field);
+    }
+  } else if (order === 'provider-mismatch') {
+    const originalRPC = batchManager.rpc;
+    // The real worker supplies complete evidence; corrupt it at the boundary
+    // to ensure the route also checks the returned evidence, not only session.
+    batchManager.rpc = (...args) => originalRPC.apply(batchManager, args).then(data => ({ ...data, _ig5: { ...data._ig5, attachmentId: 'other-attachment' } }));
+    // The first request is already pending, so exercise a new request using
+    // this deliberately corrupted transport boundary and drain the first.
+    const corruptResponse = dataRequest(batchManager);
+    await new Promise(setImmediate);
+    const corruptRead = batchChild.sent.filter(record => record.method === 'decompile').at(-1);
+    emitResponses(batchChild, [readResult, { id: corruptRead.id, result: { ea: '0x1000', code: 'foreign' } }]);
+    assert.equal((await response).error, undefined);
+    assert.equal((await corruptResponse).code, 'STALE_DATA_CONTEXT');
+  } else if (order === 'replace') {
+    emitResponses(batchChild, [readResult]);
+    batchManager.killSession(batchSession.key);
+    const reopened = batchManager.open('C:\\fixtures\\sample.exe');
+    const stale = await response;
+    assert.equal(stale.code, 'STALE_DATA_CONTEXT'); assert.equal(stale.data, undefined);
+    await reopened;
+    assert.equal(batchManager.get('C:\\fixtures\\sample.exe').attachmentId, 'at-2');
+  } else {
+    const mutation = batchManager.withSessions([batchSession], () => batchManager.rpc(batchSession, 'comment', { ea: '0x1000', text: 'fixture' }));
+    await new Promise(setImmediate);
+    const write = batchChild.sent.find(record => record.method === 'comment');
+    const writeResult = { id: write.id, result: { ok: true } };
+    emitResponses(batchChild, order === 'read-write' ? [readResult, writeResult] : [writeResult, readResult]);
+    const stale = await response;
+    assert.equal(stale.code, 'STALE_DATA_CONTEXT'); assert.equal(stale.data, undefined);
+    await mutation; assert.equal(batchSession.dbRevision, 1);
+  }
+  batchManager.killSession(batchSession.key);
+}
+console.log('Data exchange snapshots: ordinary complete evidence, both stdout batch orders, close/reopen, and mismatched provider evidence passed.');
+
+// Evaluate the exact public apply() wrapper with the real tool definitions and
+// WorkerManager. Cordis registration is controlled; no approval or engine is
+// bypassed in a running host. JSON serialization only bridges these VM realms.
+function wrappedTools(mgr) {
+  let wrapped;
+  const apply = vm.runInNewContext(source.slice(source.indexOf('export function apply(')).replace('export function apply(', 'function apply(') + '\napply;', {
+    resolveConfig: () => cfg, WorkerManager: class { constructor() { return mgr; } },
+    installDiagRoute() {}, installJobsRoute() {}, installDataRoute() {}, installApprovalGate() {},
+    defineIg5Tools, IG5_WRITE_TOOLS: vm.runInNewContext(source.slice(source.indexOf('const IG5_WRITE_TOOLS'), source.indexOf('function installApprovalGate')) + '\nIG5_WRITE_TOOLS;'),
+    PLUGIN_ID: 'dsh-infinite-gen-5', engineId, publicEngineError,
+    jsonToolOutput: value => JSON.parse(JSON.stringify(value)),
+    installWorkflow(_ctx, options) { wrapped = options.definitions; return { async dispose() {} }; },
+  });
+  apply({ effect(body) { body(); }, get() { return undefined; } }, cfg);
+  return wrapped;
+}
+for (const expectedRevision of [undefined, 0]) {
+  workerMode = 'dataBatch';
+  const queueManager = new WorkerManager(cfg);
+  let attachments = 0;
+  queueManager.projects.attachEngine = () => ({ attachmentId: 'queue-at-' + (++attachments), dbRevision: 0 });
+  queueManager.projects.bumpRevision = () => ({ dbRevision: 1 });
+  await queueManager.open('C:\\fixtures\\sample.exe');
+  const oldSession = queueManager.get('C:\\fixtures\\sample.exe'), oldChild = exchangeChild;
+  const tools = wrappedTools(queueManager), comment = tools.find(tool => tool.name === 'ig5_comment');
+  const predecessor = queueManager.withSessions([oldSession], () => queueManager.rpc(oldSession, 'decompile', { ea: '0x1000' }));
+  const predecessorRejected = assert.rejects(predecessor, /worker 已被关闭/);
+  await new Promise(setImmediate);
+  const queued = comment.execute({ target: 'C:\\fixtures\\sample.exe', ea: '0x1000', text: 'planned for old attachment',
+    ...(expectedRevision === undefined ? {} : { expected_revision: expectedRevision }) }, { agent: { id: 'queue-fixture' } });
+  const queuedRejected = assert.rejects(queued, { code: 'STALE_SESSION_CONTEXT' });
+  queueManager.killSession(oldSession.key);
+  const reopening = queueManager.open('C:\\fixtures\\sample.exe');
+  await predecessorRejected; await queuedRejected; await reopening;
+  const currentSession = queueManager.get('C:\\fixtures\\sample.exe'), currentChild = exchangeChild;
+  assert.equal(oldSession.attachmentId, 'queue-at-1'); assert.equal(currentSession.attachmentId, 'queue-at-2');
+  assert.equal(oldChild.sent.some(request => request.method === 'comment'), false);
+  assert.equal(currentChild.sent.some(request => request.method === 'comment'), false, 'old queued tool must not write through the new attachment');
+  assert.equal(currentSession.dbRevision, 0);
+  const currentWrite = comment.execute({ target: 'C:\\fixtures\\sample.exe', ea: '0x1000', text: 'new attachment review', expected_revision: 0 }, { agent: { id: 'queue-fixture' } });
+  await new Promise(setImmediate);
+  const submitted = currentChild.sent.find(request => request.method === 'comment');
+  assert(submitted, 'a fresh tool call bound to the new attachment must still execute');
+  emitResponses(currentChild, [{ id: submitted.id, result: { ok: true } }]);
+  const written = await currentWrite;
+  assert.equal(written._ig5.attachmentId, 'queue-at-2'); assert.equal(currentSession.dbRevision, 1);
+  queueManager.killSession(currentSession.key);
+}
+console.log('Public queued tools: failed old session cannot transfer a write to a reopened attachment, with or without expected_revision; fresh calls still work.');
 workerContext.spawn = nativeSpawn;
 const missingRuntime = new WorkerManager({ ...cfg, pythonExe: path.join(process.env.TEMP, 'ig5-deliberately-missing-runtime.exe') });
 await assert.rejects(missingRuntime.open('C:\\fixtures\\sample.exe'), /ENOENT/);

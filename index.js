@@ -988,11 +988,49 @@ function installDataRoute(ctx, mgr, cfg) {
             params.level = url.searchParams.get('level') || 'high';
             params.max_instructions = Math.max(1, Math.min(params.limit || 120, 1000));
           }
+          // A stdout batch can settle a read and then a write before the read's
+          // Promise continuation runs. Never label that read with the session's
+          // later revision, or serve a replaced attachment as the old selection.
+          const identityFields = ['target', 'engine', 'projectId', 'artifactId', 'sha256', 'provider', 'attachmentId', 'dbRevision'];
+          let snapshot;
+          try {
+            const evidence = mgr.evidence(session);
+            snapshot = Object.freeze(Object.fromEntries(identityFields.map(field => [field, evidence[field]])));
+            if (identityFields.some(field => field === 'dbRevision'
+              ? !Number.isSafeInteger(snapshot[field]) || snapshot[field] < 0
+              : typeof snapshot[field] !== 'string' || !snapshot[field])) {
+              throw new Error('Target database identity is not ready; wait for ig5_open to finish');
+            }
+            // The view may still hold the previous jobs-feed snapshot when a
+            // close/reopen occurs before this request reaches the handler.
+            if (url.searchParams.has('expected_snapshot')) {
+              let expected;
+              try { expected = JSON.parse(url.searchParams.get('expected_snapshot')); } catch {}
+              if (url.searchParams.getAll('expected_snapshot').length !== 1
+                || !expected || typeof expected !== 'object' || Array.isArray(expected)
+                || Object.keys(expected).length !== identityFields.length
+                || identityFields.some(field => !Object.hasOwn(expected, field)
+                  || (field === 'dbRevision'
+                    ? !Number.isSafeInteger(expected[field]) || expected[field] < 0 || Object.is(expected[field], -0)
+                    : typeof expected[field] !== 'string' || !expected[field])
+                  || expected[field] !== snapshot[field])) {
+                throw Object.assign(new Error('Selected database snapshot is invalid or has changed; refresh the target and retry'), { code: 'STALE_DATA_CONTEXT' });
+              }
+            }
+          } catch (error) { send(200, { error: publicEngineError(error, cfg), ...(error?.code ? { code: error.code } : {}) }); return; }
+          const assertSnapshot = (data, returned = false) => {
+            const current = mgr.evidence(session);
+            if (!mgr.alive(session) || session.closing
+              || mgr.sessions.get(mgr.sessionKey(snapshot.target, snapshot.engine)) !== session
+              || identityFields.some(field => current[field] !== snapshot[field])
+              || returned && (!data?._ig5 || identityFields.some(field => data._ig5[field] !== snapshot[field]))) {
+              throw Object.assign(new Error('Database snapshot changed while reading; refresh the target and retry'), { code: 'STALE_DATA_CONTEXT' });
+            }
+          };
           Promise.resolve()
-            .then(() => mgr.rpc(session, type, params, 60_000))
-            .then((data) => send(200, { target: session.target, engine: session.engine, projectId: session.projectId,
-              artifactId: session.artifactId, dbRevision: session.dbRevision, type, data }))
-            .catch((e) => send(200, { error: publicEngineError(e, cfg) }));
+            .then(() => { assertSnapshot(); return mgr.rpc(session, type, params, 60_000); })
+            .then((data) => { assertSnapshot(data, true); send(200, { ...snapshot, type, data }); })
+            .catch((e) => send(200, { error: publicEngineError(e, cfg), ...(e?.code ? { code: e.code } : {}) }));
         },
       });
       diagAppend(cfg, 'host: /ig5-data 路由已挂载');
@@ -1944,10 +1982,18 @@ export function apply(ctx, config = {}) {
         if (selected) args = { ...args, target: selected };
         const standaloneKernel = definition.name === 'ig5_ir' && args.level === 'kernel';
         const session = selected && !isData && !standaloneKernel ? mgr.get(selected) : null;
+        const selectedAttachment = session?.attachmentId;
         const perform = async () => {
         if (session?.state === 'opening') {
           await mgr.launching.get(session.key);
           if (session.state !== 'open' || mgr.get(session.target, session.engine) !== session) throw new Error('Target did not finish opening');
+        }
+        // A failed predecessor can recycle its worker while this operation is
+        // queued. execute() resolves target again; never let old planning and
+        // expected_revision checks transfer to a newly opened attachment.
+        if (session && (mgr.get(session.target, session.engine) !== session
+          || selectedAttachment !== undefined && session.attachmentId !== selectedAttachment)) {
+          throw Object.assign(new Error('Target session changed while this operation was queued; reopen its context and review the operation again'), { code: 'STALE_SESSION_CONTEXT' });
         }
         mgr.checkCancelled();
         if (session?.closing) throw new Error('Target is closing; wait for it to finish');

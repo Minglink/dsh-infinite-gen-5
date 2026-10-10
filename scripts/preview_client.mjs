@@ -52,20 +52,22 @@ const analysisRows=[{id:'00000000-0000-4000-8000-000000000001',kind:'protocol',a
 const analysisResults={};analysisResults[analysisRows[0].id]={...analysisRows[0],input:{ref:'sha256:'+('1'.repeat(64)),bytes:7,result_id:analysisRows[0].id,origin:{kind:'inline'}},output:{ref:'sha256:'+('2'.repeat(64)),bytes:7,result_id:analysisRows[0].id},responseTruncated:false,value:{schemaVersion:'ig5.protocol.v1',action:'decode',complete:true,truncated:false,framing:{type:'length-prefix',size:2,endian:'big',headerLength:2},frames:[{index:0,offset:0,length:7,dataRef:{ref:'sha256:'+('2'.repeat(64)),bytes:7,result_id:analysisRows[0].id},previewHex:'000548656c6c6f',fields:[{name:'length',type:'u16',value:5,span:{offset:0,inputOffset:0,length:2}},{name:'payload',type:'utf8',value:'Hello',span:{offset:2,inputOffset:2,length:5}}]}],evidence:{source:'supplied-bytes',checksumVerified:false},note:'模拟协议结果；字段与分帧来自显式假设，并非未知协议自动还原。'}};
 analysisResults[analysisRows[1].id]={...analysisRows[1],input:{ref:'sha256:'+('3'.repeat(64)),bytes:5,result_id:analysisRows[1].id},output:{ref:'sha256:'+('4'.repeat(64)),bytes:5,result_id:analysisRows[1].id},responseTruncated:false,value:{action:'transform',algorithm:'xor',previewHex:'48656c6c6f',previewUtf8:'Hello',note:'模拟解密结果，用户提供算法与参数；没有执行样本或恢复密钥。 <scr'+'ipt>文本原样显示</scr'+'ipt>'}};
 const config={host:{id:'win32-x64',supported:true,execution:'local-node-host'},runtimeSource:{ghidra:'bundled',x64dbg:'bundled'},engines:[{id:'reverse',available:true},{id:'ghidra',available:true,source:'bundled'},{id:'x64dbg',available:true,source:'bundled'}]};
+function snapshotFor(engine){return {target,engine,projectId:'project_fixture',artifactId:'artifact_fixture_hash',sha256:'1'.repeat(64),provider:engine==='x64dbg'?'x64dbg':'ghidra',attachmentId:'preview-1',dbRevision:['reverse','ghidra','x64dbg'].indexOf(engine)};}
 window.__ig5Requests=[];window.__ig5Focuses=[];
 window.fetch=async(url,options)=>{
  const u=new URL(url,location.href),q=u.searchParams,type=q.get('type'),engine=q.get('engine')||'reverse';let data;window.__ig5Requests.push({url:String(url),method:options&&options.method||'GET'});
  if(u.pathname==='/ig5-diag')return {ok:true,json:async()=>({ok:true})};
- if(u.pathname==='/ig5-jobs')return {ok:true,json:async()=>({config,now:Date.now(),jobs:[],sessions:['reverse','ghidra','x64dbg'].map((engine,i)=>({key:engine+':fixture',target,engine,projectId:'project_fixture',artifactId:'artifact_fixture_hash',dbRevision:i,alive:true,n_funcs:2,n_segs:5,n_imports:12,bits:64,cpu:'x86_64',file_type:'PE'}))})};
+ if(u.pathname==='/ig5-jobs')return {ok:true,json:async()=>({config,now:Date.now(),jobs:[],sessions:['reverse','ghidra','x64dbg'].map(engine=>({key:engine+':fixture',...snapshotFor(engine),alive:true,n_funcs:2,n_segs:5,n_imports:12,bits:64,cpu:'x86_64',file_type:'PE'}))})};
  if(u.pathname!=='/ig5-data'||(options&&options.method&&options.method!=='GET'))throw Error('preview refuses write requests');
  switch(type){
  case 'funcs': data={funcs:[{ea:'0x140001000',name:'decode_packet',size:148},{ea:'0x140002000',name:'check_header',size:40}],total:2};break;
  case 'decompile': data={ea:q.get('ea'),name:q.get('ea')==='0x140001000'?'decode_packet':'check_header',code:'/* '+engine+' fixture */\\n'+code};break;
  case 'cfg': data=cfg;break;
  case 'slice': data={variables,slice_variable:q.get('var'),slice_lines:q.get('var')?code.split('\\n').map((code,i)=>({line_no:i+1,code})).filter(x=>x.code.includes(q.get('var'))):[]};break;
- case 'calls':data={rows:[{ea:'0x140002000',name:'check_header'}]};break;
- case 'xrefs':data={rows:[{from:'0x140001000',func_ea:'0x140001000',func_name:'decode_packet'}]};break;
- case 'strings':data={strings:[{ea:'0x140003000',str:'packet-key',length:10}],total:1};break;
+ // Keep fixture envelopes aligned with both workers, rather than pre-normalizing for the UI.
+ case 'calls':data={ea:q.get('ea'),direction:'callees',calls:[{ea:'0x140002000',name:'check_header',refs:1}],total:1};break;
+ case 'xrefs':data={hits:[{target:q.get('ea'),other:'0x140001000',func:'decode_packet',func_ea:'0x140001000'}],total:1};break;
+ case 'strings':data={strings:[{ea:'0x140003000',text:'packet-key',length:10},{ea:'0x140003020',text:'header-magic',length:12}],total:2};break;
  case 'scan':data={...scan,sourceEngine:engine};break;
  case 'fingerprint':data={abi:'MSVC',total_functions:2,library_functions_count:0,user_functions_count:2,library_ratio:0,sample_library_funcs:[]};break;
  case 'analyses':{const selected=analysisRows.filter(item=>(!q.get('target')||(item.association&&item.association.target===q.get('target')))&&(!q.get('engine')||(item.association&&item.association.engine===q.get('engine'))));data={items:selected,total:selected.length,offset:0,limit:20};break;}
@@ -74,10 +76,12 @@ window.fetch=async(url,options)=>{
  case 'debug_state':data={state:'paused',runId:'run_fixture',stopSeq:4,regs:{rip:'0x7ff712341000',rax:'0x2a'},note:'模拟暂停快照；没有实际调试进程。'};break;
  case 'disasm':data={ea:q.get('ea'),rows:[{ea:q.get('ea'),bytes:'48 31 C0',text:'xor rax, rax',size:3},{ea:'0x140001003',bytes:'C3',text:'ret',size:1}],total:2};break;
  case 'struct':data=q.get('action')==='get'?{name:'Packet',size:36,decl:declaration,fields:[{offset:0,size:4,type:'unsigned int',name:'id'},{offset:4,size:32,type:'char[32]',name:'payload'}]}:{items:[{ordinal:1,name:'Packet',size:36,is_struct:true}]};break;
- case 'listing':data={rows:[]};break;
+ case 'listing':{const kind=q.get('kind')||'segments';const rows=kind==='segments'?[{name:'.text',start:'0x140001000',end:'0x140003000',size:8192,perm:5,class:'CODE'},{name:'.rdata',start:'0x140003000',end:'0x140005000',size:8192,perm:4,class:'DATA'},{name:'.data',start:'0x140005000',end:'0x140006000',size:4096,perm:6,class:'DATA'},{name:'.reserved',start:'0x140006000',end:'0x140007000',size:4096,perm:0,class:'DATA'}]:kind==='imports'?[{module:'bcrypt.dll',name:'BCryptDecrypt',ordinal:0}]:[{ordinal:1,name:'decode_packet',ea:'0x140001000'}];data={kind,total:rows.length,...(engine==='reverse'?{items:rows}:{rows})};break;}
  case 'approvals':{const offset=Number(q.get('offset')||0),limit=Number(q.get('limit')||20),filtered=journal.filter(item=>item.args.engine===engine);data={rows:filtered.slice(offset,offset+limit),total:filtered.length,offset,limit};break;}
  default:data={rows:[]};
- }return {ok:true,status:200,json:async()=>({data})};
+ }const snapshot=snapshotFor(engine),scoped=!['analyses','analysis_result','approvals','debug_state'].includes(type);
+ if(scoped&&q.has('expected_snapshot')){const expected=JSON.parse(q.get('expected_snapshot'));if(Object.keys(snapshot).some(field=>snapshot[field]!==expected[field]))return {ok:true,status:200,json:async()=>({error:'分析会话已变化，请刷新后重试',code:'STALE_DATA_CONTEXT'})};}
+ return {ok:true,status:200,json:async()=>scoped?({...snapshot,type,data:{...data,_ig5:{...snapshot}}}):({data})};
 };
 const inputActions={captureInsertion(){const t=document.querySelector('#composer');return {start:t.selectionStart,end:t.selectionEnd,value:t.value}},insertText(text,span){const t=document.querySelector('#composer');if(t.value!==span.value)return false;t.value=t.value.slice(0,span.start)+text+t.value.slice(span.end);return true},persistDraft(){}};
 function PreviewApp(){const [viewRequest,setViewRequest]=React.useState(null);return React.createElement(plugin.__test.Workbench,{inputActions,useProjection:()=>({calls:8,errors:0}),viewRequest,openView(view,focus){window.__ig5Focuses.push({view,focus});setViewRequest({view,focus})},completeViewRequest(){setViewRequest(null)}})}

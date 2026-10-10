@@ -168,15 +168,45 @@ test('malformed stored provenance fails closed rather than yielding a verified-l
   assert.deepEqual(fs.readFileSync(store.metadata.file), before);
 });
 
+test('empty-evidence tasks with missing or invalid stored scope fail closed without hiding or rewriting them', t => {
+  const { context, store } = fixture(t), task = store.create(context, { goal: '恢复无快照任务' }, 'agent-a');
+  const original = JSON.parse(fs.readFileSync(store.metadata.file, 'utf8'));
+  const scopes = ['projectId', 'artifactId', 'sha256', 'engine', 'provider'].map(field => {
+    const scope = { ...context }; delete scope.attachmentId; delete scope.dbRevision; delete scope[field]; return scope;
+  });
+  const originalScope = original.investigations[task.taskId].scope;
+  scopes.push(
+    { ...originalScope, projectId: 'project_invalid' },
+    { ...originalScope, sha256: 'not-a-digest' },
+    { ...originalScope, artifactId: `artifact_${digest('different artifact')}` },
+    { ...originalScope, engine: 'x64dbg' },
+    { ...originalScope, provider: 'unknown' },
+    { ...originalScope, engine: 'ghidra', provider: 'commercial' },
+  );
+  for (const scope of scopes) {
+    const data = structuredClone(original); data.investigations[task.taskId].scope = scope;
+    fs.writeFileSync(store.metadata.file, JSON.stringify(data));
+    const before = fs.readFileSync(store.metadata.file);
+    failure(() => store.get(context, task.taskId), 'INVESTIGATION_STORE_CORRUPT');
+    failure(() => store.list(context), 'INVESTIGATION_STORE_CORRUPT');
+    failure(() => store.create(context, { goal: '不得越过损坏记录' }, 'agent-a'), 'INVESTIGATION_STORE_CORRUPT');
+    failure(() => store.update(context, task.taskId, { expected_task_revision: 0, status: 'completed' }, 'agent-a'), 'INVESTIGATION_STORE_CORRUPT');
+    failure(() => store.recordSnapshot(context, task.taskId, snapshot(), 'agent-a'), 'INVESTIGATION_STORE_CORRUPT');
+    assert.deepEqual(fs.readFileSync(store.metadata.file), before);
+    assert.equal(fs.existsSync(store.metadata.lockFile), false);
+  }
+});
+
 test('two real host processes compare-and-swap one task revision without a lost update', { timeout: 45000 }, async t => {
   const { root, context, store } = fixture(t), task = store.create(context, { goal: '竞争更新' }, 'agent-a');
   function child(name) {
     const code = `import { InvestigationStore } from ${JSON.stringify(storeModule)};
       const store = new InvestigationStore({root:${JSON.stringify(root)}});
       process.stdout.write('READY\\n'); await new Promise(resolve => process.stdin.once('data', resolve));
+      const retryDeadline = Date.now()+15000;
       for (let attempt=0; attempt<200; attempt++) {
-        try { const value=store.update(${JSON.stringify(context)},${JSON.stringify(task.taskId)}, {expected_task_revision:0,goal:${JSON.stringify(name)}}, ${JSON.stringify(name)}); process.stdout.write(JSON.stringify({ok:true,revision:value.taskRevision})+'\\n'); break; }
-        catch(error) { if(error.code==='STORE_BUSY') { await new Promise(resolve=>setTimeout(resolve,10)); continue; } process.stdout.write(JSON.stringify({ok:false,code:error.code})+'\\n'); break; }
+        try { const value=store.update(${JSON.stringify(context)},${JSON.stringify(task.taskId)}, {expected_task_revision:0,goal:${JSON.stringify(name)}}, ${JSON.stringify(name)}); process.stdout.write(JSON.stringify({ok:true,revision:value.taskRevision,attempt})+'\\n'); break; }
+        catch(error) { if(error.code==='STORE_BUSY' && attempt<199 && Date.now()<retryDeadline) { await new Promise(resolve=>setTimeout(resolve,10)); continue; } process.stdout.write(JSON.stringify({ok:false,code:error.code,message:error.message,attempt})+'\\n'); break; }
       }`;
     const proc = spawn(process.execPath, ['--input-type=module', '-e', code], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     t.after(() => { if (proc.exitCode === null && proc.signalCode === null) proc.kill(); });
@@ -194,8 +224,9 @@ test('two real host processes compare-and-swap one task revision without a lost 
   await Promise.all(children.map(value => value.ready));
   for (const value of children) value.proc.stdin.end('GO');
   const results = (await Promise.all(children.map(value => value.done))).map(out => JSON.parse(out.split('\n').find(line => line.startsWith('{'))));
-  assert.equal(results.filter(value => value.ok).length, 1);
-  assert.equal(results.filter(value => value.code === 'STALE_TASK_REVISION').length, 1);
+  const diagnostic = JSON.stringify(results);
+  assert.equal(results.filter(value => value.ok).length, 1, diagnostic);
+  assert.equal(results.filter(value => value.code === 'STALE_TASK_REVISION').length, 1, diagnostic);
   const persisted = new InvestigationStore({ root }).get(context, task.taskId);
   assert.equal(persisted.taskRevision, 1); assert.ok(['writer-a', 'writer-b'].includes(persisted.goal));
 });

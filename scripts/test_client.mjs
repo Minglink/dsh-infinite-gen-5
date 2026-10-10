@@ -41,6 +41,8 @@ function text(node) { return typeof node === 'string' || typeof node === 'number
 function button(tree, label) { const found = nodes(tree, n => n.type === 'button' && text(n) === label)[0]; assert.ok(found, `button ${label}`); return found; }
 function row(tree, label) { const found = nodes(tree, n => n.type === 'tr' && text(n).includes(label) && typeof n.props.onClick === 'function')[0]; assert.ok(found, `row ${label}`); return found; }
 const response = data => ({ ok: true, status: 200, json: async () => ({ data }) });
+const mountedSession = { target: 'same.exe', engine: 'reverse', projectId: 'project', artifactId: 'artifact', sha256: '1'.repeat(64), provider: 'ghidra', attachmentId: 'old-owner', dbRevision: 3 };
+const scopedResponse = (session, data) => ({ ok: true, status: 200, json: async () => ({ ...session, data: { ...data, _ig5: { ...session } } }) });
 const settle = async () => { for (let i = 0; i < 8; i++) await Promise.resolve(); };
 function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 function markup(node) {
@@ -236,6 +238,148 @@ test('focused variable click requests var and highlights returned source line', 
   assert.ok(urls.some(url => new URL(url, 'http://test').searchParams.get('var') === 'key')); assert.equal(nodes(h.tree, n => n.type === 'mark').map(text).join(''), 'key'); h.unmount();
 });
 
+test('failed xrefs or calls remain explicit while the independently successful result stays navigable', async () => {
+  for (const failingType of ['xrefs', 'calls']) {
+    const successfulType = failingType === 'xrefs' ? 'calls' : 'xrefs';
+    const navigations = [];
+    request = url => {
+      const type = new URL(url, 'http://fixture').searchParams.get('type');
+      if (type === failingType) return Promise.resolve({ ok: true, status: 200, json: async () => ({ error: '<native read failed>' }) });
+      return Promise.resolve(response(type === 'funcs' ? { funcs: [{ ea: '0x1000', name: 'main' }], total: 1 }
+        : type === 'decompile' ? { ea: '0x1000', name: 'main', code: 'return 1;' }
+        : successfulType === 'calls' ? { calls: [{ ea: '0x2000', name: 'callee-ok', refs: 1 }] }
+        : { hits: [{ target: '0x1000', other: '0x2004', func_ea: '0x2000', func: 'caller-ok' }] }));
+    };
+    const props = { target: 'same.exe', engine: 'reverse' };
+    const h = harness(ui.FunctionsView, props); h.render(); await settle(); h.render(); row(h.tree, 'main').props.onClick(); await settle(); h.render();
+    h.render({ ...props, onNavigate: value => navigations.push(value) });
+    assert.match(text(h.tree), /读取失败/); assert.match(text(h.tree), /<native read failed>/);
+    assert.ok(!text(h.tree).includes('无外部交叉调用记录'), 'a failed read is not proof that no relations exist');
+    assert.ok(markup(h.tree).includes('&lt;native read failed&gt;'), 'failure messages are escaped text');
+    const success = nodes(h.tree, n => n.type === 'span' && typeof n.props.onClick === 'function' && text(n).includes(successfulType === 'calls' ? 'callee-ok' : 'caller-ok'))[0];
+    assert.ok(success, 'the successful section remains visible'); success.props.onClick();
+    assert.equal(navigations[0].ea, '0x2000'); h.unmount();
+  }
+});
+
+// These fields are the real worker contracts, not the historical preview's
+// rows/str aliases: ig5_worker.py and adapters/ghidra/worker.py agree on
+// xrefs.hits, calls.calls and strings[].text; listing uses items or rows.
+test('real worker calls and xref fields render names and navigate to the function or raw source address', async () => {
+  for (const engine of ['reverse', 'ghidra']) {
+    const navigations = [];
+    request = url => {
+      const type = new URL(url, 'http://fixture').searchParams.get('type');
+      return Promise.resolve(response(type === 'funcs' ? { funcs: [{ ea: '0x1000', name: 'main' }], total: 1 }
+        : type === 'decompile' ? { ea: '0x1000', name: 'main', code: 'return 1;' }
+        : type === 'calls' ? { calls: [{ ea: '0x2000', name: 'real-callee', refs: 1 }], total: 1 }
+        : { hits: [{ target: '0x1000', other: '0x3004', func: 'real-caller', func_ea: '0x3000' },
+                   { target: '0x1000', other: '0x4004', func: null, func_ea: null }], total: 2 }));
+    };
+    const h = harness(ui.FunctionsView, { target: 'real.exe', engine });
+    h.render(); await settle(); h.render(); row(h.tree, 'main').props.onClick(); await settle(); h.render();
+    h.render({ target: 'real.exe', engine, onNavigate: value => navigations.push(value) });
+    assert.match(text(h.tree), /1 个子调用 · 2 个交叉引用/); assert.ok(!text(h.tree).includes('无外部交叉调用记录'));
+    for (const label of ['real-callee', 'real-caller', '0x4004']) {
+      const chip = nodes(h.tree, n => n.type === 'span' && typeof n.props.onClick === 'function' && text(n).includes(label))[0];
+      assert.ok(chip, label + ' must remain visible'); chip.props.onClick();
+    }
+    assert.deepEqual(navigations.map(value => value.ea), ['0x2000', '0x3000', '0x4004']); h.unmount();
+  }
+});
+
+test('real worker string text is displayed, filtered and linked through hits references', async () => {
+  for (const engine of ['reverse', 'ghidra']) {
+    const navigations = [];
+    request = url => Promise.resolve(response(new URL(url, 'http://fixture').searchParams.get('type') === 'strings'
+      ? { strings: [{ ea: '0x5000', length: 10, text: 'packet-key' }, { ea: '0x6000', length: 5, text: 'other' }], total: 2 }
+      : { hits: [{ target: '0x5000', other: '0x1004', func_ea: '0x1000', func: 'decode-packet' }], total: 1 }));
+    const h = harness(ui.StringsView, { target: 'real.exe', engine, onNavigate: value => navigations.push(value) });
+    h.render(); await settle(); h.render(); assert.match(text(h.tree), /packet-key/); assert.ok(!text(h.tree).includes('undefined'));
+    nodes(h.tree, n => n.type === 'input')[0].props.onChange({ target: { value: 'packet' } }); h.render();
+    assert.match(text(h.tree), /匹配 1 \/ 2 项/); assert.ok(!nodes(h.tree, n => n.type === 'td').map(text).includes('other'));
+    button(h.tree, '查引用').props.onClick(); await settle(); h.render(); button(h.tree, 'decode-packet · 0x1000').props.onClick();
+    assert.equal(navigations[0].ea, '0x1000'); h.unmount();
+  }
+});
+
+test('both real listing contracts render numeric permissions and imports without invalid React values', async () => {
+  for (const [engine, key] of [['reverse', 'items'], ['ghidra', 'rows']]) {
+    request = url => {
+      const kind = new URL(url, 'http://fixture').searchParams.get('kind');
+      const entries = kind === 'imports' ? [{ module: 'fixture.dll', ea: '0x8000', name: 'real_import', ordinal: 0 }]
+        : [0, 5, 6, 7].map((perm, index) => ({ name: 'segment' + index, start: '0x1000', end: '0x2000', size: 4096, class: 'CODE', perm }));
+      return Promise.resolve(response({ kind, [key]: entries, total: entries.length }));
+    };
+    const h = harness(ui.ListingView, { target: 'real.exe', engine }); h.render(); await settle(); h.render();
+    assert.match(text(h.tree), /segment0/); assert.match(text(h.tree), /segment3/); markup(h.tree);
+    const permissions = nodes(h.tree, n => n.type === 'td').map(text);
+    for (const expected of ['---', 'r-x', 'rw-', 'rwx']) assert.ok(permissions.includes(expected), engine + ': ' + expected);
+    button(h.tree, '导入函数 (Imports)').props.onClick(); h.render(); await settle(); h.render();
+    assert.match(text(h.tree), /real_import/); assert.match(text(h.tree), /fixture.dll/); h.unmount();
+  }
+});
+
+test('missing Ghidra type ordinal and slice role are displayed as unprovided', async () => {
+  request = url => {
+    const type = new URL(url, 'http://fixture').searchParams.get('type');
+    return Promise.resolve(response(type === 'struct' ? { items: [{ name: 'Packet', size: 8, is_struct: true }] }
+      : type === 'listing' ? { rows: [] } : type === 'funcs' ? { funcs: [{ ea: '0x1000', name: 'main' }], total: 1 }
+      : type === 'decompile' ? { ea: '0x1000', name: 'main', code: 'return 1;' }
+      : type === 'slice' ? { variables: [{ name: 'unknown-role', type: 'int', size: 4 }], slice_lines: [] } : { rows: [] }));
+  };
+  const listing = harness(ui.ListingView, { target: 'real.exe', engine: 'ghidra' }); listing.render(); await settle(); listing.render();
+  button(listing.tree, '结构体与类型 (Structs)').props.onClick(); listing.render(); await settle(); listing.render();
+  assert.match(text(listing.tree), /Packet/); assert.match(text(listing.tree), /—/); assert.ok(!text(listing.tree).includes('undefined')); listing.unmount();
+  const functions = harness(ui.FunctionsView, { target: 'real.exe', engine: 'ghidra' }); functions.render(); await settle(); functions.render();
+  row(functions.tree, 'main').props.onClick(); await settle(); functions.render();
+  button(functions.tree, '变量与切片').props.onClick(); functions.render(); await settle(); functions.render();
+  const variableRow = nodes(functions.tree, n => n.type === 'tr' && text(n).includes('unknown-role'))[0];
+  assert.match(text(variableRow), /角色未提供/); assert.ok(!text(variableRow).includes('局部变量')); functions.unmount();
+});
+
+test('malformed native relation arrays are explicit failures even when a legacy rows alias is empty', async () => {
+  request = url => {
+    const type = new URL(url, 'http://fixture').searchParams.get('type');
+    return Promise.resolve(response(type === 'funcs' ? { funcs: [{ ea: '0x1000', name: 'main' }], total: 1 }
+      : type === 'decompile' ? { ea: '0x1000', name: 'main', code: 'return 1;' }
+      : type === 'calls' ? { calls: [null], rows: [] } : { hits: 'invalid-native-data', rows: [] }));
+  };
+  const h = harness(ui.FunctionsView, { target: 'real.exe' }); h.render(); await settle(); h.render();
+  row(h.tree, 'main').props.onClick(); await settle(); h.render();
+  assert.match(text(h.tree), /分析数据格式无效: xrefs.hits/); assert.match(text(h.tree), /分析数据格式无效: calls.calls/);
+  assert.ok(!text(h.tree).includes('无外部交叉调用记录')); h.unmount();
+});
+
+test('related HTTP and network failures never paint empty success or overwrite a newer function', async () => {
+  const pending = [];
+  request = url => {
+    const q = new URL(url, 'http://fixture').searchParams, type = q.get('type');
+    if (type === 'funcs') return Promise.resolve(response({ funcs: [{ ea: '0x1000', name: 'old' }, { ea: '0x2000', name: 'new' }], total: 2 }));
+    if (type === 'decompile') return Promise.resolve(response({ ea: q.get('ea'), name: q.get('ea'), code: 'return 1;' }));
+    if (q.get('ea') === '0x1000') { const d = deferred(); pending.push({ type, d }); return d.promise; }
+    return Promise.resolve(response({ rows: [] }));
+  };
+  const h = harness(ui.FunctionsView, { target: 'same.exe', engine: 'reverse' }); h.render(); await settle(); h.render();
+  row(h.tree, 'old').props.onClick(); await settle(); h.render();
+  assert.match(text(h.tree), /正在读取关联调用链/); assert.ok(!text(h.tree).includes('0 个子调用'));
+  assert.ok(!text(h.tree).includes('无外部交叉调用记录'), 'pending reads must not look like confirmed empty results');
+  row(h.tree, 'new').props.onClick(); await settle(); h.render();
+  for (const item of pending) if (item.type === 'xrefs') item.d.resolve({ ok: false, status: 503 }); else item.d.reject(new Error('old network failure'));
+  await settle(); h.render(); assert.ok(!text(h.tree).includes('503')); assert.ok(!text(h.tree).includes('old network failure'));
+  assert.match(text(h.tree), /无外部交叉调用记录/, 'confirmed empty reads for the newer selection remain valid'); h.unmount();
+
+  request = url => {
+    const type = new URL(url, 'http://fixture').searchParams.get('type');
+    if (type === 'xrefs') return Promise.resolve({ ok: false, status: 503 });
+    if (type === 'calls') return Promise.reject(new Error('current network failure'));
+    return Promise.resolve(response(type === 'funcs' ? { funcs: [{ ea: '0x1000', name: 'main' }], total: 1 } : { ea: '0x1000', name: 'main', code: 'return 1;' }));
+  };
+  const errors = harness(ui.FunctionsView, { target: 'same.exe', engine: 'reverse' }); errors.render(); await settle(); errors.render(); row(errors.tree, 'main').props.onClick(); await settle(); errors.render();
+  assert.match(text(errors.tree), /HTTP 503/); assert.match(text(errors.tree), /current network failure/);
+  assert.ok(!text(errors.tree).includes('无外部交叉调用记录')); errors.unmount();
+});
+
 test('switching target invalidates pending function reads and removes old code', async () => {
   const pending = [];
   request = url => {
@@ -313,6 +457,116 @@ test('function navigation calls the host openView contract with a target-owned f
   const focus = JSON.parse(calls[0][1]); assert.equal(focus.engine, 'ghidra'); assert.equal(focus.target, 'same.exe'); assert.equal(focus.artifactId, 'a'); h.unmount();
 });
 
+test('static close/reopen between feed polls remounts results even at the same artifact and revision', async () => {
+  const session = { key: 'same', target: 'same.exe', engine: 'reverse', alive: true, projectId: 'p', artifactId: 'a', sha256: 'hash', provider: 'ghidra', attachmentId: 'old-owner', dbRevision: 3 };
+  request = () => Promise.resolve({ ok: true, json: async () => ({ sessions: [session], jobs: [] }) });
+  const h = harness(ui.Workbench, {}); h.render(); await settle(); h.render();
+  const original = nodes(h.tree, n => n.type === ui.FunctionsView)[0];
+  const feedCell = h.cells.findIndex(cell => cell && Array.isArray(cell.sessions));
+  assert.ok(feedCell >= 0, 'actual feed state is present');
+  // There is no intermediate empty poll: path, session key, hash and dbRevision all remain unchanged.
+  h.cells[feedCell] = { sessions: [{ ...session, attachmentId: 'new-owner' }], jobs: [] }; h.render();
+  const replaced = nodes(h.tree, n => n.type === ui.FunctionsView)[0];
+  assert.notEqual(replaced.props.key, original.props.key, 'React must dispose old code/CFG/slice state for the replacement owner');
+  assert.equal(replaced.props.session.attachmentId, 'new-owner');
+  assert.equal(replaced.props.target, original.props.target);
+  // An ordinary feed refresh from the same owner preserves the current selection.
+  h.cells[feedCell] = { sessions: [{ ...session, attachmentId: 'new-owner', uptimeMs: 4000 }], jobs: [] }; h.render();
+  assert.equal(nodes(h.tree, n => n.type === ui.FunctionsView)[0].props.key, replaced.props.key);
+  h.unmount();
+});
+
+test('static reads send an immutable mounted snapshot and keep its response provenance', async () => {
+  const session = { ...mountedSession }, pending = deferred(); let sent;
+  request = url => { sent = JSON.parse(new URL(url, 'http://test').searchParams.get('expected_snapshot')); return pending.promise; };
+  const read = ui.readData('funcs', session.target, { limit: 1 }, session.engine, session);
+  session.attachmentId = 'new-owner'; session.dbRevision++;
+  assert.deepEqual(sent, mountedSession, 'request must capture the view identity at dispatch');
+  pending.resolve(scopedResponse(mountedSession, { funcs: [], total: 0 }));
+  const data = await read;
+  assert.deepEqual(plain(data._ig5), mountedSession);
+});
+
+test('static reads reject every mismatched outer or worker identity and missing provenance', async () => {
+  for (const layer of ['outer', 'worker']) for (const field of Object.keys(mountedSession)) {
+    request = () => Promise.resolve({ ok: true, json: async () => {
+      const envelope = { ...mountedSession, data: { funcs: [], _ig5: { ...mountedSession } } };
+      (layer === 'outer' ? envelope : envelope.data._ig5)[field] = field === 'dbRevision' ? 4 : 'other';
+      return envelope;
+    } });
+    await assert.rejects(ui.readData('funcs', 'same.exe', {}, 'reverse', mountedSession), /会话已变化/, layer + '.' + field);
+  }
+  for (const envelope of [{ data: { funcs: [] } }, { ...mountedSession, data: { funcs: [] } }, { ...mountedSession, data: { funcs: [], _ig5: {} } }]) {
+    request = () => Promise.resolve({ ok: true, json: async () => envelope });
+    await assert.rejects(ui.readData('funcs', 'same.exe', {}, 'reverse', mountedSession), /会话已变化/);
+  }
+});
+
+test('pre-request reopen cannot paint a new attachment into a view with the old feed', async () => {
+  const next = { ...mountedSession, attachmentId: 'new-owner' }, requests = [];
+  request = url => {
+    const q = new URL(url, 'http://test').searchParams; requests.push(q);
+    const type = q.get('type');
+    return Promise.resolve(scopedResponse(type === 'funcs' ? mountedSession : next, type === 'funcs'
+      ? { funcs: [{ ea: '0x1000', name: 'main' }], total: 1 }
+      : type === 'decompile' ? { ea: '0x1000', code: 'NEW_ATTACHMENT_RESULT' } : type === 'calls' ? { calls: [] } : { hits: [] }));
+  };
+  const h = harness(ui.FunctionsView, { target: 'same.exe', engine: 'reverse', session: mountedSession });
+  h.render(); await settle(); h.render(); row(h.tree, 'main').props.onClick(); await settle(); h.render();
+  assert.ok(!text(h.tree).includes('NEW_ATTACHMENT_RESULT'));
+  assert.match(text(h.tree), /会话已变化/);
+  assert.equal(requests.length, 4);
+  assert.ok(requests.every(q => JSON.parse(q.get('expected_snapshot')).attachmentId === 'old-owner'));
+  h.unmount();
+});
+
+test('all static workbench views and nested IR reads receive the mounted snapshot', async () => {
+  request = () => Promise.resolve({ ok: true, json: async () => ({ sessions: [{ ...mountedSession, key: 's', alive: true }], jobs: [] }) });
+  const workbench = harness(ui.Workbench); workbench.render(); await settle(); workbench.render();
+  for (const [tab, component] of [['funcs', ui.FunctionsView], ['strings', ui.StringsView], ['listing', ui.ListingView], ['scan', ui.ScanView]]) {
+    nodes(workbench.tree, n => typeof n.props.onSelectTab === 'function')[0].props.onSelectTab(tab); workbench.render();
+    assert.deepEqual(plain(nodes(workbench.tree, n => n.type === component)[0].props.session), { ...mountedSession, key: 's', alive: true });
+  }
+  workbench.unmount();
+  for (const [component, fixture] of [[ui.FunctionsView, { funcs: [], total: 0 }], [ui.StringsView, { strings: [], total: 0 }], [ui.ListingView, { items: [] }], [ui.ScanView, {}], [ui.IrView, { kind: 'pcode' }]]) {
+    let count = 0;
+    request = url => { count++; assert.deepEqual(JSON.parse(new URL(url, 'http://test').searchParams.get('expected_snapshot')), mountedSession); return Promise.resolve(scopedResponse(mountedSession, fixture)); };
+    const h = harness(component, { target: 'same.exe', engine: 'reverse', ea: '0x1000', session: mountedSession }); h.render(); await settle(); h.render();
+    assert.ok(count > 0); h.unmount();
+  }
+  request = url => {
+    const type = new URL(url, 'http://test').searchParams.get('type');
+    return Promise.resolve(scopedResponse(mountedSession, type === 'funcs' ? { funcs: [{ ea: '0x1000', name: 'main' }], total: 1 } : type === 'decompile' ? { ea: '0x1000', code: 'return 1;' } : { rows: [] }));
+  };
+  const functions = harness(ui.FunctionsView, { target: 'same.exe', engine: 'reverse', session: mountedSession }); functions.render(); await settle(); functions.render();
+  row(functions.tree, 'main').props.onClick(); await settle(); functions.render(); button(functions.tree, 'Ghidra p-code').props.onClick(); functions.render();
+  assert.deepEqual(plain(nodes(functions.tree, n => n.type === ui.IrView)[0].props.session), mountedSession); functions.unmount();
+});
+
+test('incomplete ready attachment identity is rejected before a static fetch', async () => {
+  let fetched = false; request = () => { fetched = true; return Promise.resolve(response({})); };
+  for (const change of [{ provider: '' }, { dbRevision: -1 }, { dbRevision: -0 }, { sha256: undefined }, { attachmentId: undefined, alive: true }, { attachmentId: null, alive: true }]) await assert.rejects(ui.readData('funcs', 'same.exe', {}, 'reverse', { ...mountedSession, ...change }), /身份尚未就绪/);
+  assert.equal(fetched, false);
+});
+
+test('persistent analysis audit and cached debug reads retain their independent scope', async () => {
+  request = url => { assert.equal(new URL(url, 'http://test').searchParams.has('expected_snapshot'), false); return Promise.resolve(response({ rows: [], state: 'idle' })); };
+  for (const type of ['analyses', 'analysis_result', 'approvals', 'debug_state']) await ui.readData(type, 'same.exe', {}, 'reverse', mountedSession);
+});
+
+test('static provider and project replacement invalidate view state independently of path', async () => {
+  const session = { key: 'same', target: 'same.exe', engine: 'reverse', alive: true, projectId: 'p', artifactId: 'a', sha256: 'hash', provider: 'ghidra', attachmentId: 'owner', dbRevision: 3 };
+  request = () => Promise.resolve({ ok: true, json: async () => ({ sessions: [session], jobs: [] }) });
+  const h = harness(ui.Workbench, {}); h.render(); await settle(); h.render();
+  const original = nodes(h.tree, n => n.type === ui.FunctionsView)[0].props.key;
+  const feedCell = h.cells.findIndex(cell => cell && Array.isArray(cell.sessions));
+  for (const change of [{ provider: 'commercial' }, { projectId: 'other-project' }, { sha256: 'other-hash' }, { artifactId: 'other-artifact' }, { dbRevision: 4 }]) {
+    h.cells[feedCell] = { sessions: [{ ...session, ...change }], jobs: [] }; h.render();
+    assert.notEqual(nodes(h.tree, n => n.type === ui.FunctionsView)[0].props.key, original, 'static identity replacement must not inherit native results');
+  }
+  h.unmount();
+});
+
 test('runtime view reads cached debug_state only and escapes register values', async () => {
   const urls = [];
   request = (url, options) => { urls.push(url); assert.equal(options, undefined); return Promise.resolve(response({ state: 'paused', runId: 'run_A', stopSeq: 3, regs: { rax: '<script>unsafe</script>' } })); };
@@ -331,17 +585,18 @@ test('Ghidra IR selection requests explicit level and keeps source distinct', as
 });
 
 test('bundled Reverse exposes p-code using the Reverse session route and actual Ghidra provider', async () => {
+  const session = { ...mountedSession, target: 'a.exe' };
   request = url => {
     const q = new URL(url, 'http://test').searchParams;
     assert.equal(q.get('engine'), 'reverse');
-    return Promise.resolve(response(q.get('type') === 'funcs' ? { funcs: [{ ea: '0x1000', name: 'main' }], total: 1 } : q.get('type') === 'decompile' ? { ea: '0x1000', code: 'return 1;' } : { rows: [] }));
+    return Promise.resolve(scopedResponse(session, q.get('type') === 'funcs' ? { funcs: [{ ea: '0x1000', name: 'main' }], total: 1 } : q.get('type') === 'decompile' ? { ea: '0x1000', code: 'return 1;' } : { rows: [] }));
   };
-  const props = { target: 'a.exe', engine: 'reverse', session: { provider: 'ghidra' } };
+  const props = { target: 'a.exe', engine: 'reverse', session };
   const h = harness(ui.FunctionsView, props); h.render(); await settle(); h.render();
   row(h.tree, 'main').props.onClick(); h.render(); await settle(); h.render();
   button(h.tree, 'Ghidra p-code').props.onClick(); h.render();
   const ir = nodes(h.tree, n => n.type === ui.IrView)[0]; assert.ok(ir); assert.equal(ir.props.engine, 'reverse');
-  h.render({ ...props, session: { provider: 'commercial' } });
+  h.render({ ...props, session: { ...session, provider: 'commercial' } });
   assert.equal(nodes(h.tree, n => n.type === 'button' && text(n) === 'Ghidra p-code').length, 0); h.unmount();
 });
 

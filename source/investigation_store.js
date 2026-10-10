@@ -40,13 +40,16 @@ function next(value) {
   if (value === Number.MAX_SAFE_INTEGER) fail('TASK_REVISION_OVERFLOW', 'Task revision cannot be incremented safely');
   return value + 1;
 }
-function contextOf(input) {
-  const context = plain(input, [...SCOPE, 'target', 'attachmentId', 'dbRevision'], 'context');
+function validateScope(context) {
   if (typeof context.projectId !== 'string' || !context.projectId.startsWith('project_')) fail('INVALID_INVESTIGATION', 'projectId must identify an IG5 project');
   uuid(context.projectId.slice(8), 'projectId');
   sha(context.sha256, 'sha256');
   if (context.artifactId !== `artifact_${context.sha256}`) fail('INVESTIGATION_IDENTITY_MISMATCH', 'Artifact identity does not match its SHA-256');
   if (!['reverse', 'ghidra'].includes(context.engine) || !['ghidra', 'commercial'].includes(context.provider) || context.engine === 'ghidra' && context.provider !== 'ghidra') fail('INVALID_INVESTIGATION', 'Investigation context requires an explicit static engine/provider');
+}
+function contextOf(input) {
+  const context = plain(input, [...SCOPE, 'target', 'attachmentId', 'dbRevision'], 'context');
+  validateScope(context);
   if (typeof context.attachmentId !== 'string' || !context.attachmentId.startsWith('attachment_')) fail('INVALID_INVESTIGATION', 'attachmentId must identify an IG5 database attachment');
   uuid(context.attachmentId.slice(11), 'attachmentId');
   revision(context.dbRevision, 'dbRevision');
@@ -66,7 +69,7 @@ function validateRecord(task, id) {
     plain(task, ['schemaVersion', 'taskId', 'taskRevision', 'scope', 'status', 'goal', 'hypothesis', 'next_step', 'conclusion', 'systemEvidence', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy'], 'stored task');
     uuid(id, 'taskId'); revision(task.taskRevision, 'taskRevision');
     if (task.schemaVersion !== 1 || task.taskId !== id || !STATUSES.has(task.status) || !Array.isArray(task.systemEvidence) || task.systemEvidence.length > MAX_EVIDENCE) throw new Error('Invalid stored task');
-    plain(task.scope, SCOPE, 'stored scope');
+    validateScope(plain(task.scope, SCOPE, 'stored scope'));
     text(task.goal, 'goal', { required: true });
     for (const field of ['hypothesis', 'next_step', 'conclusion']) text(task[field], field);
     actor(task.createdBy); actor(task.updatedBy);

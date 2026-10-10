@@ -540,17 +540,54 @@
             return { v: 1, engine: focus.engine, target: focus.target, ea: "0x" + BigInt(focus.ea).toString(16), name: typeof focus.name === "string" ? focus.name : "", artifactId: typeof focus.artifactId === "string" ? focus.artifactId : null, projectId: typeof focus.projectId === "string" ? focus.projectId : null };
           } catch (e) { return null; }
         }
-        function readData(type, target, params, engine) {
+        // Normalize the actual worker contracts once, before rendering. Keep
+        // provenance and native fields intact; rows is a workbench-only alias.
+        function normalizeReadData(type, data) {
+          if (["xrefs", "calls", "strings", "listing"].indexOf(type) === -1) return data;
+          if (!data || typeof data !== "object" || Array.isArray(data)) throw new Error("分析数据格式无效");
+          function list(primary) {
+            var value = data[primary] !== undefined ? data[primary] : data.rows;
+            if (!Array.isArray(value) || value.some(function (row) { return !row || typeof row !== "object" || Array.isArray(row); })) throw new Error("分析数据格式无效: " + type + "." + primary);
+            return value;
+          }
+          if (type === "xrefs") return Object.assign({}, data, { rows: list("hits").map(function (row) {
+            return Object.assign({}, row, { func_name: row.func_name || row.func || "", from: row.from || row.other || row.ea });
+          }) });
+          if (type === "calls") return Object.assign({}, data, { rows: list("calls") });
+          if (type === "strings") return Object.assign({}, data, { strings: list("strings").map(function (row) {
+            return Object.assign({}, row, { str: typeof row.text === "string" ? row.text : (typeof row.str === "string" ? row.str : "") });
+          }) });
+          if (type === "listing") return Object.assign({}, data, { rows: list("items").map(function (row) {
+            var perm = row.perm;
+            if (typeof perm === "number") perm = (perm & 4 ? "r" : "-") + (perm & 2 ? "w" : "-") + (perm & 1 ? "x" : "-");
+            return Object.assign({}, row, { perm: typeof perm === "string" ? perm : "" });
+          }) });
+          return data;
+        }
+        var readIdentityFields = ["target", "engine", "projectId", "artifactId", "sha256", "provider", "attachmentId", "dbRevision"];
+        function captureReadSnapshot(session) {
+          if (!session) return null;
+          var snapshot = {};
+          readIdentityFields.forEach(function (field) { snapshot[field] = session[field]; });
+          if (readIdentityFields.some(function (field) { return field === "dbRevision" ? !Number.isSafeInteger(snapshot[field]) || snapshot[field] < 0 || Object.is(snapshot[field], -0) : typeof snapshot[field] !== "string" || !snapshot[field]; })) throw new Error("分析会话身份尚未就绪，请刷新后重试");
+          return Object.freeze(snapshot);
+        }
+        function readData(type, target, params, engine, session) {
+          var expected;
+          try { expected = ["analyses", "analysis_result", "approvals", "debug_state"].indexOf(type) === -1 ? captureReadSnapshot(session) : null; }
+          catch (error) { return Promise.reject(error); }
           var base = { type: type, target: target || "" };
           if (engine || ["analyses", "analysis_result"].indexOf(type) === -1) base.engine = engine || "reverse";
           Object.keys(params || {}).forEach(function (key) { if (params[key] !== undefined && params[key] !== null) base[key] = params[key]; });
+          if (expected) base.expected_snapshot = JSON.stringify(expected);
           var query = new URLSearchParams(base);
           return fetch("/ig5-data?" + query.toString()).then(function (r) {
             if (!r.ok) throw new Error("读取失败 (HTTP " + r.status + ")");
             return r.json();
           }).then(function (j) {
             if (!j || j.error) throw new Error((j && j.error) || "空响应");
-            return j.data;
+            if (expected && readIdentityFields.some(function (field) { return j[field] !== expected[field] || !j.data || !j.data._ig5 || j.data._ig5[field] !== expected[field]; })) throw new Error("分析会话已变化，请刷新后重试");
+            return normalizeReadData(type, j.data);
           });
         }
 
@@ -847,7 +884,8 @@
           var selectedTarget = currentSession && currentSession.target;
           var engine = (currentSession && currentSession.engine) || (feed && feed.config && feed.config.engine) || "reverse";
           var currentIdentity = currentSession ? sessionIdentity(currentSession) : "none";
-          var viewKey = currentIdentity + ":" + ((currentSession && currentSession.artifactId) || "legacy") + ":" + ((currentSession && currentSession.dbRevision) || 0);
+          // Polling can miss a close/reopen interval; a new database owner must remount every static result view.
+          var viewKey = JSON.stringify([currentIdentity, currentSession && currentSession.projectId || "", currentSession && currentSession.artifactId || "legacy", currentSession && currentSession.sha256 || "", currentSession && currentSession.provider || "", currentSession && currentSession.attachmentId || "", currentSession && currentSession.dbRevision || 0]);
           var focusPair = react.useState(null), focus = focusPair[0], setFocus = focusPair[1];
           var focusNoticePair = react.useState(""), focusNotice = focusNoticePair[0], setFocusNotice = focusNoticePair[1];
           var focusCounter = react.useRef(0);
@@ -912,9 +950,9 @@
             // 3. 对应能力域工作区视图
             focusNotice ? el("p", { className: "ig5-error", role: "status" }, focusNotice) : null,
             activeTab === "funcs" && el(Ig5FunctionsView, { key: viewKey, target: selectedTarget, engine: engine, session: currentSession, focus: visibleFocus, onNavigate: navigate }),
-            activeTab === "strings" && el(Ig5StringsView, { key: viewKey, target: selectedTarget, engine: engine, onNavigate: navigate }),
-            activeTab === "listing" && el(Ig5ListingView, { key: viewKey, target: selectedTarget, engine: engine, inputActions: props.inputActions }),
-            activeTab === "scan" && el(Ig5ScanView, { key: viewKey, target: selectedTarget, engine: engine }),
+            activeTab === "strings" && el(Ig5StringsView, { key: viewKey, target: selectedTarget, engine: engine, session: currentSession, onNavigate: navigate }),
+            activeTab === "listing" && el(Ig5ListingView, { key: viewKey, target: selectedTarget, engine: engine, session: currentSession, inputActions: props.inputActions }),
+            activeTab === "scan" && el(Ig5ScanView, { key: viewKey, target: selectedTarget, engine: engine, session: currentSession }),
             activeTab === "analysis" && el(Ig5AnalysisView, { key: viewKey, target: selectedTarget, engine: engine, inputActions: props.inputActions }),
             activeTab === "patches" && el(Ig5PatchesView, { key: viewKey, target: selectedTarget, engine: engine }),
             activeTab === "runtime" && el(Ig5RuntimeView, { sessions: allSessions.filter(function (s) { return s.engine === "x64dbg"; }), refresh: feed && feed.now }),
@@ -973,7 +1011,7 @@
           var pair = react.useState({ loading: true, data: null, error: null }), state = pair[0], setState = pair[1];
           react.useEffect(function () {
             var alive = true; setState({ loading: true, data: null, error: null });
-            readData("ir", props.target, { ea: props.ea, level: level, limit: 120 }, props.engine).then(function (data) { if (alive) setState({ loading: false, data: data, error: null }); }).catch(function (error) { if (alive) setState({ loading: false, data: null, error: String(error.message || error) }); });
+            readData("ir", props.target, { ea: props.ea, level: level, limit: 120 }, props.engine, props.session).then(function (data) { if (alive) setState({ loading: false, data: data, error: null }); }).catch(function (error) { if (alive) setState({ loading: false, data: null, error: String(error.message || error) }); });
             return function () { alive = false; };
           }, [props.target, props.engine, props.ea, level]);
           var serialized = state.data ? JSON.stringify(state.data, null, 2) : "";
@@ -1032,7 +1070,7 @@
                     title: "验证所选分析会话的只读函数列表响应",
                     disabled: !session,
                     onClick: function () {
-                      readData("funcs", session.target, { limit: 1 }, session.engine || "reverse")
+                      readData("funcs", session.target, { limit: 1 }, session.engine || "reverse", session)
                         .then(function () { alert("已收到 " + engineName(session.engine) + " 的只读函数列表响应。"); })
                         .catch(function (err) { alert("读取异常: " + err); });
                     }
@@ -1143,7 +1181,7 @@
           var curCode = storedCode.scope && storedCode.scope !== scopeKey ? { ea: null, loading: false, code: null } : storedCode;
           var setCode = codeState[1];
 
-          var xrefsState = react.useState({ list: [], callers: [], callees: [], loading: false });
+          var xrefsState = react.useState({ list: [], callers: [], callees: [], loading: false, xrefsError: null, callsError: null });
           var xrefs = xrefsState[0];
           var setXrefs = xrefsState[1];
 
@@ -1166,7 +1204,7 @@
           if (previousTarget.current !== scopeKey) { previousTarget.current = scopeKey; selectionGate.current.next(); focusGate.current.next(); disasmGate.current.next(); modeGate.current.next(); }
           react.useEffect(function () {
             setCode({ ea: null, name: null, code: null, loading: false, error: null }); setCfg(null); setSlice(null); setDisasm(null);
-            setFocused({ variable: "", loading: false, lines: [], error: null }); setXrefs({ list: [], callers: [], callees: [], loading: false });
+            setFocused({ variable: "", loading: false, lines: [], error: null }); setXrefs({ list: [], callers: [], callees: [], loading: false, xrefsError: null, callsError: null });
             setList(function (s) { return Object.assign({}, s, { rows: [], total: 0, offset: 0 }); });
             setListCollapsed(false);
             return function () { selectionGate.current.next(); focusGate.current.next(); disasmGate.current.next(); modeGate.current.next(); };
@@ -1176,15 +1214,10 @@
             if (!target) return;
             var alive = true;
             setList(function (s) { return Object.assign({}, s, { loading: true, error: null }); });
-            var url = "/ig5-data?type=funcs&engine=" + encodeURIComponent(engine) + "&target=" + encodeURIComponent(target) +
-              "&offset=" + (list.offset || 0) + "&limit=50&filter=" + encodeURIComponent(list.filter || "") +
-              (list.userOnly ? "&user_only=true" : "");
-            fetch(url)
-              .then(function (r) { return r.json(); })
-              .then(function (j) {
+            readData("funcs", target, { offset: list.offset || 0, limit: 50, filter: list.filter || "", user_only: list.userOnly ? true : undefined }, engine, props.session)
+              .then(function (data) {
                 if (!alive) return;
-                if (j.error) { setList(function (s) { return Object.assign({}, s, { loading: false, error: j.error }); }); return; }
-                setList(function (s) { return Object.assign({}, s, { loading: false, rows: j.data.funcs || [], total: j.data.total || 0, error: null }); });
+                setList(function (s) { return Object.assign({}, s, { loading: false, rows: data.funcs || [], total: data.total || 0, error: null }); });
               })
               .catch(function (e) { if (alive) setList(function (s) { return Object.assign({}, s, { loading: false, error: String(e) }); }); });
             return function () { alive = false; };
@@ -1195,30 +1228,28 @@
             setListCollapsed(true);
             function current() { return selectionGate.current.isCurrent(ticket); }
             setCode({ ea: ea, name: name, code: null, loading: true, error: null, generation: ticket, scope: scopeKey });
-            setXrefs({ list: [], callers: [], callees: [], loading: true });
+            setXrefs({ list: [], callers: [], callees: [], loading: true, xrefsError: null, callsError: null });
             setCfg(null);
             setSlice(null);
             setDisasm(null); setFocused({ variable: "", loading: false, lines: [], error: null });
 
             // 1. 获取反编译伪代码
-            fetch("/ig5-data?type=decompile&engine=" + encodeURIComponent(engine) + "&target=" + encodeURIComponent(target) + "&ea=" + encodeURIComponent(ea))
-              .then(function (r) { return r.json(); })
-              .then(function (j) {
+            readData("decompile", target, { ea: ea }, engine, props.session)
+              .then(function (data) {
                 if (!current()) return;
-                if (j.error) { setCode({ ea: ea, name: name, code: null, loading: false, error: j.error, generation: ticket, scope: scopeKey }); return; }
-                setCode({ ea: j.data.ea, name: j.data.name, code: j.data.code || j.data.preview || "(空函数)", loading: false, error: null, generation: ticket, scope: scopeKey });
+                setCode({ ea: data.ea, name: data.name, code: data.code || data.preview || "(空函数)", loading: false, error: null, generation: ticket, scope: scopeKey });
               })
               .catch(function (e) { if (current()) setCode({ ea: ea, name: name, code: null, loading: false, error: String(e), generation: ticket, scope: scopeKey }); });
 
             // 2. 交叉引用 & 子调用
             Promise.all([
-              fetch("/ig5-data?type=xrefs&engine=" + encodeURIComponent(engine) + "&target=" + encodeURIComponent(target) + "&ea=" + encodeURIComponent(ea)).then(function (r) { return r.json(); }).catch(function () { return { data: [] }; }),
-              fetch("/ig5-data?type=calls&engine=" + encodeURIComponent(engine) + "&target=" + encodeURIComponent(target) + "&ea=" + encodeURIComponent(ea)).then(function (r) { return r.json(); }).catch(function () { return { data: [] }; })
+              readData("xrefs", target, { ea: ea }, engine, props.session).then(function (data) { return { data: data }; }, function (e) { return { error: String(e.message || e) }; }),
+              readData("calls", target, { ea: ea }, engine, props.session).then(function (data) { return { data: data }; }, function (e) { return { error: String(e.message || e) }; })
             ]).then(function (results) {
               if (!current()) return;
               var xrefData = (results[0] && results[0].data && results[0].data.rows) || [];
               var callData = (results[1] && results[1].data && results[1].data.rows) || [];
-              setXrefs({ list: xrefData, callees: callData, callers: [], loading: false });
+              setXrefs({ list: xrefData, callees: callData, callers: [], loading: false, xrefsError: results[0].error || null, callsError: results[1].error || null });
             });
 
           }
@@ -1228,7 +1259,7 @@
             if (!target || !curCode.ea || (viewMode !== "cfg" && viewMode !== "slice")) return;
             var ticket = modeGate.current.next(), type = viewMode, ea = curCode.ea;
             if ((type === "cfg" && cfg) || (type === "slice" && slice)) return;
-            readData(type, target, { ea: ea }, engine).then(function (data) {
+            readData(type, target, { ea: ea }, engine, props.session).then(function (data) {
               if (!modeGate.current.isCurrent(ticket)) return;
               if (type === "cfg") setCfg(data); else setSlice(data);
             }).catch(function (e) {
@@ -1250,7 +1281,7 @@
           function focusVariable(variable) {
             var ticket = focusGate.current.next();
             setFocused({ variable: variable, loading: true, lines: [], error: null });
-            readData("slice", target, { ea: curCode.ea, var: variable }, engine).then(function (data) {
+            readData("slice", target, { ea: curCode.ea, var: variable }, engine, props.session).then(function (data) {
               if (focusGate.current.isCurrent(ticket)) setFocused({ variable: variable, loading: false, lines: data.slice_lines || [], error: null });
             }).catch(function (e) { if (focusGate.current.isCurrent(ticket)) setFocused({ variable: variable, loading: false, lines: [], error: String(e.message || e) }); });
           }
@@ -1260,7 +1291,7 @@
             setDisasm({ ea: block.start, block: block.id, rows: [], loading: true });
             var size = 256;
             try { var span = BigInt(block.end) - BigInt(block.start); if (span > 0n) size = Number(span > 8192n ? 8192n : span); } catch (e) {}
-            readData("disasm", target, { ea: block.start, size: size, limit: 120 }, engine).then(function (data) {
+            readData("disasm", target, { ea: block.start, size: size, limit: 120 }, engine, props.session).then(function (data) {
               if (disasmGate.current.isCurrent(ticket)) setDisasm({ ea: block.start, block: block.id, rows: data.rows || [], loading: false, nextEa: data.nextEa });
             }).catch(function (e) { if (disasmGate.current.isCurrent(ticket)) setDisasm({ ea: block.start, block: block.id, rows: [], loading: false, error: String(e.message || e) }); });
           }
@@ -1412,7 +1443,7 @@
                 ? el(
                     "div",
                     null,
-                    viewMode === "ir" && el(Ig5IrView, { key: engine + ":" + curCode.ea, target: target, engine: engine, ea: curCode.ea }),
+                    viewMode === "ir" && el(Ig5IrView, { key: engine + ":" + curCode.ea, target: target, engine: engine, session: props.session, ea: curCode.ea }),
                     // 视图 1: 伪代码
                     viewMode === "code" && (
                       curCode.loading
@@ -1491,7 +1522,7 @@
                                       el("td", { style: { fontWeight: 600, color: "var(--dsw-alias-brand-primary)" } }, v.name),
                                       el("td", null, v.type),
                                       el("td", null, String(v.size)),
-                                      el("td", null, v.is_arg ? el("span", { className: "ig5-chip read" }, "参数") : "局部变量")
+                                      el("td", null, v.is_arg === true ? el("span", { className: "ig5-chip read" }, "参数") : v.is_arg === false ? "局部变量" : "角色未提供")
                                     );
                                   })
                                 )
@@ -1509,8 +1540,10 @@
                       "div",
                       { style: { marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--dsw-alias-border-l1)" } },
                       el("div", { style: { fontSize: 12, fontWeight: 600, color: "var(--dsw-alias-label-secondary)", marginBottom: 6 } },
-                        "关联调用链: " + xrefs.callees.length + " 个子调用 · " + xrefs.list.length + " 个交叉引用"
+                        xrefs.loading ? "正在读取关联调用链…" : "关联调用链: " + (xrefs.callsError ? "子调用读取失败" : xrefs.callees.length + " 个子调用") + " · " + (xrefs.xrefsError ? "交叉引用读取失败" : xrefs.list.length + " 个交叉引用")
                       ),
+                      xrefs.xrefsError ? el("p", { className: "ig5-error", role: "alert" }, "交叉引用读取失败: " + xrefs.xrefsError) : null,
+                      xrefs.callsError ? el("p", { className: "ig5-error", role: "alert" }, "子调用读取失败: " + xrefs.callsError) : null,
                       el(
                         "div",
                         { style: { display: "flex", flexWrap: "wrap", gap: 6 } },
@@ -1530,7 +1563,7 @@
                             onClick: function () { chooseFunction(x.func_ea || x.from || x.ea, x.func_name || ""); }
                           }, "引用自 <- " + (x.func_name || x.from || x.ea));
                         }),
-                        (!xrefs.callees.length && !xrefs.list.length) ? el("span", { className: "ig5-card-sub" }, "无外部交叉调用记录") : null
+                        (!xrefs.loading && !xrefs.xrefsError && !xrefs.callsError && !xrefs.callees.length && !xrefs.list.length) ? el("span", { className: "ig5-card-sub" }, "无外部交叉调用记录") : null
                       )
                     )
                   )
@@ -1557,7 +1590,7 @@
             if (!target) return;
             var alive = true;
             setData(function (s) { return Object.assign({}, s, { loading: true, error: null }); });
-            readData("strings", target, { offset: data.offset || 0, limit: 80 }, engine)
+            readData("strings", target, { offset: data.offset || 0, limit: 80 }, engine, props.session)
               .then(function (result) {
                 if (!alive) return;
                 var list = result.strings || [];
@@ -1568,7 +1601,7 @@
           }, [target, engine, data.offset]);
           function showReferences(ea) {
             var ticket = refsGate.current.next(); setRefs({ ea: ea, loading: true, rows: [] });
-            readData("xrefs", target, { ea: ea }, engine).then(function (result) { if (refsGate.current.isCurrent(ticket)) setRefs({ ea: ea, loading: false, rows: result.rows || [] }); }).catch(function (e) { if (refsGate.current.isCurrent(ticket)) setRefs({ ea: ea, loading: false, rows: [], error: String(e.message || e) }); });
+            readData("xrefs", target, { ea: ea }, engine, props.session).then(function (result) { if (refsGate.current.isCurrent(ticket)) setRefs({ ea: ea, loading: false, rows: result.rows || [] }); }).catch(function (e) { if (refsGate.current.isCurrent(ticket)) setRefs({ ea: ea, loading: false, rows: [], error: String(e.message || e) }); });
           }
 
           var filtered = (data.rows || []).filter(function (item) {
@@ -1656,7 +1689,7 @@
           react.useEffect(function () { typeGate.current.next(); setSelectedType({ name: "", declaration: "", revision: 0, fields: [], error: null }); return function () { typeGate.current.next(); }; }, [target, engine]);
           function loadType(name) {
             var ticket = typeGate.current.next();
-            readData("struct", target, { action: "get", name: name }, engine).then(function (result) {
+            readData("struct", target, { action: "get", name: name }, engine, props.session).then(function (result) {
               if (!typeGate.current.isCurrent(ticket)) return;
               setSelectedType(function (s) { return { name: name, declaration: result.decl || "", fields: result.fields || [], revision: s.revision + 1, error: result.decl ? null : "引擎未返回可编辑 C 声明；请根据字段列表填写完整声明后再生成草稿。" }; });
             }).catch(function (e) { if (typeGate.current.isCurrent(ticket)) setSelectedType(function (s) { return Object.assign({}, s, { error: String(e.message || e) }); }); });
@@ -1667,14 +1700,14 @@
             var alive = true;
             setData(function (s) { return Object.assign({}, s, { loading: true, error: null }); });
             if (subTab === "structs") {
-              readData("struct", target, { action: "list", limit: 100 }, engine)
+              readData("struct", target, { action: "list", limit: 100 }, engine, props.session)
                 .then(function (result) {
                   if (!alive) return;
                   setData({ list: [], structs: result.items || [], loading: false });
                 })
                 .catch(function (e) { if (alive) setData({ list: [], structs: [], loading: false, error: String(e.message || e) }); });
             } else {
-              readData("listing", target, { kind: subTab, limit: 150 }, engine)
+              readData("listing", target, { kind: subTab, limit: 150 }, engine, props.session)
                 .then(function (result) {
                   if (!alive) return;
                   setData({ list: result.rows || [], structs: [], loading: false });
@@ -1736,7 +1769,7 @@
                     el("tbody", null,
                       data.structs.map(function (st, idx) {
                         return el("tr", { key: idx },
-                          el("td", { style: { color: "var(--dsw-alias-label-secondary)" } }, String(st.ordinal)),
+                          el("td", { style: { color: "var(--dsw-alias-label-secondary)" } }, String(st.ordinal ?? "—")),
                           el("td", { style: { fontWeight: 600, color: "var(--dsw-alias-brand-primary)" } }, st.name),
                           el("td", null, String(st.size)),
                           el("td", null, st.is_struct ? el("span", { className: "ig5-chip read" }, "struct") : "type"),
@@ -1829,11 +1862,11 @@
             var alive = true;
             setScan({ data: null, loading: true });
             setFp(null);
-            readData("scan", target, {}, engine)
+            readData("scan", target, {}, engine, props.session)
               .then(function (data) { if (alive) setScan({ data: data, loading: false, scopeKey: scopeKey }); })
               .catch(function (e) { if (alive) setScan({ data: null, loading: false, error: String(e.message || e), scopeKey: scopeKey }); });
 
-            readData("fingerprint", target, {}, engine)
+            readData("fingerprint", target, {}, engine, props.session)
               .then(function (data) { if (alive) setFp({ data: data, scopeKey: scopeKey }); })
               .catch(function () {});
             return function () { alive = false; };
@@ -2405,6 +2438,9 @@
         exports.__test = { normalizeScan: normalizeScan, buildAnalysisDraft: buildAnalysisDraft, ScanView: Ig5ScanView, AnalysisDraft: AnalysisDraft, AnalysisView: Ig5AnalysisView, cfgFitCamera: cfgFitCamera, EnvironmentCard: Ig5EnvironmentCard, cfgPinchStart: cfgPinchStart, cfgPinchCamera: cfgPinchCamera, engineName: engineName, sessionIdentity: sessionIdentity, parseWorkbenchFocus: parseWorkbenchFocus, layoutCfg: layoutCfg, highlightParts: highlightParts, renderCodeLines: renderCodeLines, normalizeAudit: normalizeAudit, normalizedTarget: normalizedTarget, buildStructDraft: buildStructDraft, makeRequestGate: makeRequestGate, CfgGraph: CfgGraph, StructEditor: StructEditor, FunctionsView: Ig5FunctionsView, StringsView: Ig5StringsView, ListingView: Ig5ListingView, PatchesView: Ig5PatchesView, RuntimeView: Ig5RuntimeView, IrView: Ig5IrView, OverviewCard: Ig5OverviewCard, Workbench: Ig5Workbench };
         exports.__test.analysisReuseDraft = analysisReuseDraft;
         exports.__test.AnalysisEvidence = AnalysisEvidence;
+        exports.__test.normalizeReadData = normalizeReadData;
+        exports.__test.readData = readData;
+        exports.__test.captureReadSnapshot = captureReadSnapshot;
         exports.__test.ToolsMatrixView = Ig5ToolsMatrixView;
         return module.exports;
       },

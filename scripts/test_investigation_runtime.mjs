@@ -4,11 +4,18 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import vm from 'node:vm';
 import { createHash, randomUUID } from 'node:crypto';
 import { apply } from '../index.js';
 import { buildPE64Fixture } from './fixtures/pe64.mjs';
 
 const sourceRoot = fs.realpathSync(new URL('..', import.meta.url));
+let workbench, workbenchFetch;
+vm.runInNewContext(fs.readFileSync(path.join(sourceRoot, 'client.js'), 'utf8'), {
+  window: { __ModuleLoader__: { load(module) { workbench = module.factory(() => ({ createElement() {} })); } } },
+  console, setTimeout, clearTimeout, URLSearchParams, fetch: (...args) => workbenchFetch(...args),
+}, { filename: 'client.js' });
+const normalizeWorkbenchRead = workbench.__test.normalizeReadData;
 const scratch = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'ig5-investigation-runtime-中文-'));
 const reportFile = path.resolve(process.env.IG5_INVESTIGATION_REPORT || path.join(os.homedir(), '.dsh', 'ig5', 'artifacts', `investigation-runtime-${randomUUID()}.json`));
 const relativeReport = path.relative(sourceRoot, reportFile);
@@ -17,12 +24,19 @@ const target = path.join(scratch, '版本一.exe'), other = path.join(scratch, '
 const fixture = buildPE64Fixture(1);
 fs.writeFileSync(target, fixture.image); fs.writeFileSync(other, buildPE64Fixture(2).image);
 const tools = new Map(), events = new Map(), effects = [], checks = [], approvals = [];
+const routes = new Map();
 const agent = { id: 'investigation-runtime-acceptance' };
 const ctx = {
   tools: { register(definition) { assert(!tools.has(definition.name)); tools.set(definition.name, definition); return () => tools.delete(definition.name); } },
   on(name, callback) { events.set(name, callback); return () => events.delete(name); },
   get(name) { return name === 'approval' ? { async request(request) { approvals.push(request); return 'allowed-once'; } } : undefined; },
-  inject() { return { dispose() {} }; },
+  inject(names, callback) {
+    if (names.includes('webServer')) {
+      const dispose = callback({ webServer: { register(route) { routes.set(route.path, route.handler); return () => routes.delete(route.path); } } });
+      if (typeof dispose === 'function') effects.push(dispose);
+    }
+    return { dispose() {} };
+  },
   effect(body) { const dispose = body(); if (typeof dispose === 'function') effects.push(dispose); },
 };
 let sequence = 0, failure, cleanupSucceeded = false;
@@ -41,6 +55,47 @@ try {
   assert.equal(tools.size, 8);
   const opened = await call('ig5_open', { path: target, background: false });
   assert.equal(opened.provider, 'ghidra');
+  // The HTTP service is controlled, while the installed route and workers are
+  // real. Verify their shared identity contract without claiming GUI coverage.
+  const identityFields = ['target', 'engine', 'projectId', 'artifactId', 'sha256', 'provider', 'attachmentId', 'dbRevision'];
+  let lastReadResponse;
+  workbenchFetch = async url => {
+    const query = new URL(url, 'http://local').searchParams;
+    assert(query.has('expected_snapshot'), 'actual client must send its mounted snapshot');
+    const response = await new Promise((resolve, reject) => {
+      try {
+        routes.get('/ig5-data')({ method: 'GET', url }, { writeHead(status) { assert.equal(status, 200); }, end(body) { resolve(JSON.parse(body)); } });
+      } catch (error) { reject(error); }
+    });
+    lastReadResponse = response;
+    return { ok: true, status: 200, json: async () => response };
+  };
+  const dataTypes = ['funcs', 'strings', 'decompile', 'cfg', 'xrefs', 'calls', 'stack', 'ir', 'struct', 'listing', 'disasm'];
+  for (const type of dataTypes) {
+    const rendered = await workbench.__test.readData(type, target, { ea: fixture.addresses.branch, limit: '2', action: 'list' }, 'reverse', opened);
+    const response = lastReadResponse;
+    assert.equal(response.error, undefined, type + ': ' + JSON.stringify(response));
+    assert(response.data && typeof response.data === 'object', type + ' must return data');
+    for (const field of identityFields) {
+      assert.equal(response[field], opened[field], type + ' must retain the opened source: ' + field);
+      assert.equal(response.data._ig5[field], response[field], type + ' must agree with its worker snapshot: ' + field);
+    }
+    assert.deepEqual(rendered._ig5, response.data._ig5, type + ' must preserve worker provenance');
+    if (type === 'xrefs' || type === 'calls') {
+      const native = response.data[type === 'xrefs' ? 'hits' : 'calls'];
+      assert(Array.isArray(native)); assert.equal(rendered.rows.length, native.length);
+      if (type === 'xrefs') rendered.rows.forEach((row, index) => {
+        assert.equal(row.from, native[index].other); assert.equal(row.func_name, native[index].func || '');
+      });
+    } else if (type === 'strings') {
+      assert(rendered.strings.length > 0, 'generated PE must expose real string text');
+      rendered.strings.forEach((row, index) => assert.equal(row.str, response.data.strings[index].text));
+    } else if (type === 'listing') {
+      assert(rendered.rows.length > 0, 'generated PE must expose real sections');
+      rendered.rows.forEach(row => assert.match(row.perm, /^[r-][w-][x-]$/));
+    }
+  }
+  pass('Workbench eleven real bundled reads retain matching snapshots and normalize native UI contracts', { dataTypes, dbRevision: opened.dbRevision, httpService: 'controlled req/res handler', actualClientReadData: true, expectedSnapshotSent: true, nativeWorkers: true, desktopGui: false });
   const created = (await workspace({ action: 'create', goal: '还原测试函数的分支', hypothesis: '返回值取决于输入是否为零', next_step: '聚合并核对函数上下文' })).workspace;
   const id = created.taskId;
   assert.equal(created.progressIsCallerDeclared, true); assert.equal(created.taskRevision, 0);
@@ -101,6 +156,13 @@ try {
   pass('Same-address independent Ghidra lane and another binary cannot reuse this task', { ghidraAttachment: ghidra.provenance.attachmentId });
 
   await call('ig5_close'); await call('ig5_open', { path: target, background: false });
+  await expectError(() => workbench.__test.readData('funcs', target, { limit: 1 }, 'reverse', opened), /has changed/);
+  assert.equal(lastReadResponse.code, 'STALE_DATA_CONTEXT'); assert.equal(lastReadResponse.data, undefined);
+  const freshSession = (await call('ig5_status')).sessions.find(row => row.target === target && row.engine === 'reverse');
+  const refreshed = await workbench.__test.readData('funcs', target, { limit: 1 }, 'reverse', freshSession);
+  assert.equal(refreshed._ig5.attachmentId, freshSession.attachmentId);
+  assert.notEqual(refreshed._ig5.attachmentId, opened.attachmentId);
+  pass('Actual client rejects a pre-request reopen with the old mounted snapshot and accepts the refreshed attachment', { oldAttachment: opened.attachmentId, newAttachment: freshSession.attachmentId, nativeWorkers: true, desktopGui: false });
   const reopened = await task(id);
   assert.equal(reopened.status, 'paused'); assert.equal(reopened.systemEvidence.length, 2);
   assert(reopened.systemEvidence.every(entry => entry.stale && entry.staleReasons.includes('attachment-changed')));
@@ -121,7 +183,7 @@ try {
     await fs.promises.rm(scratch, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     cleanupSucceeded = true;
   } catch (error) { failure ||= { code: error.code || null, message: error.message, stack: error.stack }; }
-  const files = ['index.js', 'source/function_dossier.js', 'source/investigation_workflow.js', 'source/investigation_store.js', 'source/project_store.js'];
+  const files = ['index.js', 'client.js', 'source/function_dossier.js', 'source/investigation_workflow.js', 'source/investigation_store.js', 'source/project_store.js'];
   fs.mkdirSync(path.dirname(reportFile), { recursive: true });
   fs.writeFileSync(reportFile, JSON.stringify({ ok: !failure, createdAt: new Date().toISOString(), scope: 'Real bundled Reverse and explicit Ghidra static workers; generated PE only; no target process execution',
     source: Object.fromEntries(files.map(file => [file, createHash('sha256').update(fs.readFileSync(path.join(sourceRoot, file))).digest('hex')])),
