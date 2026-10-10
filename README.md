@@ -7,15 +7,8 @@
 
 解密/配置提取与协议分析使用 `ig5_crypto`、`ig5_protocol`、独立有界数据 worker 和可复用 SHA-256 产物引用，完整工具面为 **38 项**、原生技能为 **7 个**。新增 `recover` 自动恢复 XOR 密钥、检索并验证 AES 候选材料；新增 `infer` 推断未知报文的分帧、长度与字段候选。统计候选与认证/独立验证分开记录，预算、歧义和未识别部分明确保留。
 
-首次使用：[下载最新源码 ZIP](https://github.com/Minglink/dsh-infinite-gen-5/archive/refs/heads/master.zip) → 解压 → 在源码根目录运行 `& .\install.ps1` → 重启 DSH → `/ig5 engines` → `/ig5 open --engine ghidra <路径>`。安装器先检查源码和 DSH profile，再下载并验证固定完整资产，只补齐运行时与上游源码，保留本次下载的插件代码。也可从 [Windows x64 完整包发布页](https://github.com/Minglink/dsh-infinite-gen-5/releases/latest) 选择已发布并附验证报告的完整附件，解压后运行 `& .\plugin\install.ps1`，整包默认离线安装；发布页的既有旧附件不会自动获得新安装器修复。高级功能通过 `/ig5 toolset full` 展开。当前已验证的发行平台为 **Windows x64**；手机原生执行包仍需独立移植与验收。
+首次使用：从 [Windows x64 完整包发布页](https://github.com/Minglink/dsh-infinite-gen-5/releases/latest) 下载完整 Windows ZIP → 完整解压 → 运行 & .\plugin\install.ps1 → 重启 DSH → /ig5 engines → /ig5 open --engine ghidra <路径>。完整包默认离线安装；旧附件不会自动获得新安装器修复。使用 [最新源码 ZIP](https://github.com/Minglink/dsh-infinite-gen-5/archive/refs/heads/master.zip) 或 git clone 时，可在源码根目录运行 & .\install.ps1，安装器检查源码与 DSH profile 后下载固定资产，只补齐运行时和上游源码，保留当前代码。高级功能通过 /ig5 toolset full 展开。
 
-- [重构后的模块与能力边界](docs/ARCHITECTURE.md)
-- [本轮缺陷修复与验收对账](docs/REMEDIATION.md)
-- [DSH 0.2 宿主兼容、审批与验收范围](docs/DSH_COMPATIBILITY.md)
-- [固定源码构建、验证与部署](docs/BUILD.md)
-- [Android / iOS 本地离线运行的实际进度](docs/MOBILE.md)
-- [解密、配置提取与协议分析工作流](docs/CRYPTO_PROTOCOL.md)
-- [自动密钥恢复与未知协议推断](docs/AUTODISCOVERY.md)
 
 <p align="center">
   <img src="assets/banner.png" alt="无限五代 IG5 · AI 驱动的专业逆向工作台" width="100%" />
