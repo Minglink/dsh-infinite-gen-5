@@ -1,0 +1,348 @@
+{
+  "upstream": "Ghidra native decompiler",
+  "nativeExecutionVerified": false,
+  "bfdLinked": false,
+  "engine": "IG5 Kernel",
+  "sourceCommit": "8b6bbb857accdfa20dc5b2f5dea471178c2e9fbc",
+  "upstreamSources": [
+    {
+      "sha256": "f2770d67814b5d69aec3a327a8d4cc1b4b153ee75d322240b02d14c2957daab0",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/marshal.cc"
+    },
+    {
+      "sha256": "acf2877f207b4958ab01cd98a6c99b43fd143236bf752b0c0efdb4d5670f38f3",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/space.cc"
+    },
+    {
+      "sha256": "359a2a813c7dc63c1ae757b6b55adc04b5d1964331626dfd7667b12fca7abcf0",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/float.cc"
+    },
+    {
+      "sha256": "79534a8bb9c41bce77d94c3e6d5f181e2ac1b6779763bf99ea2db40fa00f2b47",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/address.cc"
+    },
+    {
+      "sha256": "11f9dafbc09ab7f787ca4480f7a6bb346122d9489bbbe567c78593e92128c6bf",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/pcoderaw.cc"
+    },
+    {
+      "sha256": "c093622122abc4a4bd4a495a03f486db4f9cea3413a52fcdc9a0a330c8108955",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/translate.cc"
+    },
+    {
+      "sha256": "bf8849e24f34239e82ac3250ff3238e5ac33c0ead154a0cbdf4e0a9f761e33bb",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/opcodes.cc"
+    },
+    {
+      "sha256": "2c0214696093d5ca864e721c88295506d66e2657c0e520af1909747d38ffd9f3",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/globalcontext.cc"
+    },
+    {
+      "sha256": "16e88a09e3093841c9aaadc2c09e07d9deff757cf7f18d969d3fea13a2eedcdc",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/capability.cc"
+    },
+    {
+      "sha256": "2957a7316ae5f962cca53ed3f2a59a536cf2dc68f10f1192dee188f5b6946486",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/architecture.cc"
+    },
+    {
+      "sha256": "cbad80eb18bbeb8906b83ec1773ba76ab29e6257c2b999bacac12106dd984461",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/options.cc"
+    },
+    {
+      "sha256": "a29398c750ef8cc5cc693d1d3a8c37b5000ed2b7e568b80b22360e43b4f04e17",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/graph.cc"
+    },
+    {
+      "sha256": "65cc1e19e6019e8a36ef0ffe8bf4db765344c7e9dcb9033d05e673abf5d32cd7",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/cover.cc"
+    },
+    {
+      "sha256": "40b0a8058568481807f030809c9c9c0e4d484362017ad9c329e4a6ff728317a9",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/block.cc"
+    },
+    {
+      "sha256": "48cb0d500cf66bb22a73460c62ff923aa19fbc146ec1ef528c797a555709cca8",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/cast.cc"
+    },
+    {
+      "sha256": "fe420fa6547f9d36be7b517cc4baa1c2886f41f67af3fbb99a8d1e6210461d8c",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/typeop.cc"
+    },
+    {
+      "sha256": "4f2be098dde9dcb75cb3e76bf8a2bf601d0725a14bc13e4983d736417abb8cec",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/database.cc"
+    },
+    {
+      "sha256": "d782876b2ccedafe0411b4651723b1418679e51a8a6e355dde28f7f7e23bdb53",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/cpool.cc"
+    },
+    {
+      "sha256": "5983ec37f7048cdb30d0ddef9cb4ff74fce35d887d3a75be4c852f70dd4fafcb",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/comment.cc"
+    },
+    {
+      "sha256": "50c9946dd6e47ded6c021882e78273bf8a60e9dcf1c70923a0a39326a1381bb2",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/stringmanage.cc"
+    },
+    {
+      "sha256": "2ec9ec28ab1bce02c00b6c9a68cf148de0d7a980f00384b21db8d5926daf3df1",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/modelrules.cc"
+    },
+    {
+      "sha256": "40b0bb5d4cf59d36ba16d06fc6cccc17d75d04cfce555cf3d28b5e7e07587ce2",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/fspec.cc"
+    },
+    {
+      "sha256": "c14bee9f21a2a3cf43bef77f4940429edf1f1ac629d9b4544733b9232535035f",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/action.cc"
+    },
+    {
+      "sha256": "feaaab99fbf8aa96a8749c546e021177731a9460bb0acf456749461c119aede5",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/loadimage.cc"
+    },
+    {
+      "sha256": "c2a47cff2473a39e616b434106e0d8df25564512c2ed27d1cc6299d6ac4a2a60",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/varnode.cc"
+    },
+    {
+      "sha256": "6bf8b238c6feec27435361dd10521c7d652b161a7253adac8f5fd8ac3f6094e0",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/op.cc"
+    },
+    {
+      "sha256": "6fadcaa232e3deb5f211272186d0eef94d836be1132b23fb993cfc6b1b747cf1",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/type.cc"
+    },
+    {
+      "sha256": "2b01003765db20a0012c8dbd27108eee774b1be7df6d50d35a54efb4711adebf",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/variable.cc"
+    },
+    {
+      "sha256": "985d48613d26c95983e69eca267f627c304a6197eabfec3e419f916a9ddf5479",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/varmap.cc"
+    },
+    {
+      "sha256": "c8bf07367f23f827e0d290bb6bfb3c2ef9db67e2c9543931203b6b627892b7fe",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/jumptable.cc"
+    },
+    {
+      "sha256": "626a556e976077f6bd3baf1bf960328e5af071aa01a894518a9cfd63f6132d0f",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/emulate.cc"
+    },
+    {
+      "sha256": "7bfaa738314b41e0da21127cc65ca9938bf2511499327286ef2fa442916507d7",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/emulateutil.cc"
+    },
+    {
+      "sha256": "bde7bed05b3cd01b0032610b517533e0414f2bb008cf87d81b7c9e577ad860ad",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/flow.cc"
+    },
+    {
+      "sha256": "57781dd222b1ed84502ed98d2e38ec15e742022e41d1c596adf5e005576157fe",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/userop.cc"
+    },
+    {
+      "sha256": "0362a8146598b6bc53165140aa3ecb9f1ac23dccb7bfd5bf498d1ed763a1cdf6",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/expression.cc"
+    },
+    {
+      "sha256": "e9220441f88b6cb22a47b57dd29a0984d97cc9537354baa04c35561a928f4186",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/multiprecision.cc"
+    },
+    {
+      "sha256": "1a2ea213a4fcd9e3fdfa44d2def9f4c5eaca76678d00a611e5d3da0fafcdcca3",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/funcdata.cc"
+    },
+    {
+      "sha256": "6c25a1b71fcc6c55d3e194a4e3a7d0c0977881ab0d28f8ce56b3a7f08f8eec09",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/funcdata_block.cc"
+    },
+    {
+      "sha256": "318b2f68fbf93375d826a8c2418661801b84a045751b7b7109775dc0f7caf388",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/funcdata_varnode.cc"
+    },
+    {
+      "sha256": "26b7b34606d0c0093b977781676b6d24836f76427f30931d353e8c64a1c19dbf",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/unionresolve.cc"
+    },
+    {
+      "sha256": "765bf51828d4f0e44a7b3e2040341342a23c8d385d7b31a2da2aede77aa2b289",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/funcdata_op.cc"
+    },
+    {
+      "sha256": "0e55b99a36623c08a10f53068ff1112d973a173fad9f6395be7c7f228cd89e75",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/pcodeinject.cc"
+    },
+    {
+      "sha256": "b6d1f700b80335d23eac124f369b42ea1e147080aeb0563d9a265c03d832b695",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/heritage.cc"
+    },
+    {
+      "sha256": "bafed8a56e8f61cfee57d8d73dec0362470efc1d370c2b9e6a84866ffd4d1fc0",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/prefersplit.cc"
+    },
+    {
+      "sha256": "87961f81a35243e1089e025a476f910b19941f357172e1672725c0438e8153a3",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/rangeutil.cc"
+    },
+    {
+      "sha256": "1af22c134b936a032ff0ff8ffecbbb5d41026b303bf1af881f063d49cadce52e",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/ruleaction.cc"
+    },
+    {
+      "sha256": "fd96c3311acf566d4a31b0f2fee9c97f5c772790104abfa867ef6b8b41df8c0c",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/subflow.cc"
+    },
+    {
+      "sha256": "f0f08b9f8045854091cc86ce43bf1584d7f8b89997b87c2b2ccbfeb1f51b0b28",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/transform.cc"
+    },
+    {
+      "sha256": "501e8d9a3caec9172b1fdfa421f6cbc96cf8eb481fa3b40acbd186db4bab9dd6",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/blockaction.cc"
+    },
+    {
+      "sha256": "bfcc34d726fcceac0ef0ffb46e0cddb5d1fc4b8d1d35ca8b640f56f114df42ce",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/merge.cc"
+    },
+    {
+      "sha256": "7ba047a84d1245350efcb482a4833fe79fcc16357f5e57b818ead2559efb4bc1",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/double.cc"
+    },
+    {
+      "sha256": "22f3bc253bad9977f04b559ed75cab2e476e8fcca144301f830e4869f9e7ab38",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/constseq.cc"
+    },
+    {
+      "sha256": "d8b05838cdc39acc6dff17c60b97d0ae7149b96d3fd0e074ea44a08f5b7548c9",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/bitfield.cc"
+    },
+    {
+      "sha256": "fe71d656fbf919dc96cbbc58c966ee3fda6b58c942c6dabbb9f219bfb80065fa",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/coreaction.cc"
+    },
+    {
+      "sha256": "f0becded8de50d4a30b59863f0590ba9d9020ce66125ece924c895622e2fb434",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/condexe.cc"
+    },
+    {
+      "sha256": "a85e410f1ca7865c3fc0e3e0f8ebd2cdfc6fe6dffb08254fa675b033c3b6ae4f",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/override.cc"
+    },
+    {
+      "sha256": "740772b620e5383045819ecc0381395014505a4af6c4125657eed32ffc5ba0a7",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/dynamic.cc"
+    },
+    {
+      "sha256": "bff77ec2beb5a294a1769ea12fdf270f6bf56ca68bb96e0a31e1826eebe5066e",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/crc32.cc"
+    },
+    {
+      "sha256": "60bd214b7a8109c9efdafdcae7414f1b0b899c13faf214ac7c55db7d14511ce7",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/prettyprint.cc"
+    },
+    {
+      "sha256": "62af8585c8098d06af09c86a1c6d2552676a979b69416e961b9f676cc3e407f9",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/printlanguage.cc"
+    },
+    {
+      "sha256": "1b4929923f73bd9ed41257ea4a296c69bb6b866000cfdfa350d14018cd66f807",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/printc.cc"
+    },
+    {
+      "sha256": "d925113661a11eb0c7ad41f84937c4e4f90ab20c3075f0378b7e3ebfda83aac7",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/printjava.cc"
+    },
+    {
+      "sha256": "ef68ee18511cac1bec55a602c64e43f57bc4755ca00e8204f411434d51d27f92",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/memstate.cc"
+    },
+    {
+      "sha256": "b8a1363a9cc065b63690bc08e9cb71d1f3d9f6ac21d34371aa4c9d218677810e",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/opbehavior.cc"
+    },
+    {
+      "sha256": "ca9fb5634c5a1b2a8ee31278a7555be4ca202c9f80e4bf0cb827d0542758e682",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/paramid.cc"
+    },
+    {
+      "sha256": "74e2522e019c8d871852dd0d27c80558f24ed3e854c9e8d762ba00d12b80d076",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/signature.cc"
+    },
+    {
+      "sha256": "ed950a2e084760853c7b64322f15f12fb26dacbd269bea4e9b8366feb469e594",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/xml.cc"
+    },
+    {
+      "sha256": "613c0a2d1bc0715c7b382737286cb96f1514f55ccb4069afbb3f00078c30ce99",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/sleigh.cc"
+    },
+    {
+      "sha256": "a88ae2db092554061cf0d606a6edef962050a2311c21afe94b7e7e6019a4d7e1",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/pcodecompile.cc"
+    },
+    {
+      "sha256": "a2ee8e59eedf8e039ecac421bcb6af8ebd1ecae09bf1a9ee737a3ff53ef41a6a",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/sleighbase.cc"
+    },
+    {
+      "sha256": "cdebf072e7033ed7fe68a8e4f25c2e12f2785027efbc60c85cee37eb92b76dbd",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/slghsymbol.cc"
+    },
+    {
+      "sha256": "09d2d0a05beaa82e980c52f577dd87354dc3b723c75224100001e1ccf5f774f2",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/slghpatexpress.cc"
+    },
+    {
+      "sha256": "47602a13e8b5df155bd79ebf706f4fa32d26bd6dd59357d7b8a3847958a3171f",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/slghpattern.cc"
+    },
+    {
+      "sha256": "74a68e500e759fce0e90b7925af04b3061b23226939b27ce95b9c52d7fed0e81",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/semantics.cc"
+    },
+    {
+      "sha256": "f2652596e95bf5609cc07192e2e9ef554d7fec81ac915d632626b0a093954f1a",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/context.cc"
+    },
+    {
+      "sha256": "5645e18d6cca036a3207f1df1a5911335642299254657e53c2516375f6ad33e8",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/slaformat.cc"
+    },
+    {
+      "sha256": "654bf55f981c97347e83422fc3c387632b94d42f2185d5da6f5bc03bdc6c4027",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/compression.cc"
+    },
+    {
+      "sha256": "f13038352ae71eb6c459d5b52b148da8fb2196b098278f30d647e122e8366e73",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/filemanage.cc"
+    },
+    {
+      "sha256": "5b47776b6ffa0eedc36caa571dacc7b65ebde25bb39f7108e40ce93c314f151f",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/pcodeparse.cc"
+    },
+    {
+      "sha256": "28f77e662b2cb394745844abff5e1ed8377816a07fc2ea614ab5e0dba092ff8a",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/sleigh_arch.cc"
+    },
+    {
+      "sha256": "81d917e03c4b5965a0475cdd41e3f37a82c8a8857f9f50057e19577ea265eb33",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/inject_sleigh.cc"
+    },
+    {
+      "sha256": "3961fc008c2565f8a6270e48e57318e46a5bdfad9fac360f1bb25fce2f0d0707",
+      "path": "Ghidra/Features/Decompiler/src/decompile/cpp/libdecomp.cc"
+    }
+  ],
+  "schemaVersion": 1,
+  "mobileHostValidated": false,
+  "optimizerDeadline": "external isolated worker",
+  "artifact": {
+    "path": "ig5_decompiler.dll",
+    "sha256": "46d8409911fa52e59a5e5838acddc12da1bef275f49ce0484bc46b8f7955cd40",
+    "bytes": 2734592
+  },
+  "commercialEngineUsed": false,
+  "builtUtc": "2026-10-10T13:57:22.7925253Z",
+  "javaFrameworkLinked": false
+}

@@ -76,6 +76,8 @@
     "test:self-contained": "node scripts/test_self_contained.mjs",
     "test:public-tools": "node scripts/test_public_tool_catalog.mjs",
     "test:host-sdk": "node scripts/test_host_sdk.mjs",
+    "test:kernel": "node scripts/test_kernel_runtime.mjs",
+    "test:kernel-jobs": "node scripts/test_kernel_jobs.mjs",
     "test:json-output": "node scripts/test_json_output.mjs",
     "test:approval-gate": "node scripts/test_approval_gate.mjs",
     "test:install-package": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test_install_package.ps1",

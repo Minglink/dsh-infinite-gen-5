@@ -14,14 +14,17 @@ const scratch = fs.mkdtempSync(path.join(tempRoot, 'ig5-new-tools-'));
 const target = path.join(scratch, path.basename(fixture));
 const tools = new Map();
 const effects = [];
+const approvalRequests = [];
+const events = new Map();
+let callSequence = 0;
 
 try {
   fs.copyFileSync(fixture, target);
   const mod = await import(pathToFileURL(path.join(pluginRoot, 'index.js')).href);
   const ctx = {
     tools: { register(def) { tools.set(def.name, def); return () => tools.delete(def.name); } },
-    on() {},
-    get() { return undefined; },
+    on(name, handler) { events.set(name, handler); },
+    get(name) { return name === 'approval' ? { async request(value) { approvalRequests.push(value); return 'allowed-once'; } } : undefined; },
     inject() { return { dispose() {} }; },
     effect(fn) { const dispose = fn(); if (typeof dispose === 'function') effects.push(dispose); },
   };
@@ -34,7 +37,18 @@ try {
   });
   assert.equal(tools.size, 38, 'all 38 tools must be registered in full mode');
 
-  const call = (name, args = {}) => tools.get(name).execute({ target, ...args });
+  const call = async (name, args = {}) => {
+    const parameters = { target, ...args };
+    const execution = { agent: { id: 'isolated-new-tools-smoke' }, callId: 'smoke-' + (++callSequence) };
+    let dispatchAllowed = false;
+    const decision = await events.get('tools/pre-execute')({ name, arguments: parameters, ...execution }, async () => {
+      dispatchAllowed = true; return { kind: 'allow' };
+    });
+    assert.equal(decision.kind, 'allow'); assert.equal(dispatchAllowed, true);
+    const result = await tools.get(name).execute(parameters, execution);
+    await events.get('tools/post-execute')({ name, arguments: parameters }, { isError: false, value: result }, async () => ({ kind: 'accept' }));
+    return result;
+  };
   const core = await call('ig5_profile', { toolset: 'core' });
   assert.equal(core.activeTools.length, 8);
   assert.equal(tools.size, 8);
@@ -108,6 +122,7 @@ try {
   assert.equal(applied.status, 'ok');
   assert.equal(applied.applied, true);
   console.log('[struct] apply verified on isolated database');
+  assert(approvalRequests.filter(row => row.toolName === 'ig5_struct').length >= 2, 'writes must pass the public approval gate');
 
   await call('ig5_close');
 } finally {

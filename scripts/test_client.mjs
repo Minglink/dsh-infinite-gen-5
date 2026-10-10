@@ -350,7 +350,10 @@ test('empty workbench uses the configured default and does not imply Reverse ana
   overview.render(); assert.match(text(overview.tree), /尚无分析结果/); assert.doesNotMatch(text(overview.tree), /Reverse 分析结果/); overview.unmount();
   const catalog = harness(ui.ToolsMatrixView, {}); catalog.render();
   for (const name of ['ig5_microcode', 'ig5_run_idapython', 'ig5_switches', 'ig5_switch_repair', 'ig5_vtables', 'ig5_sync']) assert.match(text(catalog.tree), new RegExp(name));
-  assert.match(text(catalog.tree), /需要已有本机 Reverse 引擎/); assert.match(text(catalog.tree), /需要 Reverse 和 Ghidra 两个数据库/); catalog.unmount();
+  assert.match(text(catalog.tree), /仍需已有本机 Reverse/);
+  assert.match(text(catalog.tree), /ig5_sync 需要两个静态数据库/);
+  assert.match(text(catalog.tree), /ig5_ir level=kernel 无需启动 Java 或商业引擎/);
+  assert.match(text(catalog.tree), /跳转表读取、修复与虚表分析也支持 Ghidra/); catalog.unmount();
 });
 
 test('runtime target switch never labels the previous target snapshot as the new target', async () => {

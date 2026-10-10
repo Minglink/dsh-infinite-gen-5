@@ -3,7 +3,7 @@
 
 本轮重构继续保持 **1.0.0**：抽出公共 worker 通信与内存仿真核心，维护固定版本的 Ghidra / x64dbg 源码构建，增加真实硬件断点回归，并优化手机宽度下的工作台。完整 Windows 包包含本地运行依赖，无需用户另行安装 Java、Python 或调试器。
 
-**随包能力范围**：Ghidra / x64dbg 组合覆盖当前 38 项目录中的 32 个工具入口。`ig5_microcode`、`ig5_run_idapython`、`ig5_switches`、`ig5_switch_repair`、`ig5_vtables` 需要已有本机授权 Reverse 引擎；`ig5_sync` 需要 Reverse 与 Ghidra 两个数据库。完整包包含开源后端运行时，尚不包含商业 Reverse 内核；第三方授权和启动状态不能由适配层替代。
+**随包能力范围**：本轮 Ghidra / x64dbg 实际公开目录回归通过 35/38 个工具入口。新增随包独立内核：IG5 自有 PE/ELF 加载、CFG、局部 IR 规则与 RTTI，接入源码构建的 SLEIGH / 原生 C 反编译核心；`ig5_ir level=kernel action=decompile` 无需打开数据库、启动 Java 或商业引擎即可输出真实 C。Ghidra 已支持 `ig5_switches`、`ig5_switch_repair`、`ig5_vtables`。`ig5_microcode`、`ig5_run_idapython` 保留为可选本机 Reverse 专属能力；`ig5_sync` 需要两个静态数据库。独立核心的实现、预算和明确边界见 [内核说明](docs/SELF_CONTAINED_KERNEL.md)。旧发行附件不会自动获得本轮实现。
 
 解密/配置提取与协议分析使用 `ig5_crypto`、`ig5_protocol`、独立有界数据 worker 和可复用 SHA-256 产物引用，完整工具面为 **38 项**、原生技能为 **7 个**。新增 `recover` 自动恢复 XOR 密钥、检索并验证 AES 候选材料；新增 `infer` 推断未知报文的分帧、长度与字段候选。统计候选与认证/独立验证分开记录，预算、歧义和未识别部分明确保留。
 
@@ -196,7 +196,9 @@ ig5_sync action=apply target="C:\samples\app.exe" plan_id="<preview返回的ID>"
 
 完整发行包的插件根目录直接包含 `runtimes/ghidra` 与 `runtimes/x64dbg`。Ghidra 包含自身 JDK/Python，x64dbg 包含自身 Python、x86/x64 debugger 与自建 `ig5-native` bridge；默认安装直接带入插件，运行不依赖外部 `~\.dsh\ig5\runtimes`，不改全局 Python、系统 PATH 或引擎 site-packages。Windows 桥接在导入 PyGhidra/JPype 前注册进程局部 JDK DLL 目录，并从随包 JDK 绝对加载、验证三份 VC 运行库，避免依赖维护机的系统 VC 安装。默认静态后端优先使用可用的随包 Ghidra；该后端不可用而已有本机 Reverse 通过文件检查时才回退 Reverse。`defaultEngine` 配置和调用时 `engine=ghidra|reverse` 保留显式选择，`reverse:false` 可禁用 Reverse。`runtimeRoot`、`ghidraRuntime` / `IG5_GHIDRA_RUNTIME`、`x64dbgRuntime` / `IG5_X64DBG_RUNTIME` 保留显式外置覆盖；错误的显式配置不会偷偷回退另一包。默认运行时根按已加载插件的物理目录解析，支持 DSH profile Junction；不会从其他版本目录猜测补包。`projectRoot` 与可写工程缓存仍与分发资产分开。完整配置见 [HARNESS_PLUGIN.md](HARNESS_PLUGIN.md#安装与便携-runtime)。
 
-**Reverse 是已有本机商业引擎的适配通道。** IG5 重构了工作进程、调用协议和工具能力，没有重写或随包分发该商业内核及许可；只下载 IG5 不会获得 Reverse 原生微码等专属能力。已有有效安装可以设置兼容项 `idaDir` / `IG5_IDA_DIR` 与 `pythonExe` / `IG5_PYTHON`。自动发现读取现有激活配置、Desktop/OneDrive Desktop 和 Program Files 的有界候选，并检查原生内核、无头 Python 接口及 Windows x64 Python；自定义位置建议显式配置。工作台“已发现，待验证”仅表示文件检查通过；必须调用 `ig5_doctor engine=reverse` 核验原生启动，目标架构的反编译能力以实际结果为准。缺安装、缺 Python、被禁用和不支持的宿主分别说明原因。
+**五代独立内核已随代码提供。** `adapters/kernel/native/ig5_decompiler.dll` 包含源码构建的原生反编译管线，与 IG5 自有加载器一起运行；通过 `ig5_ir level=kernel` 使用，处理器规格与 Python 来自随包资产。它不需要商业 Reverse，支持的范围、真实 C 输出与未恢复信息见 [内核说明](docs/SELF_CONTAINED_KERNEL.md)。
+
+**Reverse 兼容后端仍使用已有本机授权安装。** 商业内核及许可不随包分发；独立内核没有 IDAPython 或专属微码兼容层。已有有效安装可设置 `idaDir` / `IG5_IDA_DIR` 与 `pythonExe` / `IG5_PYTHON`。自动发现检查有界现有路径及必要文件；“已发现，待验证”仅表示文件检查通过，需调用 `ig5_doctor engine=reverse` 核验实际启动。
 
 ```powershell
 # 完整包内直接离线安装，不需要另跑 setup

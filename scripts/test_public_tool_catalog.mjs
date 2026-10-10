@@ -312,8 +312,33 @@ try {
       });
       if (requestedEngines.includes('ghidra')) await unsupported('ig5_ir', engine, { ea }, 'ir');
     } else {
-      for (const [tool, method] of [['ig5_run_idapython', 'idapython'], ['ig5_vtables', 'vtables'], ['ig5_microcode', 'microcode'], ['ig5_switch_repair', 'switch_repair'], ['ig5_switches', 'switches']])
+      for (const [tool, method] of [['ig5_run_idapython', 'idapython'], ['ig5_microcode', 'microcode']])
         await unsupported(tool, engine, tool === 'ig5_run_idapython' ? { code: 'pass' } : { ea }, method);
+      await check('ig5_vtables', engine, 'IG5 kernel RTTI over real Ghidra memory', async () => {
+        const value = await call('ig5_vtables', { ea: fixture.vtable, abi: 'msvc', offset: 8 }, engine);
+        assert.equal(value.total, 1); const table = value.tables[0];
+        assert.equal(table.slots.length, 2); assert.equal(table.selected_slot.target, fixture.addresses.buffer);
+        assert.equal(table.rtti.type.raw_name, '.?AVIG5Derived@@'); assert.equal(value.implementation, 'ig5-kernel');
+        return { class: table.rtti.type.raw_name, slots: 2 };
+      });
+      await check('ig5_switch_repair', engine, 'validated target override, unchanged preview and transaction', async () => {
+        const args = { ea: fixture.switchJump, action: 'define', table: fixture.switchTable, ncases: 3, element_size: 8,
+          lowcase: 0, default: fixture.switchDefault };
+        const before = await revision(engine), preview = await call('ig5_switch_repair', { ...args, apply: false }, engine);
+        assert.equal(preview.applied, false); assert.equal(await revision(engine), before);
+        assert.equal(preview.labelsPersisted, false); assert.equal(preview.defaultMetadataPersisted, false);
+        assert.deepEqual(preview.targets.slice(0, 3), ['case0', 'case1', 'case2'].map(name => fixture.addresses[name]));
+        const applied = await call('ig5_switch_repair', { ...args, apply: true }, engine);
+        assert.equal(applied.applied, true); assert.equal(applied.committed, true); assert.equal(applied.saved, false);
+        assert.equal(await revision(engine), before + 1); return { targets: applied.targets, journalId: applied.journalId };
+      });
+      await check('ig5_switches', engine, 'real branch destinations with explicit unknown default', async () => {
+        const value = await call('ig5_switches', { ea: fixture.switchJump, exact: true }, engine);
+        assert.equal(value.total, 1); const table = value.switches[0]; assert.equal(table.defaultUnknown, true);
+        const targets = new Set(table.cases.map(row => row.target));
+        for (const name of ['case0', 'case1', 'case2']) assert(targets.has(fixture.addresses[name]));
+        return { targets: [...targets], labelsMapped: table.labelsMapped, defaultUnknown: true };
+      });
       await check('ig5_ir', engine, 'typed raw/high p-code with native provenance', async () => {
         const evidence = {};
         for (const level of ['raw', 'high']) { const value = await call('ig5_ir', { ea, level, max_instructions: 200 }, engine); assert(value.instructions.length > 0); assert.equal(value.idb_modified, false); assert.equal(value.source.engine, 'Ghidra'); evidence[level] = value.instructions.length; }

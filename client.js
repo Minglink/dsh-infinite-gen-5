@@ -2270,7 +2270,7 @@
                 el("span", { className: "ig5-chip read ig5-mono" }, totalTools + " Tools · 完整目录")
               ),
               el("p", { className: "ig5-card-sub" }, "工具注册遵循宿主配置：core 默认提供 8 个入口，full 提供完整工具面。目录数量不代表当前会话已注册数量；请以 ig5_profile 返回的实际工具列表为准。"),
-              el("p", { className: "ig5-card-sub" }, "随包 Ghidra / x64dbg 提供静态分析与调试。ig5_microcode、ig5_run_idapython、ig5_switches、ig5_switch_repair、ig5_vtables 需要已有本机 Reverse 引擎；ig5_sync 需要 Reverse 和 Ghidra 两个数据库。各工具的实际支持以当前后端 capabilities 为准。"),
+              el("p", { className: "ig5-card-sub" }, "随包 Ghidra / x64dbg 提供静态分析与调试。五代核心已提供独立文件加载、原生 IR/CFG、RTTI 与真实 C 反编译；使用 ig5_ir level=kernel 无需启动 Java 或商业引擎，action=decompile 选择 C 输出。原生解码与反编译保留开源 Ghidra 核心来源。跳转表读取、修复与虚表分析也支持 Ghidra。ig5_microcode、ig5_run_idapython 仍需已有本机 Reverse；ig5_sync 需要两个静态数据库。实际支持以当前后端 capabilities 为准。"),
               el(
                 "div",
                 { style: { marginBottom: 12 } },

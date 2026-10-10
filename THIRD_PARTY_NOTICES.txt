@@ -7,6 +7,12 @@ licenses and copyright notices. IG5's noncommercial condition does not replace
 or add conditions to their upstream licenses.
 
 Ghidra: https://github.com/NationalSecurityAgency/ghidra
+The independent IG5 kernel links the pinned Apache-2.0 Ghidra SLEIGH and native
+decompiler into adapters/kernel/native/ig5_decompiler.dll. This is attributed
+upstream analysis code, with IG5-owned mapped-image/C ABI integration; it is
+not a recreated commercial Reverse core. GNU BFD and the Java communication
+shell are excluded. See adapters/kernel/NOTICE, native/Ghidra-LICENSE.txt,
+native/zlib-README.txt and native/build-proof.json for component provenance.
 Runtime retains LICENSE, NOTICE and component licenses from the official release.
 The bundled Project.jar GhidraURL class and its Project-src.zip source entry
 contain the IG5 local project path compatibility modification. Legal hidden

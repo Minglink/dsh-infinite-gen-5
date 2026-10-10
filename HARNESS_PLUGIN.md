@@ -9,6 +9,7 @@
 | 宿主 | `index.js` 基于 Cordis 注册工具、独立引擎会话和后台分析作业；`installApprovalGate` 统一写操作审批及审计 |
 | Reverse | `worker/ig5_worker.py`：独立 Python 子进程，stdio 单行 JSON-RPC、UTF-8 及日志隔离；仅使用用户已有本机授权商业安装，不随包、不称自研 |
 | Ghidra | `adapters/ghidra/worker.py`：插件内 `runtimes/ghidra` 提供 Ghidra/JDK/Python；可写持久项目另存，提供真实 raw/high p-code |
+| IG5 Kernel | `ig5_ir level=kernel`：自有 PE/ELF/CFG/IR/RTTI 与源码构建的原生 C 反编译管线，隔离只读，无数据库/JVM/商业引擎；详见 [内核说明](docs/SELF_CONTAINED_KERNEL.md) |
 | x64dbg | `adapters/x64dbg/adapter.py` 与自建 `ig5-native` SDK/NamedPipe bridge：headless 调试；不依赖 automate/ZeroMQ |
 | 身份与路由 | `engine_runtime.js` 解析 runtime manifest；`source/project_store.js` 持久化工程、样本哈希、数据库 attachment/revision；`source/address_ref.js` 做显式地址映射 |
 | 跨引擎 | `integration_tools.js` 提供 `ig5_ir` 与审批工具 `ig5_sync`；数据库独立，仅显式 changeset 传递选中的修改 |
@@ -39,7 +40,7 @@ Core 8 为 `doctor/open/status/funcs/strings/decompile/close/profile`（均带 `
 
 ## 三引擎使用与证据身份
 
-静态工具通过 `engine=reverse|ghidra` 路由同一工具 schema；默认优先可用的 Ghidra，完整安装直接使用随包运行时。Ghidra 不可用而本机 Reverse 通过文件检查时可回退 Reverse；`defaultEngine` 和调用时 `engine` 保留显式选择。`ig5_ir` 专用于 Ghidra raw/high p-code，Reverse 使用 `ig5_microcode`；两种 IR 不是相同成熟度或相同语义表示。后端能力以 `doctor/status` 的实际 capabilities 为准，不支持的能力明确拒绝。Ghidra 默认 `analysis_profile=interactive`，仅跳过批量 Decompiler Parameter ID 分析器，函数反编译仍可用；`full` 需显式选择。`ig5_open analysis_timeout` 设置 1–600 秒分析预算；超时返回 partial，不伪称分析完成。
+静态工具通过 `engine=reverse|ghidra` 路由同一工具 schema；默认优先可用的 Ghidra，完整安装直接使用随包运行时。Ghidra 不可用而本机 Reverse 通过文件检查时可回退 Reverse；`defaultEngine` 和调用时 `engine` 保留显式选择。`ig5_ir level=raw|high` 使用 Ghidra 项目，`level=kernel` 使用无数据库独立通道；Reverse 使用 `ig5_microcode`，这些表示不当成相同成熟度。后端能力以 `doctor/status` 的实际 capabilities 为准，不支持的能力明确拒绝。Ghidra 默认 `analysis_profile=interactive`，仅跳过批量 Decompiler Parameter ID 分析器，函数反编译仍可用；`full` 需显式选择。`ig5_open analysis_timeout` 设置 1–600 秒分析预算；超时返回 partial，不伪称分析完成。
 
 ```text
 ig5_open path="C:\samples\app.exe" engine=ghidra analysis_profile=interactive analysis_timeout=120

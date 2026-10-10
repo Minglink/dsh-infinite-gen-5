@@ -316,7 +316,7 @@ class Worker:
                 'jvmBootstrap': self.jvm_bootstrap,
                 'analysisProfiles': {'default': 'interactive', 'interactive': {'skippedAnalyzers': ['Decompiler Parameter ID']}, 'full': {'skippedAnalyzers': []}},
                 'childProcessCleanup': 'Windows kill-on-job-close' if self.job_handle else 'host process-tree termination required',
-                'unsupported': ['dbg', 'microcode', 'idapython', 'switches', 'switch_repair', 'vtables'] + ([] if os.name == 'nt' else ['emulate']),
+                'unsupported': ['dbg', 'microcode', 'idapython'] + ([] if os.name == 'nt' else ['emulate']),
                 'emulation': {'available': os.name == 'nt', 'targetArchitectures': ['x86', 'x64', 'ARM64'],
                               'scope': 'CPU-only copied memory; no operating system, imports, TLS or native process'},
                 'journal': 'rename/comment/patch saved immediately with session inverse undo; other writes remain session-only with native undo until a save/close; intent and database markers reconcile interrupted persistence',
@@ -683,6 +683,44 @@ class Worker:
         return {'ok': True, 'ea': addrstr(function.getEntryPoint()), 'has_frame': bool(frame.getFrameSize() or members),
                 'frame_size': int(frame.getFrameSize()), 'local_size': int(frame.getLocalSize()),
                 'total_members': len(members), 'members': members, 'engine': 'Ghidra'}
+
+    def m_switches(self, params):
+        from switch_analysis import read_switches
+        return read_switches(self, params)
+
+    def m_switch_repair(self, params):
+        from switch_analysis import repair_switch
+        return repair_switch(self, params)
+
+    def m_vtables(self, params):
+        self.require()
+        shared = ADAPTER_ROOT.parent.parent / 'worker'
+        if str(shared) not in sys.path: sys.path.insert(0, str(shared))
+        from kernel_rtti import analyze_vtables
+        worker = self
+        default_space = worker.program.getAddressFactory().getDefaultAddressSpace()
+        class Provider:
+            pointer_size = int(worker.program.getDefaultPointerSize())
+            byteorder = 'big' if worker.program.getLanguage().isBigEndian() else 'little'
+            imagebase = int(addrstr(worker.program.getImageBase()), 16)
+            ranges = [{'start': int(addrstr(block.getStart()), 16), 'end': int(addrstr(block.getEnd()), 16) + 1,
+                       'executable': bool(block.isExecute())} for block in worker.program.getMemory().getBlocks()
+                      if block.isInitialized() and block.isRead() and block.getStart().getAddressSpace() == default_space]
+            def read(self, ea, size): return worker.read_bytes(worker.address({'ea': hex(ea)}), size)
+            def is_executable(self, ea):
+                block = worker.program.getMemory().getBlock(worker.address({'ea': hex(ea)}))
+                return block is not None and bool(block.isExecute())
+            def symbol(self, ea):
+                symbol = worker.program.getSymbolTable().getPrimarySymbol(worker.address({'ea': hex(ea)}))
+                return str(symbol.getName(True)) if symbol else ''
+            def symbols(self):
+                for index, symbol in enumerate(each(worker.program.getSymbolTable().getAllSymbols(True))):
+                    if index >= 8192: break
+                    address = symbol.getAddress()
+                    if address.getAddressSpace() == default_space: yield int(addrstr(address), 16), str(symbol.getName(True))
+        result = analyze_vtables(Provider(), params)
+        return {**result, 'engine': 'Ghidra', 'revision': self.revision,
+                'source': {'provider': 'Ghidra memory/symbols', 'analysis': 'IG5 kernel RTTI', 'artifactSHA256': self.source_hash}}
 
     def m_ir(self, params):
         from pcode_view import operation_view

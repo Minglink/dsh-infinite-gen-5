@@ -1908,7 +1908,8 @@ export function apply(ctx, config = {}) {
         const selected = !args.target && !isGlobal && !['ig5_open', 'ig5_doctor', 'ig5_bindiff', 'ig5_sync'].includes(definition.name)
           && !definition.parameters.required?.includes('target') ? mgr.selectedTarget() : args.target;
         if (selected) args = { ...args, target: selected };
-        const session = selected && !isData ? mgr.get(selected) : null;
+        const standaloneKernel = definition.name === 'ig5_ir' && args.level === 'kernel';
+        const session = selected && !isData && !standaloneKernel ? mgr.get(selected) : null;
         const perform = async () => {
         if (session?.state === 'opening') {
           await mgr.launching.get(session.key);
@@ -1933,6 +1934,7 @@ export function apply(ctx, config = {}) {
     return async () => {
       await workflow.dispose();
       await mgr.analysis?.dispose();
+      await mgr.kernel?.dispose();
       await Promise.all([...mgr.sessions.values()].filter((s) => s.engine !== 'x64dbg').map((s) => mgr.close(s.target, true, s.engine, { force: true })));
       await Promise.all([...mgr.sessions.values()].map((s) => mgr.close(s.target, true, s.engine, { force: true })));
     };
