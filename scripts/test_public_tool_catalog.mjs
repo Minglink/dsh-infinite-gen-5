@@ -395,7 +395,7 @@ finally {
     requestedEngines, executeDebugger, toolCount: expectedNames.length, passedToolCount: covered, approvalToolCount: approvalChecks.length,
     engineReports, coverage, checks, cleanupSucceeded, ...(failure ? { error: failure } : {}),
     execution: 'Real public definition.execute → native Reverse/Ghidra workers; real bundled Unicorn; x64dbg executes only a generated PE64.',
-    hostBoundary: 'A controlled public approval.request service exercises the real plugin gate with agent/callId/signal. Rejected decisions must not call next; allowed-once delegates once. Native DSH SDK dispatch and its consent dialog are verified separately by test_host_sdk.mjs.',
+    hostBoundary: 'A controlled public approval.request service exercises the real plugin gate with agent/callId/signal. Rejected decisions must not call next; allowed-once delegates once. The actual DSH SDK dispatch is exercised separately in isolation by test_host_sdk.mjs. The desktop consent dialog is not verified by either suite.',
     boundaries: ['One generated PE64 pair; no arbitrary-binary guarantee.', 'Unsupported engine/tool pairs are recorded separately and do not count as successful execution.', 'No Android/iOS native runtime claim.', 'Full38 success requires both licensed Reverse and bundled Ghidra plus enabled x64dbg.'],
   };
   fs.mkdirSync(reportDirectory, { recursive: true }); fs.writeFileSync(reportFile, JSON.stringify(report, null, 2) + '\n', { flag: 'wx' });
