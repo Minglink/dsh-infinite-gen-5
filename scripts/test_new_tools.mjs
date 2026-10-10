@@ -29,6 +29,7 @@ try {
     ...(process.env.IG5_IDA_DIR ? { idaDir: process.env.IG5_IDA_DIR } : {}),
     ...(process.env.IG5_PYTHON ? { pythonExe: process.env.IG5_PYTHON } : {}),
     artifactDir: path.join(scratch, 'artifacts'),
+    defaultEngine: 'reverse',
     toolset: 'full',
   });
   assert.equal(tools.size, 38, 'all 38 tools must be registered in full mode');

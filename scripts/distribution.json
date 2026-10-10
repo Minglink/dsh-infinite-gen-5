@@ -4,6 +4,8 @@
   "repository": "Minglink/dsh-infinite-gen-5",
   "releaseTag": "v1.0.0-dsh021-20261010",
   "assetName": "IG5-1.0.0-Windows-x64-dsh021-full-20261010.zip",
+  "assetBytes": 1064580056,
+  "assetSha256": "a2459ddca1f19e5eec2d7918c504f133889809800a0b277e1e379d3ce1459b54",
   "runtimeManifestSha256": "8fc4ae42f775f0139aa5f184c912db71f77e68d661c14564ab6f4820d434abea",
   "sourceManifestSha256": "1cf887f344882ebcf053fba43527eae696f1dbb418c5dd8f9a6c2b6038fdc7b5",
   "sourceInventorySha256": {

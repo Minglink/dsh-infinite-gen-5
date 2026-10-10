@@ -72,6 +72,7 @@
     "test:projects": "node scripts/test_project_store.mjs && node scripts/test_address_ref.mjs",
     "test:engines": "node scripts/test_engine_integration.mjs",
     "test:runtime-bundle": "node scripts/test_runtime_bundle.mjs",
+    "test:reverse-runtime": "node scripts/test_reverse_runtime.mjs",
     "test:self-contained": "node scripts/test_self_contained.mjs",
     "test:public-tools": "node scripts/test_public_tool_catalog.mjs",
     "test:host-sdk": "node scripts/test_host_sdk.mjs",

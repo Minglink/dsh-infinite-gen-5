@@ -3,9 +3,11 @@
 
 本轮重构继续保持 **1.0.0**：抽出公共 worker 通信与内存仿真核心，维护固定版本的 Ghidra / x64dbg 源码构建，增加真实硬件断点回归，并优化手机宽度下的工作台。完整 Windows 包包含本地运行依赖，无需用户另行安装 Java、Python 或调试器。
 
+**随包能力范围**：Ghidra / x64dbg 组合覆盖当前 38 项目录中的 32 个工具入口。`ig5_microcode`、`ig5_run_idapython`、`ig5_switches`、`ig5_switch_repair`、`ig5_vtables` 需要已有本机授权 Reverse 引擎；`ig5_sync` 需要 Reverse 与 Ghidra 两个数据库。完整包包含开源后端运行时，尚不包含商业 Reverse 内核；第三方授权和启动状态不能由适配层替代。
+
 解密/配置提取与协议分析使用 `ig5_crypto`、`ig5_protocol`、独立有界数据 worker 和可复用 SHA-256 产物引用，完整工具面为 **38 项**、原生技能为 **7 个**。新增 `recover` 自动恢复 XOR 密钥、检索并验证 AES 候选材料；新增 `infer` 推断未知报文的分帧、长度与字段候选。统计候选与认证/独立验证分开记录，预算、歧义和未识别部分明确保留。
 
-首次使用：进入 [Windows x64 完整包发布页](https://github.com/Minglink/dsh-infinite-gen-5/releases/tag/v1.0.0-dsh021-20261010)，下载 `IG5-1.0.0-Windows-x64-dsh021-full-20261010.zip` → 完整解压 → 在解压根目录运行 `& .\plugin\install.ps1` → 重启 DSH → `/ig5 engines` → `/ig5 open --engine ghidra <路径>`。高级功能通过 `/ig5 toolset full` 展开。使用 GitHub **Source code ZIP** 或 `git clone` 时，也可在源码根目录运行 `& .\install.ps1`：安装器先检查源码和 DSH profile，再自动下载并验证固定发行包，仅补齐运行时与完整上游源码资产，保留本次下载的插件代码；完整包安装无需联网。当前已验证的发行平台为 **Windows x64**；手机原生执行包仍需独立移植与验收。
+首次使用：[下载最新源码 ZIP](https://github.com/Minglink/dsh-infinite-gen-5/archive/refs/heads/master.zip) → 解压 → 在源码根目录运行 `& .\install.ps1` → 重启 DSH → `/ig5 engines` → `/ig5 open --engine ghidra <路径>`。安装器先检查源码和 DSH profile，再下载并验证固定完整资产，只补齐运行时与上游源码，保留本次下载的插件代码。也可从 [Windows x64 完整包发布页](https://github.com/Minglink/dsh-infinite-gen-5/releases/latest) 选择已发布并附验证报告的完整附件，解压后运行 `& .\plugin\install.ps1`，整包默认离线安装；发布页的既有旧附件不会自动获得新安装器修复。高级功能通过 `/ig5 toolset full` 展开。当前已验证的发行平台为 **Windows x64**；手机原生执行包仍需独立移植与验收。
 
 - [重构后的模块与能力边界](docs/ARCHITECTURE.md)
 - [本轮缺陷修复与验收对账](docs/REMEDIATION.md)
@@ -130,7 +132,7 @@
 
 ## ⚡ 本地自包含安装
 
-需要 Windows x64 和已安装的 DeepSeek Harness profile。普通用户从 [完整包发布页](https://github.com/Minglink/dsh-infinite-gen-5/releases/tag/v1.0.0-dsh021-20261010) 下载附件 **`IG5-1.0.0-Windows-x64-dsh021-full-20261010.zip`**，其中包含插件、两套开源运行依赖和上游源码。GitHub 自动生成的 **Source code ZIP / tar.gz** 或 `git clone` 提供维护源码；运行源码根目录的 `install.ps1` 时，安装器检测缺少的完整资产，展示固定发行附件、大小和下载进度，流式下载并核验 ZIP 校验文件、GitHub 资产摘要（如有）及逐文件 SHA-256 清单，最后只补齐 `runtimes/` 和 `third_party/sources/`，不会用发行包中的旧代码覆盖本次源码。
+需要 Windows x64 和已安装的 DeepSeek Harness profile。完整 ZIP 包含插件、两套开源运行依赖和上游源码；GitHub **Source code ZIP / tar.gz** 或 `git clone` 提供插件维护源码。当前源码的 `install.ps1` 能为源码目录补齐资产：显示固定附件、大小和进度，流式下载并核验固定 ZIP 大小/SHA-256、校验文件、GitHub 资产摘要（如有）及逐文件清单，最后只补齐 `runtimes/` 与 `third_party/sources/`。固定供体由 `scripts/distribution.json` 锁定为已发布的 `IG5-1.0.0-Windows-x64-dsh021-full-20261010.zip`；它提供不变的引擎资产，不覆盖当前插件代码，也不表示旧 ZIP 已包含本次修复。
 
 1. 完整解压下载的 ZIP，保留包内 `plugin/runtimes/`、`plugin/third_party/sources/` 与各清单文件，不单独复制安装脚本；
 2. 打开 PowerShell，进入 ZIP 解压根目录；
@@ -141,13 +143,29 @@
 4. 脚本离线核验完整运行包，暂存插件及内置依赖，备份已有插件并配置 profile；缺件或校验失败时拒绝安装；
 5. 重启 DeepSeek Harness；使用 `/ig5 engines` 或 `ig5_doctor` 检查实际引擎可用性。
 
-源码安装需要首次联网获取完整资产，网络失败时不会更改 DSH profile。已下载完整 ZIP 的用户可完全离线复用其资产，在源码根目录执行：
+源码安装默认首次联网获取完整资产，下载或校验失败不会更改 DSH profile。已下载原始固定 ZIP 的用户可完全离线复用，**在最新源码根目录**执行：
+
+```powershell
+& .\install.ps1 -DistributionArchive 'D:\IG5-1.0.0-Windows-x64-dsh021-full-20261010.zip' -Offline
+```
+
+`-DistributionArchive` 指向原始 ZIP 文件，并置于源码目录之外；安装器检查固定大小和整包 SHA-256，再在独立暂存目录提取、逐文件校验和安装。已确认完整的解压目录也可作为供体：
 
 ```powershell
 & .\install.ps1 -DistributionRoot 'C:\已解压的完整发行包根目录' -Offline
 ```
 
-`-DistributionRoot` 指向含 `manifest.json` 与 `plugin/` 的完整解压根目录。只用 `-Offline` 而没有完整资产时，安装器给出对应发布页与上述命令。缺件、损坏或资产版本/固定哈希不符的完整包会拒绝安装，不会自动掩盖损坏；不能仅补一个 JSON 代替完整资产。维护者重建完整资产的步骤见 [BUILD](docs/BUILD.md)。
+`-DistributionRoot` 指向含 `manifest.json` 与 `plugin/` 的完整解压根目录，不能与 `-DistributionArchive` 同时使用。只传 `-Offline` 而未提供完整资产时，安装器给出对应发布页和可执行指引；需要下载固定供体时见 [已发布资产基线](https://github.com/Minglink/dsh-infinite-gen-5/releases/tag/v1.0.0-dsh021-20261010)。固定 ZIP 的 SHA-256 为 `a2459ddca1f19e5eec2d7918c504f133889809800a0b277e1e379d3ce1459b54`。
+
+若完整包的 `runtimes/` 或 `third_party/sources/` 缺件、SHA-256 不符，当前安装器支持显式 `-RepairAssets`：先核验插件自身代码与完整外层清单一致，再以固定供体替换这两类资产并完整复验；核心代码被改动、外层清单缺失、资产版本或固定哈希不符仍拒绝。对于**包含此参数的新安装器完整包**，可在解压根目录执行：
+
+```powershell
+& .\plugin\install.ps1 -RepairAssets -DistributionArchive 'D:\IG5-1.0.0-Windows-x64-dsh021-full-20261010.zip' -Offline
+```
+
+**旧发行包的安装器没有这些新参数。** 遇到旧包校验错误，请重新下载最新源码，执行上面的源码 `-DistributionArchive` 命令，保留原始 ZIP 作为校验供体。不要把新 `install.ps1` 复制进旧包：那会改变外层清单登记的核心代码，使校验继续失败。
+
+SHA-256 不符时保留报错中的相对路径、Expected/Actual SHA-256 和文件大小，并核对原始 ZIP 哈希；当前证据不能确定其他用户文件变化的原因，不能直接归咎某种解压工具。不要改清单、跳过校验或只补空 JSON。安装成功后 profile 的 `node_modules/dsh-infinite-gen-5` 应指向 `.dsh/plugins/dsh-infinite-gen-5` 的完整目录；未完成安装而保留的普通 npm 源码副本没有运行时。完全退出并重启 DSH 后，以 `/ig5 engines` 和 `ig5_doctor engine=ghidra` 验证新副本。维护者资产重建步骤见 [BUILD](docs/BUILD.md)。
 
 ---
 
@@ -183,7 +201,9 @@ ig5_sync action=apply target="C:\samples\app.exe" plan_id="<preview返回的ID>"
 
 ### 自包含 runtime、上游源码与离线安装
 
-完整发行包的插件根目录直接包含 `runtimes/ghidra` 与 `runtimes/x64dbg`。Ghidra 包含自身 JDK/Python，x64dbg 包含自身 Python、x86/x64 debugger 与自建 `ig5-native` bridge；默认安装直接带入插件，运行不依赖外部 `~\.dsh\ig5\runtimes`，不改全局 Python、系统 PATH 或引擎 site-packages。默认优先使用可用的已授权本机 Reverse；没有该引擎时选随包 Ghidra，也可显式指定 `engine=ghidra|reverse`。`reverse:false` 可禁用 Reverse。`runtimeRoot`、`ghidraRuntime` / `IG5_GHIDRA_RUNTIME`、`x64dbgRuntime` / `IG5_X64DBG_RUNTIME` 保留显式外置覆盖，`projectRoot` 与可写工程缓存仍与分发资产分开。Reverse 兼容配置 `idaDir` / `IG5_IDA_DIR`、`pythonExe` 保留。完整配置见 [HARNESS_PLUGIN.md](HARNESS_PLUGIN.md#安装与便携-runtime)。
+完整发行包的插件根目录直接包含 `runtimes/ghidra` 与 `runtimes/x64dbg`。Ghidra 包含自身 JDK/Python，x64dbg 包含自身 Python、x86/x64 debugger 与自建 `ig5-native` bridge；默认安装直接带入插件，运行不依赖外部 `~\.dsh\ig5\runtimes`，不改全局 Python、系统 PATH 或引擎 site-packages。默认静态后端优先使用可用的随包 Ghidra；该后端不可用而已有本机 Reverse 通过文件检查时才回退 Reverse。`defaultEngine` 配置和调用时 `engine=ghidra|reverse` 保留显式选择，`reverse:false` 可禁用 Reverse。`runtimeRoot`、`ghidraRuntime` / `IG5_GHIDRA_RUNTIME`、`x64dbgRuntime` / `IG5_X64DBG_RUNTIME` 保留显式外置覆盖；错误的显式配置不会偷偷回退另一包。默认运行时根按已加载插件的物理目录解析，支持 DSH profile Junction；不会从其他版本目录猜测补包。`projectRoot` 与可写工程缓存仍与分发资产分开。完整配置见 [HARNESS_PLUGIN.md](HARNESS_PLUGIN.md#安装与便携-runtime)。
+
+**Reverse 是已有本机商业引擎的适配通道。** IG5 重构了工作进程、调用协议和工具能力，没有重写或随包分发该商业内核及许可；只下载 IG5 不会获得 Reverse 原生微码等专属能力。已有有效安装可以设置兼容项 `idaDir` / `IG5_IDA_DIR` 与 `pythonExe` / `IG5_PYTHON`。自动发现读取现有激活配置、Desktop/OneDrive Desktop 和 Program Files 的有界候选，并检查原生内核、无头 Python 接口及 Windows x64 Python；自定义位置建议显式配置。工作台“已发现，待验证”仅表示文件检查通过；必须调用 `ig5_doctor engine=reverse` 核验原生启动，目标架构的反编译能力以实际结果为准。缺安装、缺 Python、被禁用和不支持的宿主分别说明原因。
 
 ```powershell
 # 完整包内直接离线安装，不需要另跑 setup
@@ -254,7 +274,8 @@ Get-Content -LiteralPath (Join-Path $env:USERPROFILE '.dsh\ig5\artifacts\ig5-dia
 | `npm run test:projects` | 持久身份、崩溃锁恢复/真进程竞争、物理数据库别名/修订、64 位地址及双向歧义拒绝 |
 | `npm run test:worker-budget`、`npm run test:attachment-leases` | UTF-8/缓冲/启动队列预算、真实子进程清理；双进程创建身份、孤儿 worker 保留和 nonce 幂等恢复 |
 | `npm run test:audit-history`、`npm run test:patch-export-scope`、`npm run test:history-maintenance` | 审计游标预算、样本隔离导出；active/archive 异步索引、引用复用、篡改与目录替换拒绝 |
-| `npm run test:runtime-bundle`、`npm run test:self-contained` | 结构/搬移/路由拒绝夹具；清空外部运行配置后的真实包内 Ghidra+x64dbg 验收及运行资产不变性 |
+| `npm run test:runtime-bundle`、`npm run test:self-contained` | 结构/搬移/profile Junction 与 preserve-symlinks/显式覆盖拒绝夹具；清空外部运行配置后的真实包内 Ghidra+x64dbg 验收及运行资产不变性 |
+| `npm run test:reverse-runtime` | Reverse 发现、明确配置优先、文件/PE/Python 检查、诊断脱敏与启动待验证状态；结构夹具不启动商业内核 |
 | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/test_install_package.ps1` | 临时 profile/运行件夹具中的安装、备份/失败回退、缺件与打包过滤；不替代真实引擎验收 |
 | `npm run test:engines`、`npm run test:ghidra` | 真实 Ghidra、双引擎 changeset/字节导出/Undo 与修订校验 |
 | `npm run test:ghidra-project-paths` | 默认 `.dsh` 本地目录、13 项原生路径边界、工程关闭重开与反编译持久化；不执行样本 |

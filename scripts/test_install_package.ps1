@@ -93,7 +93,7 @@ try {
     Put (Join-Path $fixture 'client.js') 'export default {};'
     foreach ($file in @('engine_runtime.js','advanced_tools.js','analysis_tools.js','integration_tools.js','workflow.js','semantic_diff.js','semantic_diff_async.js','semantic_diff_worker.js',
         'source/analysis_artifacts.js','source/analysis_jobs.js','source/analysis_worker.js','source/crypto_analysis.js','source/crypto_recovery.js','source/protocol_analysis.js','source/protocol_inference.js','worker/scan_analysis.py',
-        'source/project_store.js','source/attachment_lease.js','source/audit_history.js','source/patch_export.js','source/history_index.js','source/json_output.js','source/address_ref.js','source/host_platform.js','source/worker_transport.js','worker/ig5_worker.py','worker/advanced_analysis.py','worker/execution_analysis.py','worker/memory_image.py','worker/cpu_emulator.py','worker/vendor/NOTICE.txt',
+        'source/project_store.js','source/attachment_lease.js','source/audit_history.js','source/patch_export.js','source/history_index.js','source/json_output.js','source/reverse_runtime.js','source/address_ref.js','source/host_platform.js','source/worker_transport.js','worker/ig5_worker.py','worker/advanced_analysis.py','worker/execution_analysis.py','worker/memory_image.py','worker/cpu_emulator.py','worker/vendor/NOTICE.txt',
         'adapters/ghidra/worker.py','adapters/ghidra/pcode_view.py','adapters/ghidra/jpype-patch/JPypeContext.java','adapters/ghidra/jpype-patch/upstream/org.jpype.jar',
         'adapters/ghidra/jpype-patch/LICENSE','adapters/ghidra/jpype-patch/UPSTREAM-NOTICE','adapters/ghidra/jpype-patch/NOTICE.txt','adapters/ghidra/jpype-patch/unicode-bootstrap.patch',
         'scripts/patch_ghidra_jpype.ps1','scripts/patch_ghidra_project_paths.ps1','adapters/ghidra/local-project-path/build_patch.py',
@@ -286,7 +286,7 @@ try {
     $fixtureHook = @'
 $script:fixturePrepare = (Get-Item Function:New-IG5SourceDistribution).ScriptBlock
 function New-IG5SourceDistribution {
-    param([string]$SourceRoot,[string]$PluginVersion,[string]$DistributionRoot,[switch]$Offline)
+    param([string]$SourceRoot,[string]$PluginVersion,[string]$DistributionRoot,[switch]$Offline,[string]$DistributionArchive,[object[]]$CoreFiles)
     $prepared = & $script:fixturePrepare @PSBoundParameters
     [IO.File]::WriteAllText('__PROFILE_PATH__',[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__PROFILE_TEXT__')),[Text.UTF8Encoding]::new($false))
     return $prepared
@@ -300,6 +300,45 @@ function New-IG5SourceDistribution {
         Check-NoMutation $sourceDsh $concurrentText $sourceBackups
     } finally { Put $bootstrapPath $bootstrapText; Put $sourceProfile $sourceBefore }
     Pass 'profile edits made during long preparation are preserved and abort before switching the existing plugin'
+
+    # A source edit after the donor was checked must not become a new trusted snapshot.
+    $coreRaceHook = @'
+$script:fixtureAssets = (Get-Item Function:Assert-IG5DistributionAssets).ScriptBlock
+function Assert-IG5DistributionAssets {
+    param([string]$DistributionRoot,$Descriptor,[string]$PluginVersion)
+    $donor = & $script:fixtureAssets @PSBoundParameters
+    [IO.File]::WriteAllText('__CORE_PATH__',[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__CORE_TEXT__')),[Text.UTF8Encoding]::new($false))
+    return $donor
+}
+'@
+    $sourceHostText = Read-IG5Text $sourceHost
+    $coreRaceHook = $coreRaceHook.Replace('__CORE_PATH__',$sourceHost.Replace("'","''")).Replace('__CORE_TEXT__',[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($sourceHostText.Replace('export','exporX'))))
+    Put $bootstrapPath ($bootstrapText + [Environment]::NewLine + $coreRaceHook)
+    try {
+        $null = Run-Script $sourceInstaller @('-DshRoot',$sourceDsh,'-DistributionRoot',$portable,'-Offline') $false 'prepared-core/index.js'
+        Check-NoMutation $sourceDsh $sourceBefore $sourceBackups
+    } finally { Put $bootstrapPath $bootstrapText; Put $sourceHost $sourceHostText }
+    Pass 'source edits during asset preparation fail against the original core snapshot before touching DSH'
+
+    $stagePinHook = @'
+$script:fixtureWrite = (Get-Item Function:Write-IG5RuntimeManifest).ScriptBlock
+function Write-IG5RuntimeManifest {
+    param($Validated,[string]$Destination,[string]$PluginVersion)
+    & $script:fixtureWrite @PSBoundParameters
+    [IO.File]::WriteAllText((Join-Path $Destination 'x64dbg\licenses\NOTICE.txt'),'stage-time replacement',[Text.UTF8Encoding]::new($false))
+    $files = @(Get-IG5PackFiles $Destination | Where-Object Name -ne 'manifest.json' | ForEach-Object {
+        @{path=(Get-IG5RelativePath $Destination $_.FullName);bytes=$_.Length;sha256=(Get-IG5Hash $_.FullName)}
+    })
+    $manifest = @{schemaVersion=1;pluginVersion=$PluginVersion;platform='win32-x64';engines=@('ghidra','x64dbg');files=$files}
+    [IO.File]::WriteAllText((Join-Path $Destination 'manifest.json'),($manifest | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
+}
+'@
+    Put $bootstrapPath ($bootstrapText + [Environment]::NewLine + $stagePinHook)
+    try {
+        $null = Run-Script $sourceInstaller @('-DshRoot',$sourceDsh,'-DistributionRoot',$portable,'-Offline') $false 'Pinned distribution manifest SHA-256 mismatch'
+        Check-NoMutation $sourceDsh $sourceBefore $sourceBackups
+    } finally { Put $bootstrapPath $bootstrapText }
+    Pass 'final installer stage rejects replacement assets with a self-consistent new manifest against immutable pins'
 
     $externalDsh = Join-Path $testRoot 'external-profile'
     New-Profile $externalDsh
@@ -322,6 +361,104 @@ function New-IG5SourceDistribution {
     Check ((Get-IG5Hash (Join-Path $zipExtract "plugin\$deepRelative")) -eq (Get-IG5Hash $deepPath)) 'ZIP extraction lost long Windows paths'
     Pass 'safe ZIP extraction preserves long paths and passes full distribution/pinned asset inventories'
 
+    # A fixed older release supplies immutable assets, while the new core is retained.
+    $descriptor | Add-Member -NotePropertyName assetSha256 -NotePropertyValue $zipHash -Force
+    $descriptor | Add-Member -NotePropertyName assetBytes -NotePropertyValue (New-Object IO.FileInfo $fixtureZip).Length -Force
+    Put-Json $descriptorPath $descriptor
+    Put-Json (Join-Path $fixture 'scripts\distribution.json') $descriptor
+    $null = Run-Script $sourceInstaller @('-DshRoot',$sourceDsh,'-DistributionArchive',$fixtureZip,'-Offline')
+    Check ((Get-IG5Hash (Join-Path $sourceInstalled 'index.js')) -eq $sourceHash) 'offline archive recovery replaced Source ZIP core'
+    Pass 'source ZIP installs from a fixed SHA-256 original ZIP fully offline, preserving current code'
+
+    $repairResult = Run-Script $packager @('-OutputRoot',(Join-Path $testRoot 'repair-package'))
+    $repairPortable = ($repairResult -split "`r?`n" | Where-Object { $_ -like 'PORTABLE_ROOT=*' } | Select-Object -First 1).Substring('PORTABLE_ROOT='.Length).Trim()
+    $repairInstaller = Join-Path $repairPortable 'plugin\install.ps1'
+    $repairDsh = Join-Path $testRoot 'repair-dsh'
+    New-Profile $repairDsh
+    $null = Run-Script $repairInstaller @('-DshRoot',$repairDsh)
+    $repairInstalled = Join-Path $repairDsh 'plugins\dsh-infinite-gen-5'
+    Put (Join-Path $repairInstalled 'keep.txt')
+    $repairProfilePath = Join-Path $repairDsh 'profiles\default\package.json'
+    $repairBefore = Read-IG5Text $repairProfilePath
+    $repairBackups = @(Get-ChildItem -LiteralPath (Split-Path $repairProfilePath) -Filter '*.bak-*').Count
+    $damagedSource = Join-Path $repairPortable 'plugin\third_party\sources\upstream\code.cpp'
+    $goodSourceText = Read-IG5Text $damagedSource
+    Put $damagedSource ($goodSourceText.Replace('source','sourcX'))
+    $badSourceHash = Get-IG5Hash $damagedSource
+    $failureText = Run-Script $repairInstaller @('-DshRoot',$repairDsh) $false 'Expected SHA-256:'
+    Check ($failureText.Contains('Actual SHA-256:') -and $failureText.Contains($badSourceHash)) 'failure lacks exact expected/actual checksum diagnostics'
+    Check-NoMutation $repairDsh $repairBefore $repairBackups
+    $null = Run-Script $repairInstaller @('-DshRoot',$repairDsh,'-RepairAssets','-DistributionArchive',$fixtureZip,'-Offline')
+    Check ((Get-IG5Hash $damagedSource) -eq $badSourceHash) 'repair modified the original damaged extraction'
+    Check ((Read-IG5Text (Join-Path $repairInstalled 'third_party\sources\upstream\code.cpp')) -eq $goodSourceText) 'repair did not restore verified source asset bytes'
+    Check ((Get-IG5Hash (Join-Path $repairInstalled 'index.js')) -eq (Get-IG5Hash (Join-Path $repairPortable 'plugin\index.js'))) 'repair changed current plugin core'
+    Check (-not (Test-IG5Path (Join-Path $repairInstalled 'keep.txt'))) 'repair left a partial previous install'
+    $null = Assert-IG5RuntimePack (Join-Path $repairInstalled 'runtimes')
+    Pass 'same-size source corruption is diagnosed and repaired from the pinned ZIP without editing input or skipping inventories'
+
+    Put (Join-Path $repairInstalled 'keep.txt')
+    $repairBefore = Read-IG5Text $repairProfilePath
+    $repairBackups = @(Get-ChildItem -LiteralPath (Split-Path $repairProfilePath) -Filter '*.bak-*').Count
+    $repairCore = Join-Path $repairPortable 'plugin\index.js'
+    $repairCoreText = Read-IG5Text $repairCore
+    Put $repairCore ($repairCoreText.Replace('export','exporX'))
+    $null = Run-Script $repairInstaller @('-DshRoot',$repairDsh,'-RepairAssets','-DistributionArchive',$fixtureZip,'-Offline') $false 'plugin-core/index.js'
+    Check-NoMutation $repairDsh $repairBefore $repairBackups
+    Put $repairCore $repairCoreText
+    Pass 'asset repair refuses changed core code before touching profiles or existing installation'
+
+    # A legitimately sealed fixture adds a hook which changes prepared code only after
+    # the helper returns. The installer must retain the original outer core records.
+    $repairBootstrapPath = Join-Path $repairPortable 'plugin\scripts\bootstrap_distribution.ps1'
+    $repairBootstrapText = Read-IG5Text $repairBootstrapPath
+    $preparedRaceHook = @'
+$script:fixturePrepare = (Get-Item Function:New-IG5SourceDistribution).ScriptBlock
+function New-IG5SourceDistribution {
+    param([string]$SourceRoot,[string]$PluginVersion,[string]$DistributionRoot,[switch]$Offline,[string]$DistributionArchive,[object[]]$CoreFiles)
+    $prepared = & $script:fixturePrepare @PSBoundParameters
+    $index = Join-Path $prepared.Root 'index.js'
+    [IO.File]::WriteAllText($index,(Read-IG5Text $index).Replace('export','exporX'),[Text.UTF8Encoding]::new($false))
+    return $prepared
+}
+'@
+    $repairOuterPath = Join-Path $repairPortable 'manifest.json'
+    $repairOuterText = Read-IG5Text $repairOuterPath
+    Put $repairBootstrapPath ($repairBootstrapText + [Environment]::NewLine + $preparedRaceHook)
+    $raceOuter = $repairOuterText | ConvertFrom-Json
+    foreach ($row in $raceOuter.files) {
+        if ($row.path -eq 'plugin/scripts/bootstrap_distribution.ps1') { $row.sha256=Get-IG5Hash $repairBootstrapPath; $row.bytes=(New-Object IO.FileInfo $repairBootstrapPath).Length }
+    }
+    Put-Json $repairOuterPath $raceOuter
+    try {
+        $null = Run-Script $repairInstaller @('-DshRoot',$repairDsh,'-RepairAssets','-DistributionArchive',$fixtureZip,'-Offline') $false 'core-after-preparation/index.js'
+        Check-NoMutation $repairDsh $repairBefore $repairBackups
+    } finally { Put $repairBootstrapPath $repairBootstrapText; Put $repairOuterPath $repairOuterText }
+    Pass 'full asset repair retains the authenticated outer core hashes through preparation and rejects a later code change'
+
+    $damagedZip = Join-Path $testRoot 'damaged-original.zip'
+    [IO.File]::Copy($fixtureZip,$damagedZip)
+    $damagedZipBytes = [IO.File]::ReadAllBytes($damagedZip)
+    $damagedZipBytes[100] = $damagedZipBytes[100] -bxor 1
+    [IO.File]::WriteAllBytes($damagedZip,$damagedZipBytes)
+    $null = Run-Script $repairInstaller @('-DshRoot',$repairDsh,'-RepairAssets','-DistributionArchive',$damagedZip,'-Offline') $false 'DistributionArchive SHA-256 differs'
+    Check-NoMutation $repairDsh $repairBefore $repairBackups
+    $null = Run-Script $repairInstaller @('-DshRoot',$repairDsh,'-RepairAssets','-DistributionArchive',$fixtureZip,'-DistributionRoot',$portable,'-Offline') $false 'Choose either'
+    Check-NoMutation $repairDsh $repairBefore $repairBackups
+    Pass 'fixed ZIP digest and mutually exclusive donor arguments reject unsafe recovery without mutation'
+
+    $insideArchive = Join-Path $sourceZip 'original-full.zip'
+    [IO.File]::Copy($fixtureZip,$insideArchive)
+    try {
+        $null = Run-Script $sourceInstaller @('-DshRoot',$sourceDsh,'-DistributionArchive',$insideArchive,'-Offline') $false 'Place DistributionArchive outside'
+        $null = Run-Script $sourceInstaller @('-DshRoot',$sourceDsh,'-DistributionRoot',$sourceZip,'-Offline') $false 'separate non-overlapping'
+    } finally { [IO.File]::Delete($insideArchive) }
+    Pass 'archive and donor overlap are rejected so downloaded assets cannot become copied plugin code'
+
+    # Preserve the current snapshot after the successful archive-backed reinstall.
+    $sourceBefore = Read-IG5Text $sourceProfile
+    $sourceBackups = @(Get-ChildItem -LiteralPath (Split-Path $sourceProfile) -Filter '*.bak-*').Count
+    Put (Join-Path $sourceInstalled 'keep.txt')
+
     $tamperedDonor = Join-Path $testRoot 'rewritten-upstream-release'
     Copy-IG5Pack $portable $tamperedDonor
     $tamperedCode = Join-Path $tamperedDonor 'plugin\third_party\sources\upstream\code.cpp'
@@ -341,6 +478,23 @@ function New-IG5SourceDistribution {
     Put-Json $tamperedOuterPath $tamperedOuter
     Expect-Failure { Assert-IG5DistributionAssets $tamperedDonor $descriptor '1.0.0' } 'Pinned source inventory SHA-256 mismatch'
     Pass 'rewriting upstream source plus its inventory and outer release manifest still fails the fixed inventory hash pin'
+
+    # Copy-time replacement can be internally self-consistent; fixed pins must still win.
+    $copyDefinition = (Get-Item Function:Copy-IG5Pack).ScriptBlock
+    $script:fixtureCopy = $copyDefinition
+    function Copy-IG5Pack {
+        param([string]$From,[string]$To,[string[]]$ExtraExclude=@())
+        & $script:fixtureCopy @PSBoundParameters
+        if ($To -like '*\prepared-plugin\runtimes') {
+            Put (Join-Path $To 'x64dbg\licenses\NOTICE.txt') 'copy-time replacement'
+            Manifest $To
+        }
+    }
+    try {
+        Expect-Failure { New-IG5SourceDistribution $sourceZip '1.0.0' $portable -Offline } 'Pinned distribution manifest SHA-256 mismatch'
+        Check-NoMutation $sourceDsh $sourceBefore $sourceBackups
+    } finally { Set-Item Function:Copy-IG5Pack $copyDefinition }
+    Pass 'prepared assets are rechecked against fixed pins even when replacement bytes have a self-consistent new inventory'
 
     $badZipCases = @(
         @{name='traversal';rows=@(@{path='../outside.txt';text='bad'});expected='Unsafe ZIP path'},

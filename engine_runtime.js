@@ -12,7 +12,10 @@ export function engineId(value) {
   return id;
 }
 
-const PLUGIN_ROOT = path.dirname(fileURLToPath(import.meta.url));
+// DSH loads profile dependencies through directory junctions. Resolve the
+// loaded package itself, including hosts using --preserve-symlinks; never guess
+// another .dsh/plugins copy whose code and runtime may belong to another build.
+const PLUGIN_ROOT = fs.realpathSync(path.dirname(fileURLToPath(import.meta.url)));
 const BUNDLED_RUNTIME_ROOT = path.join(PLUGIN_ROOT, 'runtimes');
 const pathKeys = ['pythonExe', 'ghidraHome', 'javaHome', 'headlessExe', 'headless32Exe', 'x64dbgExe', 'x32dbgExe',
   'pythonLibrary', 'pythonStdlib', 'pythonModules', 'jpypeLibrary'];
@@ -93,7 +96,12 @@ export function readRuntime(root, engine, override, options = {}) {
       }
     }
   } catch (error) {
-    errors.push((error.code === 'ENOENT' && !windows ? `Missing matching ${host.id} runtime pack: ` : 'Runtime metadata unavailable: ') + error.message);
+    if (error.code === 'ENOENT' && !fs.existsSync(file)) {
+      if (source === 'bundled') errors.push(windows
+        ? `Bundled ${engine === 'ghidra' ? 'Ghidra' : 'x64dbg'} runtime.json is missing from the loaded plugin. Complete install.ps1 from the verified full distribution, then restart DSH; a source-only npm copy cannot run this engine.`
+        : `Missing matching ${host.id} runtime pack: the loaded plugin has no matching runtime.json. Install a validated pack for this host or configure an explicit matching runtime.`);
+      else errors.push(`Configured ${engine === 'ghidra' ? 'Ghidra' : 'x64dbg'} runtime.json is missing. Check ${engine}Runtime and runtimeRoot configuration, or the matching IG5 environment override.`);
+    } else errors.push('Runtime metadata unavailable: ' + error.message);
     return failure();
   }
 

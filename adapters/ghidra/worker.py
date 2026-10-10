@@ -310,7 +310,7 @@ class Worker:
                 'jvmBootstrap': self.jvm_bootstrap,
                 'analysisProfiles': {'default': 'interactive', 'interactive': {'skippedAnalyzers': ['Decompiler Parameter ID']}, 'full': {'skippedAnalyzers': []}},
                 'childProcessCleanup': 'Windows kill-on-job-close' if self.job_handle else 'host process-tree termination required',
-                'unsupported': ['dbg', 'microcode', 'idapython', 'switch_repair', 'vtables'] + ([] if os.name == 'nt' else ['emulate']),
+                'unsupported': ['dbg', 'microcode', 'idapython', 'switches', 'switch_repair', 'vtables'] + ([] if os.name == 'nt' else ['emulate']),
                 'emulation': {'available': os.name == 'nt', 'targetArchitectures': ['x86', 'x64', 'ARM64'],
                               'scope': 'CPU-only copied memory; no operating system, imports, TLS or native process'},
                 'journal': 'rename/comment/patch saved immediately with session inverse undo; other writes remain session-only with native undo until a save/close; intent and database markers reconcile interrupted persistence',

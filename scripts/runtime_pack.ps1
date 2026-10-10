@@ -249,7 +249,7 @@ function Write-IG5RuntimeManifest {
 }
 
 function Assert-IG5FileInventory {
-    param([string]$Root, [object[]]$Files, [string]$Label, [switch]$IncludeExcluded)
+    param([string]$Root, [object[]]$Files, [string]$Label, [switch]$IncludeExcluded, [string[]]$IgnoredPrefixes = @())
     if (-not $Files.Count) { throw "文件清单为空: $Label" }
     $progress = $Files.Count -ge 4096
     $progressLabel = [regex]::Replace([string]$Label, '[^A-Za-z0-9._/-]', '_')
@@ -262,22 +262,63 @@ function Assert-IG5FileInventory {
         $full = Resolve-IG5PackPath $Root $relative
         if ($records.ContainsKey($relative) -or [string]$record.sha256 -notmatch '^[a-fA-F0-9]{64}$' -or [long]$record.bytes -lt 0) { throw "无效文件清单: $Label/$relative" }
         if (-not (Test-IG5Path $full Leaf)) { throw "安装源缺少文件: $Label/$relative" }
-        if ((New-Object IO.FileInfo (ConvertTo-IG5IOPath $full)).Length -ne [long]$record.bytes) { throw "安装源文件长度不符: $Label/$relative" }
+        $actualBytes = (New-Object IO.FileInfo (ConvertTo-IG5IOPath $full)).Length
+        if ($actualBytes -ne [long]$record.bytes) { throw "安装源文件长度不符: $Label/$relative`nExpected bytes: $($record.bytes); actual bytes: $actualBytes. Source files were not changed." }
         $records[$relative] = $record
         $registered++
         if ($progress -and $registered % 4096 -eq 0) { Write-Host "[VERIFY] $progressLabel sizes/paths: $registered / $($Files.Count)" }
     }
-    $actual = @(Get-IG5PackFiles $Root -IncludeExcluded:$IncludeExcluded)
+    $actual = @(Get-IG5PackFiles $Root -IncludeExcluded:$IncludeExcluded | Where-Object {
+        $candidate = Get-IG5RelativePath $Root $_.FullName
+        $ignored = $false
+        foreach ($prefix in $IgnoredPrefixes) { if ($candidate.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { $ignored = $true; break } }
+        -not $ignored
+    })
     $checked = 0
     foreach ($file in $actual) {
         $relative = Get-IG5RelativePath $Root $file.FullName
         if (-not $records.ContainsKey($relative)) { throw "安装源含未登记文件: $Label/$relative" }
-        if ((Get-IG5Hash $file.FullName) -ne [string]$records[$relative].sha256) { throw "安装源 SHA-256 不符: $Label/$relative" }
+        $actualHash = Get-IG5Hash $file.FullName
+        if ($actualHash -ne [string]$records[$relative].sha256) {
+            throw "安装源 SHA-256 不符: $Label/$relative`nExpected SHA-256: $($records[$relative].sha256)`nActual SHA-256: $actualHash`nBytes: $($file.Length). Do not edit the manifest or skip validation. For immutable asset repair use install.ps1 -RepairAssets with the pinned original ZIP via -DistributionArchive, or verified -DistributionRoot. Existing DSH installation is unchanged."
+        }
         $checked++
         if ($progress -and $checked % 4096 -eq 0) { Write-Host "[VERIFY] $progressLabel SHA-256: $checked / $($Files.Count)" }
     }
     if ($actual.Count -ne $records.Count) { throw "安装源清单数量不符: $Label" }
     if ($progress) { Write-Host "[OK] $progressLabel SHA-256: $checked files verified" }
+}
+
+function Get-IG5CoreInventory {
+    param([string]$Root)
+    # Freeze plugin code before any potentially long asset preparation. Assets
+    # are validated independently against their immutable distribution pins.
+    foreach ($file in Get-IG5PackFiles $Root) {
+        $relative = Get-IG5RelativePath $Root $file.FullName
+        if ($relative.StartsWith('runtimes/', [StringComparison]::OrdinalIgnoreCase) -or $relative.StartsWith('third_party/sources/', [StringComparison]::OrdinalIgnoreCase)) { continue }
+        @{path=$relative;bytes=$file.Length;sha256=(Get-IG5Hash $file.FullName)}
+    }
+}
+
+function Assert-IG5ReleaseCore {
+    param([string]$Root, [string]$PluginVersion)
+    $parentManifest = Join-Path (Split-Path $Root -Parent) 'manifest.json'
+    if (-not (Test-IG5Path $parentManifest Leaf)) { throw 'Asset repair of a full/partial package requires its complete outer manifest.json; use a fresh Source ZIP instead.' }
+    $release = Read-IG5Text $parentManifest | ConvertFrom-Json
+    if ($release.schemaVersion -ne 1 -or $release.platform -ne 'win32-x64' -or -not $release.files -or [string]$release.pluginVersion -cne $PluginVersion) { throw 'Asset repair release inventory identity/version is invalid' }
+    $prefix = (Split-Path $Root -Leaf) + '/'
+    $ignored = @('runtimes/', 'third_party/sources/')
+    $files = @($release.files | Where-Object { ([string]$_.path).StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object {
+        $relative = ([string]$_.path).Substring($prefix.Length).Replace('\','/')
+        $null = Resolve-IG5PackPath $Root $relative
+        if (-not $relative.StartsWith('runtimes/', [StringComparison]::OrdinalIgnoreCase) -and -not $relative.StartsWith('third_party/sources/', [StringComparison]::OrdinalIgnoreCase)) {
+            @{path=$relative;bytes=$_.bytes;sha256=$_.sha256}
+        }
+    })
+    Assert-IG5FileInventory $Root $files 'plugin-core' -IgnoredPrefixes $ignored
+    # Keep the authenticated outer-manifest records, rather than re-snapshotting
+    # possibly changed code after a download or donor copy.
+    return $files
 }
 
 function Assert-IG5PluginSource {
@@ -287,7 +328,7 @@ function Assert-IG5PluginSource {
     # Keep this list aligned with the modules loaded by index.js, workers and the profile entry points.
     $required = @('package.json','index.js','client.js','engine_runtime.js','advanced_tools.js','integration_tools.js','analysis_tools.js','workflow.js',
         'semantic_diff.js','semantic_diff_async.js','semantic_diff_worker.js','source/project_store.js','source/attachment_lease.js','source/address_ref.js','source/host_platform.js','source/worker_transport.js',
-        'source/audit_history.js','source/patch_export.js','source/history_index.js','source/json_output.js',
+        'source/audit_history.js','source/patch_export.js','source/history_index.js','source/json_output.js','source/reverse_runtime.js',
         'source/analysis_artifacts.js','source/analysis_jobs.js','source/analysis_worker.js','source/crypto_analysis.js','source/crypto_recovery.js','source/protocol_analysis.js','source/protocol_inference.js',
         'worker/ig5_worker.py','worker/scan_analysis.py','worker/advanced_analysis.py','worker/execution_analysis.py','worker/memory_image.py','worker/cpu_emulator.py','worker/vendor/NOTICE.txt',
         'worker/vendor/unicorn/__init__.py','worker/vendor/unicorn/lib/unicorn.dll',

@@ -845,7 +845,7 @@
           var setSelectedIdentity = currentTargetState[1];
           var currentSession = sessions.find(function (s) { return sessionIdentity(s) === selectedIdentity; }) || sessions[0] || null;
           var selectedTarget = currentSession && currentSession.target;
-          var engine = (currentSession && currentSession.engine) || "reverse";
+          var engine = (currentSession && currentSession.engine) || (feed && feed.config && feed.config.engine) || "ghidra";
           var currentIdentity = currentSession ? sessionIdentity(currentSession) : "none";
           var viewKey = currentIdentity + ":" + ((currentSession && currentSession.artifactId) || "legacy") + ":" + ((currentSession && currentSession.dbRevision) || 0);
           var focusPair = react.useState(null), focus = focusPair[0], setFocus = focusPair[1];
@@ -931,10 +931,11 @@
               el("span", { className: "ig5-chip " + (host.supported ? "read" : "warn") }, host.id || "待确认")),
             el("p", { className: "ig5-card-sub" }, host.supported ? "分析引擎在当前宿主设备执行；能力以下列实际可用状态为准。" : "当前宿主尚无匹配的本地引擎执行方案。移动界面可用不代表引擎已移植。"),
             el("div", { className: "ig5-form-row" }, engines.map(function (engine) {
-              return el("span", { key: engine.id, className: "ig5-chip " + (engine.available ? "read" : "warn") },
-                engineName(engine.id) + " · " + (engine.available ? "可用" : "不可用") + (engine.source === "bundled" ? " · 随包" : ""));
+              var failed = engine.id === "reverse" && engine.readiness === "startup-failed";
+              return el("span", { key: engine.id, className: "ig5-chip " + (engine.available && !failed ? "read" : "warn") },
+                engineName(engine.id) + " · " + (failed ? "启动失败" : engine.available ? (engine.id === "reverse" && engine.runtimeReady !== true ? "已发现，待验证" : "可用") : "不可用") + (engine.source === "bundled" ? " · 随包" : ""));
             })),
-            engines.filter(function (engine) { return !engine.available && engine.id !== "reverse" && engine.reason; }).map(function (engine) {
+            engines.filter(function (engine) { return engine.reason && (!engine.available || engine.id === "reverse"); }).map(function (engine) {
               return el("p", { key: engine.id, className: "ig5-card-sub" }, engineName(engine.id) + ": " + String(engine.reason).slice(0, 300));
             }));
         }
@@ -1072,7 +1073,7 @@
               el("div", { className: "ig5-stat" },
                 el("span", { className: "ig5-stat-label" }, "函数总量 (Functions)"),
                 el("b", { className: "ig5-stat-value ig5-mono" }, session && session.n_funcs ? String(session.n_funcs) : "0"),
-                el("span", { className: "ig5-stat-sub" }, engineName(session && session.engine) + " 分析结果")
+                el("span", { className: "ig5-stat-sub" }, session ? engineName(session.engine) + " 分析结果" : "尚无分析结果")
               ),
               el("div", { className: "ig5-stat" },
                 el("span", { className: "ig5-stat-label" }, "节段/导入 (Sections/Imp)"),
@@ -2269,6 +2270,7 @@
                 el("span", { className: "ig5-chip read ig5-mono" }, totalTools + " Tools · 完整目录")
               ),
               el("p", { className: "ig5-card-sub" }, "工具注册遵循宿主配置：core 默认提供 8 个入口，full 提供完整工具面。目录数量不代表当前会话已注册数量；请以 ig5_profile 返回的实际工具列表为准。"),
+              el("p", { className: "ig5-card-sub" }, "随包 Ghidra / x64dbg 提供静态分析与调试。ig5_microcode、ig5_run_idapython、ig5_switches、ig5_switch_repair、ig5_vtables 需要已有本机 Reverse 引擎；ig5_sync 需要 Reverse 和 Ghidra 两个数据库。各工具的实际支持以当前后端 capabilities 为准。"),
               el(
                 "div",
                 { style: { marginBottom: 12 } },
@@ -2400,6 +2402,7 @@
         exports.__test = { normalizeScan: normalizeScan, buildAnalysisDraft: buildAnalysisDraft, ScanView: Ig5ScanView, AnalysisDraft: AnalysisDraft, AnalysisView: Ig5AnalysisView, cfgFitCamera: cfgFitCamera, EnvironmentCard: Ig5EnvironmentCard, cfgPinchStart: cfgPinchStart, cfgPinchCamera: cfgPinchCamera, engineName: engineName, sessionIdentity: sessionIdentity, parseWorkbenchFocus: parseWorkbenchFocus, layoutCfg: layoutCfg, highlightParts: highlightParts, renderCodeLines: renderCodeLines, normalizeAudit: normalizeAudit, normalizedTarget: normalizedTarget, buildStructDraft: buildStructDraft, makeRequestGate: makeRequestGate, CfgGraph: CfgGraph, StructEditor: StructEditor, FunctionsView: Ig5FunctionsView, StringsView: Ig5StringsView, ListingView: Ig5ListingView, PatchesView: Ig5PatchesView, RuntimeView: Ig5RuntimeView, IrView: Ig5IrView, OverviewCard: Ig5OverviewCard, Workbench: Ig5Workbench };
         exports.__test.analysisReuseDraft = analysisReuseDraft;
         exports.__test.AnalysisEvidence = AnalysisEvidence;
+        exports.__test.ToolsMatrixView = Ig5ToolsMatrixView;
         return module.exports;
       },
     });

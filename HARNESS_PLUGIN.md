@@ -39,7 +39,7 @@ Core 8 为 `doctor/open/status/funcs/strings/decompile/close/profile`（均带 `
 
 ## 三引擎使用与证据身份
 
-静态工具通过 `engine=reverse|ghidra` 路由同一工具 schema；默认优先可用的已授权本机 Reverse，否则使用随包 Ghidra，用户可显式指定。`ig5_ir` 专用于 Ghidra raw/high p-code，Reverse 使用 `ig5_microcode`；两种 IR 不是相同成熟度或相同语义表示。后端能力以 `doctor/status` 的实际 capabilities 为准，不支持的能力明确拒绝。Ghidra 默认 `analysis_profile=interactive`，仅跳过批量 Decompiler Parameter ID 分析器，函数反编译仍可用；`full` 需显式选择。`ig5_open analysis_timeout` 设置 1–600 秒分析预算；超时返回 partial，不伪称分析完成。
+静态工具通过 `engine=reverse|ghidra` 路由同一工具 schema；默认优先可用的 Ghidra，完整安装直接使用随包运行时。Ghidra 不可用而本机 Reverse 通过文件检查时可回退 Reverse；`defaultEngine` 和调用时 `engine` 保留显式选择。`ig5_ir` 专用于 Ghidra raw/high p-code，Reverse 使用 `ig5_microcode`；两种 IR 不是相同成熟度或相同语义表示。后端能力以 `doctor/status` 的实际 capabilities 为准，不支持的能力明确拒绝。Ghidra 默认 `analysis_profile=interactive`，仅跳过批量 Decompiler Parameter ID 分析器，函数反编译仍可用；`full` 需显式选择。`ig5_open analysis_timeout` 设置 1–600 秒分析预算；超时返回 partial，不伪称分析完成。
 
 ```text
 ig5_open path="C:\samples\app.exe" engine=ghidra analysis_profile=interactive analysis_timeout=120
@@ -93,9 +93,23 @@ apply 锁定两个参与数据库的修改队列，逐条记录目的后端操�
 
 ## 安装与便携 runtime
 
-完整发行包默认在插件根目录包含 `runtimes/ghidra`、`runtimes/x64dbg`，运行不依赖外部 `.dsh/ig5/runtimes`。直接执行 `.\install.ps1` 离线校验、暂存并安装整包，备份已有插件和更新 profile；缺件或哈希不符时拒绝安装。`-RuntimeSource` 保留为显式导入其他已校验包的维护入口，用户无需另跑 setup。`.\uninstall.ps1` 卸载插件。
+完整发行包在 `plugin/` 根目录包含 `runtimes/ghidra`、`runtimes/x64dbg`，运行不依赖外部 `.dsh/ig5/runtimes`。在完整解压根目录执行 `& .\plugin\install.ps1`，离线校验、暂存并安装整包，备份已有插件并更新 profile；默认缺件或哈希不符即拒绝，现有 DSH 安装不被部分替换。`-RuntimeSource` 保留为显式导入其他已校验包的维护入口，用户无需另跑 setup。在插件目录运行 `.\uninstall.ps1` 卸载。
 
-Ghidra runtime 包含自身 Ghidra/JDK/Python，x64dbg runtime 包含 x86/x64 debugger/Python/native bridge；不修改 Reverse 安装、全局 Python 或引擎 site-packages。`scripts/setup_ghidra_runtime.ps1`、`scripts/setup_x64dbg_runtime.ps1` 是维护者联网重建资产的脚本，不是默认安装前置依赖。`scripts/package_portable.ps1` 生成自包含目录及文件大小/SHA-256 清单；不附带 DSH、商业 Reverse 程序、用户项目或缓存，用户项目需单独备份；`-IncludeProjects` 明确拒绝。GitHub 已有 v1.0.0 完整包发布基线，本轮已下载并核验其归档及完整资产；当前兼容、审批和输出修正仍需在完成验收后更新发行附件，不能把本地修正说成旧附件已经包含。
+源码 ZIP / git clone 的新 `install.ps1` 可自动下载 `scripts/distribution.json` 锁定的完整资产，流式验证固定 ZIP 大小/SHA-256 与所有清单后，仅补齐 `runtimes/` 和 `third_party/sources/`，不替换当前源码。供体固定为已发布的 `IG5-1.0.0-Windows-x64-dsh021-full-20261010.zip`，其 SHA-256 为 `a2459ddca1f19e5eec2d7918c504f133889809800a0b277e1e379d3ce1459b54`；不能因更新插件代码而把供体指向包含自身描述文件的新 ZIP，产生自引用哈希。离线可在最新源码根目录使用：
+
+```powershell
+& .\install.ps1 -DistributionArchive 'D:\IG5-1.0.0-Windows-x64-dsh021-full-20261010.zip' -Offline
+# 或使用已完整验证的解压供体根目录（含 manifest.json 与 plugin/）
+& .\install.ps1 -DistributionRoot 'D:\已解压的完整发行包' -Offline
+```
+
+两个供体参数互斥；ZIP 应置于插件源码目录之外。对于包含新安装器的完整包，`-RepairAssets` 可显式恢复不变资产：完整外层清单及插件核心代码必须先通过校验，再从固定原 ZIP 或已验证解压供体替换运行时/上游源码并复验。缺少外层清单、核心代码变化、资产固定哈希不符仍拒绝；`-RepairAssets` 不能与 `-RuntimeSource` 合用。旧完整包的安装器没有新参数，用户应重新下载最新源码并使用其 `-DistributionArchive` 离线入口，不能把新脚本拷进旧 SHA-256 封存包。具体恢复命令见 [README 安装说明](README.md#local-install)。SHA-256 不符时保留相对路径、Expected/Actual SHA-256、文件大小和原始 ZIP 哈希；其他用户文件变化的原因尚未确定，不归咎某种解压器，不改清单或跳过校验。
+
+安装器为各 profile 的 `node_modules/dsh-infinite-gen-5` 建立指向完整 `.dsh/plugins/dsh-infinite-gen-5` 的 Junction，并核验入口可读两份 runtime manifest；运行时从已加载模块的物理目录解析，支持 `--preserve-symlinks`。普通 npm 源码副本缺包会报告安装指引，不暗中借用其他版本目录；显式 `runtimeRoot` 或引擎覆盖错误时也不回退。安装成功后须完全退出并重启 DSH，再执行 `ig5_doctor engine=ghidra`。新源码修复不会自动修改已发布旧附件，完整包是否包含本次变更以 [Release 的版本说明和验证报告](https://github.com/Minglink/dsh-infinite-gen-5/releases/latest) 为准。
+
+Ghidra runtime 包含自身 Ghidra/JDK/Python，x64dbg runtime 包含 x86/x64 debugger/Python/native bridge；不修改 Reverse 安装、全局 Python 或引擎 site-packages。`scripts/setup_ghidra_runtime.ps1`、`scripts/setup_x64dbg_runtime.ps1` 是维护者联网重建资产的脚本，不是默认安装前置依赖。`scripts/package_portable.ps1` 生成自包含目录及文件大小/SHA-256 清单；不附带 DSH、商业 Reverse 程序、用户项目或缓存，用户工程需单独备份，`-IncludeProjects` 明确拒绝。
+
+Reverse 的重构范围是 IG5 适配器、worker 和工具通道，不是商业内核的独立替代实现。需用户已有本机授权安装、完整无头 Python 接口以及兼容的 Windows x64 Python；纯源码目录、图形程序或空 `idalib/` 目录均不足。`source/reverse_runtime.js` 读取现有激活配置与有界 Desktop/OneDrive Desktop/Program Files 候选，校验小型 PE 头及必要文件，不启动程序；自定义位置用 `idaDir` / `IG5_IDA_DIR`，Python 可用 `pythonExe` / `IG5_PYTHON`，错误的明确配置不被另一个解释器替代。`readiness=detected` / 工作台“已发现，待验证”表示文件检查通过，`runtimeReady` 和 `startupVerified` 需实际 `ig5_doctor engine=reverse` 成功才成立；目标架构所需反编译能力另按实际返回判断。
 
 `third_party/sources/ghidra-master`、`x64dbg-development` 保留桌面原档主体，`ghidra-12.1.4` 与 `x64dbg-runtime` 另存运行版固定源码及递归 gitlinks。来源、archive/hash、逐文件校验、materialize 的相对链接和已知缺件见 [源码清单](third_party/sources/manifest.json)。Ghidra 运行版是固定 12.1.4 tag 完整 Java/PyGhidra/native 本地 DEV 构建，PUBLIC 目录名仅兼容别名；12.3 DEV 桌面原档独立保留。x64dbg x86/x64 headless/dbg/bridge/loaddll/TitanEngine 已按固定修订及维护补丁重建，GUI 与列明的链接依赖仍预编译。development 原档的提交/gitlinks 未知，其固定补充来源明确记录，不冒称原 gitlinks。IG5 维护上游 Java/C++ 引擎及桥接协议，完整源码归档不意味着随包包含全部离线重编工具链、构建缓存或已暴露上游每项功能，详见 [BUILD](docs/BUILD.md)。
 
@@ -104,14 +118,14 @@ Ghidra runtime 包含自身 Ghidra/JDK/Python，x64dbg runtime 包含 x86/x64 de
 | 配置 | 用途 |
 |---|---|
 | `reverse` | `false` 可关闭 Reverse，Ghidra-only 模式无需商业安装 |
-| `defaultEngine` | 默认静态后端 `reverse` 或 `ghidra` |
+| `defaultEngine` | 显式默认静态后端 `reverse` 或 `ghidra`；未配置优先可用 Ghidra |
 | `defaultDebugger` | 默认调试路由，可显式选 `x64dbg`；不隐式运行样本 |
-| `runtimeRoot` / `IG5_RUNTIME_ROOT` | 显式覆盖 runtimes 根目录；未覆盖时使用插件内 `runtimes` |
+| `runtimeRoot` / `IG5_RUNTIME_ROOT` | 显式覆盖 runtimes 根目录；未覆盖时使用已加载插件物理目录内 `runtimes` |
 | `ghidraRuntime` / `IG5_GHIDRA_RUNTIME` | Ghidra runtime.json 路径 |
 | `x64dbgRuntime` / `IG5_X64DBG_RUNTIME` | x64dbg runtime.json 路径 |
 | `projectRoot` | 项目身份、修订与 changesets；默认 `~\.dsh\ig5\projects` |
-| `idaDir` / `IG5_IDA_DIR` | 已有 Reverse 安装目录，内部兼容名称 |
-| `pythonExe` | Reverse Worker 使用的 Python 可执行文件 |
+| `idaDir` / `IG5_IDA_DIR` | 已有授权 Reverse 安装目录，内部兼容名称；缺失/无效明确拒绝 |
+| `pythonExe` / `IG5_PYTHON` | Reverse Worker 的实际 Windows x64 Python 可执行文件 |
 | `requestTimeoutMs` / `openTimeoutMs` | 普通/打开任务超时，默认 240000 / 1800000 毫秒 |
 | `maxSessions` / `artifactDir` | 默认 3 个会话；产物默认 `~\.dsh\ig5\artifacts` |
 | `backgroundOpen` / `autoOpenHint` | 默认 true；后台打开与提示 |
@@ -130,6 +144,7 @@ Ghidra runtime 包含自身 Ghidra/JDK/Python，x64dbg runtime 包含 x86/x64 de
 - **Reverse 调试**：native win32 在 notepad 副本完成 start→ASLR 入口断点→寄存器读写→step→注释/Undo→故意访问违规→恢复→stop。Bochs 仍仅 load/bpt 通过，不能声称真实运行闭环通过。
 - **微码**：原生 filter 管线与构造真实临时 MBA 的受限 xor-self/sub-self 改写已验证；自然夹具仍 rule_hits=0，未实现通用去平坦化。
 - **RTTI/diff/仿真**：MSVC64 与 Itanium class/SI/VMI 字节布局已在生成 PE 验证，非原生 Linux ELF 验证；虚槽要求显式 table+offset。bindiff 为带歧义/截断的启发式与变更块，不是语义等价/漏洞证明。Unicorn 2.1.4 支持 provider 提供的 x86/x64 与 Ghidra ARM64/AAPCS64，最多复制 64 MiB，无 OS/import/TLS；ARM64 已在 Windows 宿主验证，不代表手机原生运行。报告返回/内存/超时/fault，保留 [NOTICE](worker/vendor/NOTICE.txt) 及 [依赖锁定](worker/requirements-emulation.txt)。
-- **身份/前端**：store 20 项、address 11 项与 client 47 项回归通过，含真进程活锁/崩溃/竞争恢复、确定性延迟恢复、硬链接/目录别名、双向映射重叠与运行态快照切换；三项恢复竞争用例连续五轮通过，真实 Ghidra-only 与双静态引擎集成回归通过。本轮使用安装版 DSH React 的实际浏览器 fixture 完成 8 页、16 项检查：CFG 缩放/拖动/双击跳转、标识符高亮、类型草稿与已有 composer 内容保留、审计两页、解密/协议视图及 390×844 窄屏滚动宽度 390，控制台无错误或警告；报告为 `workbench-browser.json`。该浏览器使用模拟 HTTP 分析数据，不证明实时引擎、桌面模型 API、人工审批弹窗或 Android/iOS 原生运行；迟到响应竞争另由 renderer 回归覆盖。
+- **安装与发现结构**：`test_runtime_bundle.mjs` 12 组覆盖 profile 普通 npm 缺包、正确 Junction、preserve-symlinks、物理搬移与明确覆盖拒绝；`test_reverse_runtime.mjs` 28 项覆盖有界发现、原生文件/Python 检查、诊断脱敏、启动待验证及显式配置优先。均为结构/隔离夹具，不代替原生启动或其他用户机器验证；安装资产恢复由 `test_install_package.ps1` 独立覆盖。
+- **身份/前端**：store 20 项、address 11 项与 client 48 项回归通过，含真进程活锁/崩溃/竞争恢复、确定性延迟恢复、硬链接/目录别名、双向映射重叠与运行态快照切换；三项恢复竞争用例连续五轮通过，真实 Ghidra-only 与双静态引擎集成回归通过。既有浏览器验证使用安装版 DSH React 的实际 fixture 完成 8 页、16 项检查：CFG 缩放/拖动/双击跳转、标识符高亮、类型草稿与已有 composer 内容保留、审计两页、解密/协议视图及 390×844 窄屏滚动宽度 390，控制台无错误或警告；报告为 `workbench-browser.json`。该浏览器使用模拟 HTTP 分析数据，不证明实时引擎、桌面模型 API、人工审批弹窗或 Android/iOS 原生运行，也不自动证明本次新增诊断在实际桌面界面上已验收；迟到响应竞争另由 renderer 回归覆盖。
 
 对外商业引擎统一称 **Reverse**，不输出其版本或带版本安装路径；保留 `ig5_run_idapython`、`IG5_IDA_DIR` 等兼容 API/配置名。Schema 必填放父级 `required: [...]`，不得在 property 写 `required: true`。

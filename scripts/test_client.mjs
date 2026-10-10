@@ -153,6 +153,17 @@ test('environment view reports missing local runtime and never assumes mobile ex
   h.render({ config: { host: { id: 'ios-arm64', supported: false }, engines: [] } }); assert.match(text(h.tree), /移动界面可用不代表引擎已移植/); h.unmount();
 });
 
+test('environment explains optional Reverse and distinguishes discovery from native readiness', () => {
+  const h = harness(ui.EnvironmentCard, { config: { host: { id: 'win32-x64', supported: true }, engines: [{ id: 'reverse', available: false, reason: '未发现本机安装；随包 Ghidra 可用。' }] } });
+  h.render(); assert.match(text(h.tree), /Reverse · 不可用/); assert.match(text(h.tree), /未发现本机安装/);
+  h.render({ config: { host: { id: 'win32-x64', supported: true }, engines: [{ id: 'reverse', available: true, runtimeReady: null, reason: '尚未验证原生启动' }] } });
+  assert.match(text(h.tree), /已发现，待验证/); assert.match(text(h.tree), /尚未验证原生启动/);
+  h.render({ config: { host: { id: 'win32-x64', supported: true }, engines: [{ id: 'reverse', available: true, runtimeReady: false, readiness: 'startup-failed', reason: '原生启动检查失败' }] } });
+  assert.match(text(h.tree), /Reverse · 启动失败/); assert.doesNotMatch(text(h.tree), /Reverse · 可用/);
+  h.render({ config: { host: { id: 'win32-x64', supported: true }, engines: [{ id: 'reverse', available: true, runtimeReady: true, reason: '原生启动检查通过' }] } });
+  assert.match(text(h.tree), /Reverse · 可用/); assert.doesNotMatch(text(h.tree), /待验证/); h.unmount();
+});
+
 test('pending lazy CFG reads cannot replace a newer function or survive same-function reload', async () => {
   const cfgReads = [];
   request = url => {
@@ -299,6 +310,17 @@ test('overview preserves partial analysis status instead of presenting completio
   const h = harness(ui.OverviewCard, { currentSession: { target: 'a.exe', engine: 'ghidra', partial: true, n_funcs: 17 }, sessions: [], runningCount: 0 });
   h.render(); assert.match(text(h.tree), /部分分析结果/); assert.ok(!text(h.tree).includes('分析会话就绪'));
   assert.ok(nodes(h.tree, node => node.props?.className === 'ig5-chip warn').length); h.unmount();
+});
+
+test('empty workbench uses the configured default and does not imply Reverse analysis', async () => {
+  request = () => Promise.resolve({ ok: true, json: async () => ({ config: { engine: 'ghidra' }, sessions: [], jobs: [] }) });
+  const h = harness(ui.Workbench, {}); h.render(); await settle(); h.render();
+  assert.equal(nodes(h.tree, n => n.type === ui.FunctionsView)[0].props.engine, 'ghidra'); h.unmount();
+  const overview = harness(ui.OverviewCard, { sessions: [], currentSession: null, runningCount: 0 });
+  overview.render(); assert.match(text(overview.tree), /尚无分析结果/); assert.doesNotMatch(text(overview.tree), /Reverse 分析结果/); overview.unmount();
+  const catalog = harness(ui.ToolsMatrixView, {}); catalog.render();
+  for (const name of ['ig5_microcode', 'ig5_run_idapython', 'ig5_switches', 'ig5_switch_repair', 'ig5_vtables', 'ig5_sync']) assert.match(text(catalog.tree), new RegExp(name));
+  assert.match(text(catalog.tree), /需要已有本机 Reverse 引擎/); assert.match(text(catalog.tree), /需要 Reverse 和 Ghidra 两个数据库/); catalog.unmount();
 });
 
 test('runtime target switch never labels the previous target snapshot as the new target', async () => {

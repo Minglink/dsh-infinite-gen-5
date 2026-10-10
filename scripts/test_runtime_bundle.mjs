@@ -92,12 +92,12 @@ function cleanEnvironment(home) {
   for (const key of ['IG5_RUNTIME_ROOT', 'IG5_GHIDRA_RUNTIME', 'IG5_X64DBG_RUNTIME']) delete environment[key];
   return environment;
 }
-function cleanChild(module, home) {
+function cleanChild(module, home, nodeFlags = []) {
   const command = `import {runtimeConfiguration} from ${JSON.stringify(pathToFileURL(module).href)};
     const value=runtimeConfiguration(); console.log(JSON.stringify({home:value.home,runtimeRoot:value.runtimeRoot,
     ghidra:{available:value.ghidra.available,source:value.ghidra.source,root:value.ghidra.root,reason:value.ghidra.reason},
     x64dbg:{available:value.x64dbg.available,source:value.x64dbg.source,root:value.x64dbg.root,reason:value.x64dbg.reason}}));`;
-  const result = spawnSync(process.execPath, ['--input-type=module', '-e', command], {
+  const result = spawnSync(process.execPath, [...nodeFlags, '--input-type=module', '-e', command], {
     env: cleanEnvironment(home), encoding: 'utf8', windowsHide: true, timeout: 30000,
   });
   assert.equal(result.status, 0, result.error?.message || result.stderr);
@@ -123,6 +123,39 @@ try {
   assert.equal(noSystem.ghidra.root, path.join(bundle, 'ghidra'));
   pass('Chinese relocation resolves plugin-local packs with empty HOME/PATH and no external runtime');
 
+  // Reproduce the path reported by users: DSH loads its profile dependency,
+  // which can either be an incomplete npm copy or a junction to a full install.
+  const isolatedDsh = path.join(scratch, '独立 DSH');
+  const canonical = path.join(isolatedDsh, 'plugins', 'dsh-infinite-gen-5');
+  const profileEntry = path.join(isolatedDsh, 'profiles', 'desktop', 'node_modules', 'dsh-infinite-gen-5');
+  const copyLoader = directory => {
+    write(path.join(directory, 'package.json'), '{"name":"dsh-infinite-gen-5","type":"module"}');
+    write(path.join(directory, 'engine_runtime.js'), fs.readFileSync(path.join(source, 'engine_runtime.js')));
+    write(path.join(directory, 'source/host_platform.js'), fs.readFileSync(path.join(source, 'source/host_platform.js')));
+  };
+  copyLoader(canonical); tinyPacks(path.join(canonical, 'runtimes'));
+  copyLoader(profileEntry);
+  const staleCopy = cleanChild(path.join(profileEntry, 'engine_runtime.js'), isolatedDsh);
+  for (const id of ['ghidra', 'x64dbg']) {
+    assert.equal(staleCopy[id].available, false); assert.equal(staleCopy[id].source, 'bundled');
+    assert.match(staleCopy[id].reason, /runtime\.json is missing from the loaded plugin/);
+    assert.match(staleCopy[id].reason, /install\.ps1.*restart DSH/);
+    assert.match(staleCopy[id].reason, /source-only npm copy/);
+    assert.doesNotMatch(staleCopy[id].reason, /ENOENT|Users[\\/]/);
+  }
+  assert.equal(staleCopy.runtimeRoot, path.join(profileEntry, 'runtimes'));
+  pass('a source-only profile npm copy is unavailable with installation guidance and cannot borrow a different full plugin');
+  fs.renameSync(profileEntry, profileEntry + '.source-only');
+  fs.symlinkSync(canonical, profileEntry, 'junction');
+  for (const flags of [[], ['--preserve-symlinks', '--preserve-symlinks-main']]) {
+    const profileAlias = cleanChild(path.join(profileEntry, 'engine_runtime.js'), isolatedDsh, flags);
+    available(profileAlias); assert.equal(profileAlias.runtimeRoot, path.join(canonical, 'runtimes'));
+    assert.equal(profileAlias.ghidra.root, path.join(canonical, 'runtimes/ghidra'));
+    assert.equal(profileAlias.x64dbg.root, path.join(canonical, 'runtimes/x64dbg'));
+    assert.equal(profileAlias.ghidra.source, 'bundled'); assert.equal(profileAlias.x64dbg.source, 'bundled');
+  }
+  pass('desktop profile junctions select the full physical plugin under normal and preserve-symlinks module loading');
+
   available(moved.runtimeConfiguration({ runtimeRoot: legacy }));
   process.env.IG5_RUNTIME_ROOT = legacy;
   assert.equal(moved.runtimeConfiguration().x64dbg.source, 'environment');
@@ -132,6 +165,16 @@ try {
   assert.equal(moved.runtimeConfiguration({ runtimeRoot: legacy }).ghidra.source, 'environment');
   for (const key of envKeys) delete process.env[key];
   pass('explicit engine config/env and runtime-root overrides retain deterministic precedence');
+
+  const wrongRoot = path.join(scratch, '显式缺失 runtime');
+  const missingOverride = moved.runtimeConfiguration({ runtimeRoot: wrongRoot });
+  for (const id of ['ghidra', 'x64dbg']) {
+    assert.equal(missingOverride[id].available, false); assert.equal(missingOverride[id].source, 'config');
+    assert.match(missingOverride[id].reason, /Configured .* runtime\.json is missing/);
+    assert.match(missingOverride[id].reason, new RegExp(`${id}Runtime and runtimeRoot`));
+    assert.equal(missingOverride[id].root, path.join(wrongRoot, id));
+  }
+  pass('missing explicit runtime configuration stays unavailable and does not silently use bundled assets');
 
   const debugManifestPath = path.join(bundle, 'x64dbg/runtime.json');
   const debugManifest = JSON.parse(fs.readFileSync(debugManifestPath, 'utf8'));

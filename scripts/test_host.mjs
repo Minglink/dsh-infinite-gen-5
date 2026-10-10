@@ -81,7 +81,9 @@ const ctx = {
 };
 
 try {
-mod.apply(ctx, { idaDir: IDA_DIR, toolset: 'full', artifactDir });
+// This legacy native API smoke specifically asserts Reverse outputs; the
+// independent self-contained/catalog checks validate the bundled default.
+mod.apply(ctx, { idaDir: IDA_DIR, defaultEngine: 'reverse', toolset: 'full', artifactDir });
 console.log('[registered]', [...tools.keys()].join(', '));
 console.log('[routes]', [...routes.keys()].join(', '));
 

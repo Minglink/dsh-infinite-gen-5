@@ -7,6 +7,8 @@
 param(
     [string]$RuntimeSource,
     [string]$DistributionRoot,
+    [string]$DistributionArchive,
+    [switch]$RepairAssets,
     [switch]$Offline,
     [string]$DshRoot = (Join-Path $env:USERPROFILE '.dsh')
 )
@@ -49,8 +51,14 @@ Assert-IG5NoReparsePath (Join-Path $dshRootPath 'profiles')
 Assert-IG5NoReparsePath $pluginsDir
 Assert-IG5NoReparsePath (Join-Path $dshRootPath 'ig5\artifacts')
 Assert-IG5PluginSource $srcDir -CoreOnly
+if ($DistributionRoot -and $DistributionArchive) { throw 'Choose either DistributionRoot or DistributionArchive, not both' }
+if ($RepairAssets -and $RuntimeSource) { throw 'RepairAssets cannot be combined with RuntimeSource' }
 # Bootstrap only a clean source-only tree. A partial/damaged full pack must fail closed.
 $sourceOnly = -not (Test-IG5Path (Join-Path $srcDir 'runtimes')) -and -not (Test-IG5Path (Join-Path $srcDir 'third_party\sources')) -and -not (Test-IG5Path (Join-Path (Split-Path $srcDir -Parent) 'manifest.json'))
+# Freeze expected core records before profiles or long donor/download work. Full
+# repair retains the authenticated outer inventory; source-only installs retain
+# their own initial code. Never accept a later snapshot as the new baseline.
+$coreFiles = if ($RepairAssets -and -not $sourceOnly) { @(Assert-IG5ReleaseCore $srcDir $pluginVersion) } else { @(Get-IG5CoreInventory $srcDir) }
 # Every source and profile check here is read-only. A missing/corrupt pack cannot leave a partial install.
 $profilesRoot = Join-Path $dshRootPath 'profiles'
 if (-not (Test-Path -LiteralPath $profilesRoot -PathType Container)) { throw "未找到 DSH profiles: $profilesRoot" }
@@ -87,16 +95,18 @@ foreach ($plan in $plans) {
     $nm = Join-Path $plan.Directory 'node_modules'
     if ((Test-Path -LiteralPath $nm) -and ((Get-Item -LiteralPath $nm).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw "node_modules 不能为链接: $nm" }
 }
-if ($sourceOnly) {
-    $bootstrap = New-IG5SourceDistribution $srcDir $pluginVersion $DistributionRoot -Offline:$Offline
+if ($sourceOnly -or $RepairAssets) {
+    $prepareArgs = @{SourceRoot=$srcDir;PluginVersion=$pluginVersion;DistributionRoot=$DistributionRoot;Offline=$Offline;CoreFiles=$coreFiles}
+    if ($DistributionArchive) { $prepareArgs.DistributionArchive = $DistributionArchive }
+    $bootstrap = New-IG5SourceDistribution @prepareArgs
     $srcDir = $bootstrap.Root
-} elseif ($DistributionRoot) { throw '-DistributionRoot is only used to supplement a source-only tree; incomplete full packages must be replaced with a complete release.' }
+} elseif ($DistributionRoot -or $DistributionArchive) { throw 'Full-package asset recovery requires -RepairAssets; changed core code remains rejected.' }
 $runtimeInput = if ($RuntimeSource) { Get-IG5FullPath $RuntimeSource } else { Join-Path $srcDir 'runtimes' }
 Assert-IG5PluginSource $srcDir
+Assert-IG5FileInventory $srcDir $coreFiles 'core-after-preparation' -IgnoredPrefixes @('runtimes/','third_party/sources/')
 $validated = Assert-IG5RuntimePack $runtimeInput
 if ($validated.Manifest.pluginVersion -and [string]$validated.Manifest.pluginVersion -ne $pluginVersion) { throw "运行包版本与插件不符: $($validated.Manifest.pluginVersion) / $pluginVersion" }
 Write-Host "[OK] 两引擎完整性验证通过：$($validated.Files) 个文件" -ForegroundColor Green
-
 $token = [Guid]::NewGuid().ToString('N')
 $stage = Assert-Child (Join-Path $pluginsDir ".ig5-stage-$token") $pluginsDir
 $previous = Assert-Child (Join-Path $pluginsDir ".ig5-previous-$token") $pluginsDir
@@ -109,7 +119,15 @@ try {
     Copy-IG5Pack $srcDir $stage @('runtimes')
     Copy-IG5Pack $runtimeInput (Join-Path $stage 'runtimes')
     Write-IG5RuntimeManifest $validated (Join-Path $stage 'runtimes') $pluginVersion
-    $null = Assert-IG5RuntimePack (Join-Path $stage 'runtimes')
+    Assert-IG5FileInventory $stage $coreFiles 'staged-core' -IgnoredPrefixes @('runtimes/','third_party/sources/')
+    if ($bootstrap -and -not $RuntimeSource) {
+        Assert-IG5PluginSource $stage -CoreOnly
+        $stageDescriptor = Get-IG5DistributionDescriptor $stage $pluginVersion
+        $null = Assert-IG5PinnedAssets $stage $stageDescriptor $pluginVersion
+    } else {
+        $null = Assert-IG5RuntimePack (Join-Path $stage 'runtimes')
+        Assert-IG5PluginSource $stage
+    }
     # Downloads, extraction and staging can take minutes. Never overwrite a changed profile plan.
     Assert-IG5NoReparsePath $destDir
     Assert-IG5NoReparsePath (Join-Path $dshRootPath 'ig5\artifacts')
@@ -134,6 +152,11 @@ try {
         if (Get-Item -LiteralPath $entry -Force -ErrorAction SilentlyContinue) { Move-Item -LiteralPath $entry -Destination $savedEntry; $record.OldEntry = $true }
         New-Item -ItemType Junction -Path $entry -Target $destDir | Out-Null
         $record.NewEntry = $true
+        foreach ($runtimeEntry in @('ghidra','x64dbg')) {
+            $projected = Join-Path $entry "runtimes\$runtimeEntry\runtime.json"
+            $physical = Join-Path $destDir "runtimes\$runtimeEntry\runtime.json"
+            if (-not (Test-IG5Path $projected Leaf) -or (Get-IG5Hash $projected) -ne (Get-IG5Hash $physical)) { throw "Profile entry cannot read the installed $runtimeEntry runtime; profile registration aborted" }
+        }
         $temporary = "$($plan.Path).ig5-$token"
         [IO.File]::WriteAllText($temporary, $plan.Json, $utf8NoBom)
         Move-Item -LiteralPath $temporary -Destination $plan.Path -Force

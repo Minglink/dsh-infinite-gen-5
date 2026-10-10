@@ -14,6 +14,7 @@ import { defineAnalysisTools } from './analysis_tools.js';
 import { exportPatchDiff } from './source/patch_export.js';
 import { readAuditPage, targetIdentity } from './source/audit_history.js';
 import { jsonToolOutput } from './source/json_output.js';
+import { resolveReverseRuntime } from './source/reverse_runtime.js';
 
 // ── 无限五代（IG5）v1.0.0 ──────────────────────────────────────────────────
 // DeepSeek Harness 逆向插件：隔离多引擎 Worker 池 + ig5_* 工具面 + ig5dash 投影。
@@ -27,20 +28,15 @@ const WORKER = path.join(HERE, 'worker', 'ig5_worker.py');
 // ── Config（cordis.yml 插件行可覆盖；misconfiguration fails loud） ──────────
 function resolveConfig(cfg = {}) {
   const runtime = runtimeConfiguration(cfg);
-  const idaDir = cfg.reverse === false || runtime.host.id !== 'win32-x64' ? null : cfg.idaDir || process.env.IG5_IDA_DIR || findIdaDir();
-  const reverseAvailable = !!idaDir && fs.existsSync(path.join(idaDir, 'idalib'));
-  const pythonCandidates = [
-    cfg.pythonExe,
-    idaDir && path.join(idaDir, 'python311', 'python.exe'),
-    'python',
-  ].filter(Boolean);
-  const pythonExe = pythonCandidates.find((p) => p === 'python' || fs.existsSync(p)) || 'python';
+  const reverseRuntime = resolveReverseRuntime(cfg, { host: runtime.host });
+  const { idaDir, pythonExe, available: reverseAvailable } = reverseRuntime;
   return {
     ...runtime,
     idaDir,
     reverseAvailable,
+    reverseRuntime,
     pythonExe,
-    defaultEngine: cfg.defaultEngine ? engineId(cfg.defaultEngine) : reverseAvailable ? 'reverse' : 'ghidra',
+    defaultEngine: cfg.defaultEngine ? engineId(cfg.defaultEngine) : runtime.ghidra.available ? 'ghidra' : reverseAvailable ? 'reverse' : 'ghidra',
     defaultDebugger: cfg.defaultDebugger || (runtime.x64dbg.available ? 'x64dbg' : 'auto'),
     projectRoot: cfg.projectRoot || (cfg.artifactDir ? path.join(cfg.artifactDir, 'projects') : runtime.projectRoot),
     stateRoot: cfg.stateRoot || (cfg.artifactDir ? path.join(cfg.artifactDir, 'runtime-state') : path.join(runtime.home, 'state')),
@@ -53,27 +49,6 @@ function resolveConfig(cfg = {}) {
     backgroundOpen: cfg.backgroundOpen !== false,
     toolset: cfg.toolset || 'core',
   };
-}
-
-function findIdaDir() {
-  const roots = [
-    path.join(os.homedir(), 'Desktop'),
-    'C:\\Program Files',
-    'C:\\Program Files (x86)',
-  ];
-  for (const root of roots) {
-    try {
-      for (const entry of fs.readdirSync(root)) {
-        if (/^IDA\b/i.test(entry)) {
-          const candidate = path.join(root, entry);
-          if (fs.existsSync(path.join(candidate, 'idalib', 'python'))) return candidate;
-        }
-      }
-    } catch {
-      // unreadable root — skip
-    }
-  }
-  return null;
 }
 
 // Keep the failure reason while hiding runtime install paths and engine versions.
@@ -446,20 +421,39 @@ class WorkerManager {
   }
 
   async doctor(engine = this.scope.getStore()?.engine || this.cfg.defaultEngine) {
-    const child = this.spawnWorker(engine);
+    engine = engineId(engine);
+    if (engine === 'reverse' && !this.cfg.reverseAvailable) {
+      const runtime = this.cfg.reverseRuntime;
+      throw Object.assign(new Error(runtime?.reason || 'Reverse 本机运行环境不可用；可选择 engine=ghidra。'), { code: runtime?.code || 'REVERSE_UNAVAILABLE' });
+    }
+    let child;
     try {
+      child = this.spawnWorker(engine);
       const result = await doctorWorker(child, { formatError: error => this.rpcError(error) });
-      if (engine === 'reverse') return { ok: true, engine: 'Reverse', python: result?.python,
-        runtimeReady: result?.idalib === 'loaded', caps: {
-          planAndWait: result?.caps?.['ida_auto.plan_and_wait'] === true,
-          wait: result?.caps?.['ida_auto.auto_wait'] === true,
-          makeCode: result?.caps?.['ida_auto.auto_make_code'] === true } };
+      if (engine === 'reverse') {
+        if (result?.idalib !== 'loaded') throw new Error('Reverse 原生内核没有确认启动完成。');
+        if (this.cfg.reverseRuntime) Object.assign(this.cfg.reverseRuntime, { readiness: 'verified', runtimeReady: true, startupVerified: true,
+          reason: 'Reverse 原生启动检查通过；具体目标架构的反编译能力仍需打开样本验证。' });
+        return { ok: true, engine: 'Reverse', python: result?.python, startupVerified: true,
+          runtimeReady: result?.idalib === 'loaded', caps: {
+            planAndWait: result?.caps?.['ida_auto.plan_and_wait'] === true,
+            wait: result?.caps?.['ida_auto.auto_wait'] === true,
+            makeCode: result?.caps?.['ida_auto.auto_make_code'] === true } };
+      }
       return { ...result, engine, runtimeReady: true };
+    } catch (error) {
+      if (engine === 'reverse' && this.cfg.reverseRuntime) Object.assign(this.cfg.reverseRuntime, { readiness: 'startup-failed', runtimeReady: false,
+        startupVerified: false, reason: 'Reverse 原生启动检查失败：' + publicEngineError(error, this.cfg) });
+      throw error;
     } finally { terminateTree(child); }
   }
 
   engines() {
-    return [{ id: 'reverse', label: 'Reverse', available: this.cfg.reverseAvailable, default: this.cfg.defaultEngine === 'reverse' },
+    return [{ id: 'reverse', label: 'Reverse', available: this.cfg.reverseAvailable, default: this.cfg.defaultEngine === 'reverse',
+      source: this.cfg.reverseRuntime?.source || 'local-installation', distribution: 'local-installation',
+      readiness: this.cfg.reverseRuntime?.readiness || 'detected', runtimeReady: this.cfg.reverseRuntime?.runtimeReady ?? null,
+      startupVerified: this.cfg.reverseRuntime?.startupVerified === true, validation: this.cfg.reverseRuntime?.validation || 'files-only',
+      reason: this.cfg.reverseRuntime?.reason, code: this.cfg.reverseRuntime?.code, discoveryPartial: this.cfg.reverseRuntime?.discoveryPartial === true },
       ...['ghidra', 'x64dbg'].map((id) => ({ id, label: id === 'ghidra' ? 'Ghidra' : 'x64dbg',
         available: !!this.cfg[id]?.available, platform: this.cfg[id]?.platform, mode: this.cfg[id]?.mode || 'headless',
         default: this.cfg.defaultEngine === id, source: this.cfg[id]?.source, portable: this.cfg[id]?.portable,

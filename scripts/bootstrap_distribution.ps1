@@ -9,6 +9,7 @@ function Get-IG5DistributionDescriptor {
     foreach ($field in @('runtimeManifestSha256','sourceManifestSha256')) {
         if ([string]$d.$field -notmatch '^[a-f0-9]{64}$') { throw "Invalid distribution SHA-256: $field" }
     }
+    if ($d.assetSha256 -and ([string]$d.assetSha256 -notmatch '^[a-f0-9]{64}$' -or [long]$d.assetBytes -le 0 -or [long]$d.assetBytes -gt 2GB)) { throw 'Invalid pinned distribution archive digest/size' }
     $sourcePins = @($d.sourceInventorySha256.PSObject.Properties)
     if (-not $sourcePins.Count -or $sourcePins.Count -gt 16) { throw 'Distribution source inventory pins are missing/invalid' }
     foreach ($pin in $sourcePins) {
@@ -205,6 +206,14 @@ function Assert-IG5DistributionAssets {
     $outerRecord = @{path='manifest.json';bytes=(New-Object IO.FileInfo (ConvertTo-IG5IOPath $manifestPath)).Length;sha256=(Get-IG5Hash $manifestPath)}
     Assert-IG5FileInventory $root @($releaseFiles + @($outerRecord)) 'complete-release' -IncludeExcluded
     $pluginRoot = Join-Path $root 'plugin'
+    $null = Assert-IG5PinnedAssets $pluginRoot $Descriptor $PluginVersion
+    return $pluginRoot
+}
+
+function Assert-IG5PinnedAssets {
+    param([string]$PluginRoot, $Descriptor, [string]$PluginVersion)
+    $pluginRoot = Get-IG5FullPath $PluginRoot
+    Assert-IG5NoReparsePath $pluginRoot
     foreach ($pin in @(@('runtimes\manifest.json','runtimeManifestSha256'), @('third_party\sources\manifest.json','sourceManifestSha256'))) {
         if ((Get-IG5Hash (Join-Path $pluginRoot $pin[0])) -ne $Descriptor.($pin[1])) { throw "Pinned distribution manifest SHA-256 mismatch: $($pin[0])" }
     }
@@ -226,7 +235,7 @@ function Assert-IG5DistributionAssets {
         $name = "ig5-bridge.dp$bits"
         if ((Get-IG5Hash (Join-Path $debugDir "plugins\$name")) -ne $Descriptor.nativeBridgeSha256.$name) { throw "Distribution native bridge mismatch: $name" }
     }
-    return $pluginRoot
+    return $runtime
 }
 
 function Remove-IG5BootstrapWorkspace {
@@ -240,17 +249,58 @@ function Remove-IG5BootstrapWorkspace {
     }
 }
 
+function Copy-IG5PinnedArchive {
+    param([string]$Source, [string]$Destination, [long]$ExpectedBytes)
+    if ($ExpectedBytes -le 0 -or $ExpectedBytes -gt 2GB) { throw 'Invalid archive copy budget' }
+    $inputStream = [IO.File]::Open((ConvertTo-IG5IOPath $Source), [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+    $outputStream = $null
+    try {
+        if ($inputStream.Length -ne $ExpectedBytes) { throw 'DistributionArchive size changed before copy' }
+        $outputStream = [IO.File]::Open((ConvertTo-IG5IOPath $Destination), [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        $buffer = New-Object byte[] 1048576
+        $copied = [long]0
+        while (($read = $inputStream.Read($buffer,0,$buffer.Length)) -gt 0) {
+            if ($copied + $read -gt $ExpectedBytes) { throw 'DistributionArchive exceeded fixed copy budget' }
+            $outputStream.Write($buffer,0,$read)
+            $copied += $read
+        }
+        if ($copied -ne $ExpectedBytes) { throw 'DistributionArchive truncated during copy' }
+    } finally { if ($outputStream) { $outputStream.Dispose() }; $inputStream.Dispose() }
+}
+
 function New-IG5SourceDistribution {
-    param([string]$SourceRoot, [string]$PluginVersion, [string]$DistributionRoot, [switch]$Offline)
+    param([string]$SourceRoot, [string]$PluginVersion, [string]$DistributionRoot, [switch]$Offline, [string]$DistributionArchive, [object[]]$CoreFiles)
     Assert-IG5PluginSource $SourceRoot -CoreOnly
+    $expectedCore = if ($PSBoundParameters.ContainsKey('CoreFiles')) { @($CoreFiles) } else { @(Get-IG5CoreInventory $SourceRoot) }
+    Assert-IG5FileInventory $SourceRoot $expectedCore 'source-core-before-preparation' -IgnoredPrefixes @('runtimes/','third_party/sources/')
     $d = Get-IG5DistributionDescriptor $SourceRoot $PluginVersion
     $releaseUrl = Get-IG5DistributionUrl $d
-    if ($Offline -and -not $DistributionRoot) { throw "Source ZIP lacks runtime/upstream assets. Offline: download/extract the full ZIP from $releaseUrl and rerun with -DistributionRoot '<extracted-full-release-root>' -Offline, or run that package's plugin\install.ps1." }
+    if ($DistributionRoot -and $DistributionArchive) { throw 'Choose either DistributionRoot or DistributionArchive, not both' }
+    $sourceBoundary = (Get-IG5FullPath $SourceRoot) + '\'
+    if ($DistributionArchive -and (Get-IG5FullPath $DistributionArchive).StartsWith($sourceBoundary, [StringComparison]::OrdinalIgnoreCase)) { throw 'Place DistributionArchive outside the plugin source directory; the ZIP must not become plugin code' }
+    if ($DistributionRoot) {
+        $donorBoundary = (Get-IG5FullPath $DistributionRoot) + '\'
+        if ($donorBoundary.StartsWith($sourceBoundary, [StringComparison]::OrdinalIgnoreCase) -or $sourceBoundary.StartsWith($donorBoundary, [StringComparison]::OrdinalIgnoreCase)) { throw 'DistributionRoot and plugin source must be separate non-overlapping directories' }
+    }
+    if ($Offline -and -not $DistributionRoot -and -not $DistributionArchive) { throw "Source ZIP lacks runtime/upstream assets. Offline: use -DistributionArchive '<pinned-full-release.zip>' -Offline, verified -DistributionRoot '<extracted-full-release-root>' -Offline, or download/extract the full ZIP from $releaseUrl and run plugin\install.ps1." }
     $workspace = Join-Path ([IO.Path]::GetTempPath()) ('ig5-bootstrap-' + [Guid]::NewGuid().ToString('N'))
     try {
         Assert-IG5NoReparsePath $workspace
         [IO.Directory]::CreateDirectory((ConvertTo-IG5IOPath $workspace)) | Out-Null
-        if ($DistributionRoot) {
+        if ($DistributionArchive) {
+            if (-not $d.assetSha256) { throw 'Offline archive recovery requires a fixed assetSha256 and assetBytes in scripts/distribution.json' }
+            $archiveInput = Get-IG5FullPath $DistributionArchive
+            Assert-IG5NoReparsePath $archiveInput
+            if (-not (Test-IG5Path $archiveInput Leaf)) { throw "DistributionArchive file not found: $archiveInput" }
+            if ((New-Object IO.FileInfo (ConvertTo-IG5IOPath $archiveInput)).Length -ne [long]$d.assetBytes) { throw "DistributionArchive size differs from pinned $($d.assetName); expected $($d.assetBytes) bytes" }
+            $zipPath = Join-Path $workspace 'full-release.zip'
+            Copy-IG5PinnedArchive $archiveInput $zipPath ([long]$d.assetBytes)
+            if ((Get-IG5Hash $zipPath) -ne [string]$d.assetSha256) { throw "DistributionArchive SHA-256 differs from the fixed published $($d.assetName); do not change the checksum or manifest" }
+            Write-Host '[OK] Local original ZIP matches the fixed published SHA-256. Extracting without changing the original source...'
+            $extracted = Join-Path $workspace 'release'
+            Expand-IG5VerifiedZip $zipPath $extracted
+            $donor = Assert-IG5DistributionAssets $extracted $d $PluginVersion
+        } elseif ($DistributionRoot) {
             Write-Host "[SOURCE ZIP] Using local full-release assets: $DistributionRoot"
             $donor = Assert-IG5DistributionAssets $DistributionRoot $d $PluginVersion
         } else {
@@ -259,11 +309,13 @@ function New-IG5SourceDistribution {
             $asset = Get-IG5Asset $release $d.assetName $d
             $checksum = Get-IG5Asset $release ($d.assetName + '.sha256') $d
             if ([long]$asset.size -gt 2GB -or [long]$checksum.size -gt 64KB) { throw 'Release asset size exceeds installer budget' }
+            if ($d.assetSha256 -and [long]$asset.size -ne [long]$d.assetBytes) { throw 'Published ZIP size differs from the fixed distribution pin' }
             Write-Host ("[SOURCE ZIP] {0}; {1:N1} MiB. Local plugin source is preserved." -f $d.assetName, ([long]$asset.size / 1MB))
             $checksumText = Invoke-IG5DistributionDownload $checksum.browser_download_url '' 64KB ([long]$checksum.size)
             $match = [regex]::Match($checksumText.Trim(), '^([a-fA-F0-9]{64})[ \t]+\*?([^\r\n]+)$')
             if (-not $match.Success -or $match.Groups[2].Value.Trim() -cne $d.assetName) { throw 'Release .sha256 file must identify the pinned ZIP exactly' }
             $expectedHash = $match.Groups[1].Value.ToLowerInvariant()
+            if ($d.assetSha256 -and $expectedHash -cne [string]$d.assetSha256) { throw 'Published ZIP checksum differs from the fixed distribution pin' }
             if ($asset.digest -and ([string]$asset.digest -notmatch '^sha256:[a-fA-F0-9]{64}$' -or ([string]$asset.digest).Substring(7).ToLowerInvariant() -ne $expectedHash)) { throw 'GitHub asset digest differs from release .sha256' }
             $zipPath = Join-Path $workspace 'full-release.zip'
             Invoke-IG5DistributionDownload $asset.browser_download_url $zipPath 2GB ([long]$asset.size) -Progress
@@ -277,7 +329,11 @@ function New-IG5SourceDistribution {
         Copy-IG5Pack $SourceRoot $prepared @('runtimes','third_party/sources')
         Copy-IG5Pack (Join-Path $donor 'runtimes') (Join-Path $prepared 'runtimes')
         Copy-IG5Pack (Join-Path $donor 'third_party\sources') (Join-Path $prepared 'third_party\sources')
-        Assert-IG5PluginSource $prepared
+        Assert-IG5PluginSource $prepared -CoreOnly
+        Assert-IG5FileInventory $prepared $expectedCore 'prepared-core' -IgnoredPrefixes @('runtimes/','third_party/sources/')
+        # A verified donor may change during copying. Re-bind the copied assets
+        # to the fixed pins, then check their actual inventories exactly once.
+        $null = Assert-IG5PinnedAssets $prepared $d $PluginVersion
         Write-Host '[OK] Pinned assets prepared; source code retained. Starting validated installation.'
         return [pscustomobject]@{Root=$prepared;Workspace=$workspace}
     } catch {
