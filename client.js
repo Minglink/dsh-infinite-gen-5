@@ -752,7 +752,7 @@
         }
         function normalizeAudit(item) {
           var args = item.args || item.arguments || {}, result = item.detail || (item.result && (item.result.value || item.result)) || {};
-          return { tool: String(item.tool || item.name || "未知工具"), target: args.target || item.target || "", engine: (result.destination && result.destination.engine) || args.engine || item.engine || "reverse", time: item.ts || item.time || "", ea: result.ea || args.ea || "", fileOffset: result.fileOffset, before: result.before, after: result.after, isError: item.isError === true || !!(item.result && item.result.isError), detail: typeof result === "string" ? result : String(result.error || result.note || "") };
+          return { tool: String(item.tool || item.name || "未知工具"), target: (result.destination && result.destination.target) || (result._ig5 && result._ig5.target) || args.target || item.target || "", engine: (result.destination && result.destination.engine) || (result._ig5 && result._ig5.engine) || args.engine || item.engine || "reverse", time: item.ts || item.time || "", ea: result.ea || args.ea || "", fileOffset: result.fileOffset, before: result.before, after: result.after, isError: item.isError === true || !!(item.result && item.result.isError), detail: typeof result === "string" ? result : String(result.error || result.note || "") };
         }
         function normalizeScan(data) {
           data = data || {};

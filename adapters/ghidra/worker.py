@@ -160,17 +160,23 @@ class Worker:
         os.environ['JAVA_HOME'] = str(java_home)
         os.environ['JAVA_HOME_OVERRIDE'] = str(java_home)
         os.environ['GHIDRA_INSTALL_DIR'] = str(ghidra_home)
-        import pyghidra
-        import jpype
-        from pyghidra.launcher import HeadlessPyGhidraLauncher
-        self.pyghidra, self.jpype = pyghidra, jpype
-        self.root = Path(project_root).resolve()
-        self.root.mkdir(parents=True, exist_ok=True)
-        launcher = HeadlessPyGhidraLauncher(install_dir=Path(ghidra_home))
-        # Never discover a system JDK or invoke a PATH/shell-based Java lookup.
-        launcher.java_home = Path(java_home)
-        launcher.vm_args += ['-Xmx2G', '-XX:ActiveProcessorCount=2', '-XX:ParallelGCThreads=2', '-XX:CICompilerCount=2']
-        self.jvm_bootstrap = start_launcher(launcher, jpype)
+        from native_bootstrap import bootstrap_windows_dlls
+        self.native_dll_search = bootstrap_windows_dlls(java_home)
+        try:
+            import pyghidra
+            import jpype
+            from pyghidra.launcher import HeadlessPyGhidraLauncher
+            self.pyghidra, self.jpype = pyghidra, jpype
+            self.root = Path(project_root).resolve()
+            self.root.mkdir(parents=True, exist_ok=True)
+            launcher = HeadlessPyGhidraLauncher(install_dir=Path(ghidra_home))
+            # Never discover a system JDK or invoke a PATH/shell-based Java lookup.
+            launcher.java_home = Path(java_home)
+            launcher.vm_args += ['-Xmx2G', '-XX:ActiveProcessorCount=2', '-XX:ParallelGCThreads=2', '-XX:CICompilerCount=2']
+            self.jvm_bootstrap = start_launcher(launcher, jpype)
+        except BaseException:
+            self.native_dll_search.close()
+            raise
         self.program = self.project = self.consumer = self.decompiler = None
         self.target = self.project_name = self.source_hash = None
         self.journal = []

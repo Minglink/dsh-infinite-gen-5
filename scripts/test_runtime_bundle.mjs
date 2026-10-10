@@ -40,8 +40,9 @@ function tinyPacks(root) {
     } }));
   for (const name of ['LICENSE', 'UPSTREAM-NOTICE', 'NOTICE.txt', 'README.md', 'JPypeContext.java',
     'unicode-bootstrap.patch', 'upstream-JPypeContext.java', 'provenance.json']) write(path.join(ghidra, 'licenses/ig5-jpype-bootstrap', name));
-  for (const [home, file] of [[python, 'python.exe'], [python, 'python312.dll'], [python, 'vcruntime140.dll'],
+  for (const [home, file] of [[python, 'python.exe'], [python, 'python312.dll'], [python, 'vcruntime140.dll'], [python, 'vcruntime140_1.dll'],
     [python, 'pylib/_jpype.cp312-win_amd64.pyd'], [java, 'bin/java.exe'], [java, 'bin/server/jvm.dll'],
+    [java, 'bin/vcruntime140.dll'], [java, 'bin/vcruntime140_1.dll'], [java, 'bin/msvcp140.dll'],
     [gh, 'Ghidra/Features/Decompiler/os/win_x86_64/decompile.exe']]) write(path.join(home, file), pe(64));
   for (const file of ['python312.zip', 'LICENSE.txt', 'pylib/pyghidra/__init__.py', 'pylib/pyghidra/launcher.py',
     'pylib/jpype/__init__.py', 'pylib/packaging/__init__.py', 'pylib/org.jpype.jar']) write(path.join(python, file));
@@ -57,7 +58,7 @@ function tinyPacks(root) {
   write(path.join(debug, 'runtime.json'), JSON.stringify({ pythonExe: 'python/python.exe', bridge: 'ig5-native', mode: 'headless',
     x64dbgExe: 'snapshot/release/x64/x64dbg.exe', x32dbgExe: 'snapshot/release/x32/x32dbg.exe',
     headlessExe: 'snapshot/release/x64/headless.exe', headless32Exe: 'snapshot/release/x32/headless.exe' }));
-  for (const file of ['python.exe', 'python312.dll', 'vcruntime140.dll']) write(path.join(debug, 'python', file), pe(64));
+  for (const file of ['python.exe', 'python312.dll', 'vcruntime140.dll', 'vcruntime140_1.dll']) write(path.join(debug, 'python', file), pe(64));
   for (const file of ['python312.zip', 'LICENSE.txt']) write(path.join(debug, 'python', file));
   write(path.join(debug, 'python/python312._pth'), 'python312.zip\n.\n');
   for (const bits of [64, 32]) {
@@ -65,6 +66,7 @@ function tinyPacks(root) {
     for (const name of [`x${bits}dbg.exe`, 'headless.exe', `plugins/ig5-bridge.dp${bits}`, `x${bits}dbg.dll`, `x${bits}bridge.dll`,
       `x${bits}_dbg.dll`, `x${bits}_bridge.dll`, 'jansson.dll', 'TitanEngine.dll', 'Scylla.dll',
       'Qt5Core.dll', 'Qt5Gui.dll', 'Qt5Widgets.dll', 'msvcp140.dll', 'vcruntime140.dll']) write(path.join(home, name), pe(bits));
+    if (bits === 64) write(path.join(home, 'vcruntime140_1.dll'), pe(64));
   }
   fs.mkdirSync(path.join(debug, 'licenses'), { recursive: true });
   inventory(root);
@@ -218,6 +220,30 @@ try {
   assert.equal(wrongBridge.x64dbg.available, false); assert.match(wrongBridge.x64dbg.reason, /expected Windows x32 PE/);
   fs.writeFileSync(bridge, pe(32));
   pass('Python/JVM/debugger bridge architecture is checked using small PE headers');
+
+  for (const [id, relative, label] of [
+    ['ghidra', 'ghidra/jdk/bin/msvcp140.dll', /JDK C\+\+ runtime msvcp140/],
+    ['ghidra', 'ghidra/jdk/bin/vcruntime140.dll', /JDK C\+\+ runtime vcruntime140/],
+    ['ghidra', 'ghidra/jdk/bin/vcruntime140_1.dll', /JDK C\+\+ runtime vcruntime140_1/],
+    ['ghidra', 'ghidra/python/vcruntime140_1.dll', /Python vcruntime140_1/],
+    ['x64dbg', 'x64dbg/python/vcruntime140_1.dll', /Python vcruntime140_1/],
+    ['x64dbg', 'x64dbg/snapshot/release/x64/vcruntime140_1.dll', /x64 vcruntime140_1/],
+  ]) {
+    const dependency = path.join(bundle, relative);
+    fs.renameSync(dependency, dependency + '.saved');
+    try {
+      const withoutDependency = moved.runtimeConfiguration();
+      assert.equal(withoutDependency[id].available, false, relative);
+      assert.match(withoutDependency[id].reason, label);
+    } finally { fs.renameSync(dependency + '.saved', dependency); }
+  }
+  const cppRuntime = path.join(bundle, 'ghidra/jdk/bin/msvcp140.dll');
+  fs.writeFileSync(cppRuntime, pe(32));
+  const wrongCppRuntime = moved.runtimeConfiguration();
+  assert.equal(wrongCppRuntime.ghidra.available, false);
+  assert.match(wrongCppRuntime.ghidra.reason, /JDK C\+\+ runtime msvcp140.*expected Windows x64 PE/);
+  fs.writeFileSync(cppRuntime, pe(64));
+  pass('JDK/Python/debugger C++ runtimes are required locally with the correct architecture');
 
   const raw = JSON.parse(originalManifest);
   fs.writeFileSync(cfgPath, JSON.stringify({ ...raw, pythonExe: '../x64dbg/python/python.exe' })); inventory(bundle);

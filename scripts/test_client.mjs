@@ -80,6 +80,18 @@ test('audit normalization uses actual nested journal fields and preserves offset
   assert.equal(ui.normalizeAudit({ result: { isError: true, value: 'failed' } }).isError, true);
 });
 
+test('audit normalization prefers executed backend evidence and preserves legacy Reverse history', () => {
+  const inferred = ui.normalizeAudit({ args: { target: 'a.exe' }, detail: { _ig5: { engine: 'ghidra' } } });
+  assert.equal(inferred.engine, 'ghidra', 'omitting engine must not relabel a Ghidra result as Reverse');
+  const inferredTarget = ui.normalizeAudit({ args: { action: 'define' }, detail: { _ig5: { target: 'a.exe', engine: 'ghidra' } } });
+  assert.equal(inferredTarget.target, 'a.exe'); assert.equal(inferredTarget.engine, 'ghidra');
+  assert.equal(ui.normalizeAudit({ args: { target: 'original.exe' }, detail: { _ig5: { target: 'executed.exe' } } }).target, 'executed.exe');
+  assert.equal(ui.normalizeAudit({ args: { target: 'original.exe' }, detail: { destination: { target: 'destination.exe' }, _ig5: { target: 'source.exe' } } }).target, 'destination.exe');
+  assert.equal(ui.normalizeAudit({ args: { engine: 'reverse' }, detail: { _ig5: { engine: 'ghidra' } } }).engine, 'ghidra');
+  assert.equal(ui.normalizeAudit({ args: { engine: 'reverse' }, detail: { destination: { engine: 'ghidra' }, _ig5: { engine: 'reverse' } } }).engine, 'ghidra');
+  assert.equal(ui.normalizeAudit({ args: { target: 'a.exe' } }).engine, 'reverse', 'unbound legacy history retains its original backend');
+});
+
 test('structure draft serializes target and C declaration without executing a write', () => {
   const declaration = 'struct Packet { char value[32]; };\n// "quoted"';
   const draft = ui.buildStructDraft('C:\\samples\\a.exe', declaration);
@@ -301,9 +313,27 @@ test('Ghidra IR selection requests explicit level and keeps source distinct', as
 });
 
 test('audit view includes only selected engine at the same target', async () => {
-  request = url => { assert.equal(new URL(url, 'http://test').searchParams.get('engine'), 'ghidra'); return Promise.resolve(response({ rows: [{ tool: 'ghidra-note', args: { target: 'a.exe', engine: 'ghidra' } }, { tool: 'ig5_sync', args: { target: 'a.exe' }, detail: { destination: { engine: 'ghidra' }, note: 'sync destination evidence' } }, { tool: 'reverse-note', args: { target: 'a.exe' } }], total: 1 })); };
-  const h = harness(ui.PatchesView, { target: 'a.exe', engine: 'ghidra' }); h.render(); await settle(); h.render();
-  assert.match(text(h.tree), /ghidra-note/); assert.match(text(h.tree), /sync destination evidence/); assert.ok(!text(h.tree).includes('reverse-note')); h.unmount();
+  const rows = [
+    { tool: 'ghidra-note', args: { target: 'a.exe', engine: 'ghidra' } },
+    { tool: 'ghidra-inferred-note', args: { target: 'a.exe' }, detail: { _ig5: { engine: 'ghidra' } } },
+    { tool: 'ig5_sync', args: { target: 'a.exe', engine: 'reverse' }, detail: { destination: { target: 'a.exe', engine: 'ghidra' }, _ig5: { target: 'other.exe', engine: 'reverse' }, note: 'sync destination evidence' } },
+    { tool: 'ig5_struct', args: { action: 'define' }, detail: { _ig5: { target: 'a.exe', engine: 'ghidra' }, note: 'inferred struct target' } },
+    { tool: 'foreign-executed-note', args: { target: 'a.exe' }, detail: { _ig5: { target: 'other.exe', engine: 'ghidra' } } },
+    { tool: 'reverse-note', args: { target: 'a.exe' } },
+  ];
+  for (const engine of ['ghidra', 'reverse']) {
+    request = url => { assert.equal(new URL(url, 'http://test').searchParams.get('engine'), engine); return Promise.resolve(response({ rows, total: rows.length })); };
+    const h = harness(ui.PatchesView, { target: 'a.exe', engine }); h.render(); await settle(); h.render();
+    if (engine === 'ghidra') {
+      assert.match(text(h.tree), /ghidra-note/); assert.match(text(h.tree), /ghidra-inferred-note/); assert.match(text(h.tree), /sync destination evidence/);
+      assert.match(text(h.tree), /inferred struct target/); assert.ok(!text(h.tree).includes('reverse-note'));
+    } else {
+      assert.match(text(h.tree), /reverse-note/); assert.ok(!text(h.tree).includes('ghidra-note'));
+      assert.ok(!text(h.tree).includes('ghidra-inferred-note')); assert.ok(!text(h.tree).includes('sync destination evidence'));
+      assert.ok(!text(h.tree).includes('inferred struct target'));
+    }
+    assert.ok(!text(h.tree).includes('foreign-executed-note')); h.unmount();
+  }
 });
 
 test('overview preserves partial analysis status instead of presenting completion', () => {

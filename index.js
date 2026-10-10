@@ -310,7 +310,7 @@ class WorkerManager {
   }
 
   evidence(session) {
-    return { engine: session.engine, projectId: session.projectId, artifactId: session.artifactId,
+    return { target: session.target, engine: session.engine, projectId: session.projectId, artifactId: session.artifactId,
       sha256: session.sha256, dbRevision: session.dbRevision, attachmentId: session.attachmentId };
   }
 
@@ -893,8 +893,12 @@ function installDataRoute(ctx, mgr, cfg) {
             const scope = mgr.sessionKey(session.target, session.engine);
             readAuditPage(auditFile, { offset: params.offset || 0, limit: params.limit || 30,
               cursor: url.searchParams.get('cursor') || undefined, scope,
-              predicate: item => item?.args?.target && mgr.sessionKey(item.args.target, session.engine) === scope
-                && (!session.engine || (item.detail?.destination?.engine || item.args.engine || 'reverse') === session.engine) })
+              predicate: item => {
+                const auditTarget = item?.detail?.destination?.target || item?.detail?._ig5?.target || item?.args?.target;
+                const auditEngine = item?.detail?.destination?.engine || item?.detail?._ig5?.engine || item?.args?.engine || 'reverse';
+                return auditTarget && mgr.sessionKey(auditTarget, session.engine) === scope
+                  && (!session.engine || auditEngine === session.engine);
+              } })
               .then(data => send(200, { target: session.target, type, data }), err => send(200, { error: publicEngineError(err, cfg) }));
             return;
           }

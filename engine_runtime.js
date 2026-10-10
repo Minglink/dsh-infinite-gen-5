@@ -132,7 +132,7 @@ export function readRuntime(root, engine, override, options = {}) {
   const python = component(resolved.pythonExe, 'pythonExe', windows ? 'file' : 'executable', 64);
   const pythonHome = python && (windows ? path.dirname(python) : path.dirname(path.dirname(python)));
   if (windows) {
-    for (const name of ['python312.dll', 'vcruntime140.dll']) under(pythonHome, name, 'Python ' + name, 'file', 64);
+    for (const name of ['python312.dll', 'vcruntime140.dll', 'vcruntime140_1.dll']) under(pythonHome, name, 'Python ' + name, 'file', 64);
     under(pythonHome, 'python312.zip', 'Python standard library');
     const pth = under(pythonHome, 'python312._pth', 'Python isolated search path');
     if (pth) {
@@ -172,6 +172,7 @@ export function readRuntime(root, engine, override, options = {}) {
     }
     under(java, windows ? 'bin/java.exe' : 'bin/java', 'JDK java', windows ? 'file' : 'executable', 64);
     under(java, windows ? 'bin/server/jvm.dll' : 'lib/server/libjvm.so', 'JDK JVM', 'file', 64);
+    if (windows) for (const name of ['vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll']) under(java, 'bin/' + name, 'JDK C++ runtime ' + name, 'file', 64);
     if (!windows) { under(java, 'lib/jli/libjli.so', 'JDK launcher library', 'file', 64); under(java, 'lib/modules', 'JDK runtime modules'); }
     under(java, 'jmods/java.base.jmod', 'JDK base module');
     under(java, 'legal', 'JDK licenses', 'directory');
@@ -208,6 +209,7 @@ export function readRuntime(root, engine, override, options = {}) {
       under(directory, `plugins/ig5-bridge.dp${bits}`, `x${bits} native bridge`, 'file', bits);
       for (const name of [`x${bits}dbg.dll`, `x${bits}bridge.dll`, `x${bits}_dbg.dll`, `x${bits}_bridge.dll`,
         'jansson.dll', 'TitanEngine.dll', 'Scylla.dll', 'Qt5Core.dll', 'Qt5Gui.dll', 'Qt5Widgets.dll', 'msvcp140.dll', 'vcruntime140.dll']) under(directory, name, `x${bits} ${name}`, 'file', bits);
+      if (bits === 64) under(directory, 'vcruntime140_1.dll', 'x64 vcruntime140_1.dll', 'file', 64);
     }
     under(base, 'licenses', 'x64dbg licenses', 'directory');
   }

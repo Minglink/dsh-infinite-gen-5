@@ -5,6 +5,8 @@ import { EventEmitter } from 'node:events';
 import { spawn as nativeSpawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import { readAuditPage } from '../source/audit_history.js';
 import vm from 'node:vm';
 import { defineAdvancedTools } from '../advanced_tools.js';
 import { defineIntegrationTools } from '../integration_tools.js';
@@ -138,6 +140,61 @@ assert.equal(route.calls.at(-1).method, 'funcs', 'default route remains funcs');
 const beforeApprovals = route.calls.length;
 assert.deepEqual((await route.request('?type=approvals')).body.data, { rows: [], total: 0, offset: 0, limit: 30 });
 assert.equal(route.calls.length, beforeApprovals, 'approvals are read locally');
+
+// The post hook keeps original AI arguments; omitted engine must be attributed
+// using the executed result, independently of the current configured default.
+const auditScratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ig5-data-audit-'));
+try {
+  const auditCfg = { ...cfg, artifactDir: auditScratch, defaultEngine: 'ghidra' };
+  const gateStart = source.indexOf('const IG5_WRITE_TOOLS');
+  const gateEnd = source.indexOf('// ── M1-C', gateStart);
+  const installApprovalGate = vm.runInNewContext(source.slice(gateStart, gateEnd) + '\ninstallApprovalGate;', { fs, path, diagAppend() {} });
+  const events = new Map();
+  installApprovalGate({ on(name, callback) { events.set(name, callback); } }, auditCfg);
+  const auditTarget = path.join(auditScratch, 'sample.exe');
+  const records = [
+    { name: 'ig5_comment', args: { target: auditTarget }, detail: { note: 'ghidra-omitted-engine', _ig5: { engine: 'ghidra' } } },
+    { name: 'ig5_comment', args: { target: auditTarget, engine: 'reverse' }, detail: { note: 'reverse-explicit-engine', _ig5: { engine: 'reverse' } } },
+    { name: 'ig5_sync', args: { target: auditTarget, engine: 'reverse' }, detail: { note: 'sync-ghidra-destination', destination: { target: auditTarget, engine: 'ghidra' }, _ig5: { target: path.join(auditScratch, 'other.exe'), engine: 'reverse' } } },
+    { name: 'ig5_comment', args: { target: auditTarget }, detail: { note: 'legacy-reverse-engine' } },
+    { name: 'ig5_struct', args: { action: 'define', decl: 'struct Inferred { int value; };' }, detail: { note: 'ghidra-omitted-target-and-engine', _ig5: { target: auditTarget, engine: 'ghidra' } } },
+    { name: 'ig5_comment', args: { target: auditTarget }, detail: { note: 'foreign-executed-target', _ig5: { target: path.join(auditScratch, 'other.exe'), engine: 'ghidra' } } },
+  ];
+  for (const record of records) await events.get('tools/post-execute')(
+    { name: record.name, arguments: record.args }, { isError: false, value: record.detail }, async () => ({ kind: 'accept' }));
+  const stored = fs.readFileSync(path.join(auditScratch, 'approvals.jsonl'), 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(stored[0].args.engine, undefined, 'post hook must preserve omitted AI input');
+  assert.equal(stored[0].detail._ig5.engine, 'ghidra', 'execution evidence binds the default-selected backend');
+  assert.equal(stored[4].args.target, undefined, 'post hook must preserve omitted struct target');
+  assert.equal(stored[4].args.engine, undefined, 'post hook must preserve omitted struct engine');
+  assert.equal(stored[4].detail._ig5.target, auditTarget, 'execution evidence binds the inferred target');
+  let auditHandler, auditWorkerCalls = 0;
+  const sessionKey = (value, engine = 'ghidra') => path.resolve(value).toLowerCase() + '::' + engine;
+  const auditSessions = ['ghidra', 'reverse'].map(engine => ({ target: auditTarget, engine, alive: true }));
+  const auditManager = {
+    sessionKey, alive: session => session?.alive === true,
+    sessions: new Map(auditSessions.map(session => [sessionKey(session.target, session.engine), session])),
+    rpc() { auditWorkerCalls++; throw new Error('audit view must not enter any worker'); },
+  };
+  const auditRoute = vm.runInNewContext(source.slice(start, end) + '\ninstallDataRoute;', { URL, path, fs, readAuditPage, publicEngineError, diagAppend() {} });
+  auditRoute({ inject(_names, callback) { callback({ webServer: { register(spec) { auditHandler = spec.handler; } } }); } }, auditManager, auditCfg);
+  async function auditRequest(engine) {
+    return new Promise((resolve, reject) => {
+      try {
+        auditHandler({ method: 'GET', url: '/ig5-data?' + new URLSearchParams({ type: 'approvals', target: auditTarget, engine }) }, {
+          writeHead(status) { assert.equal(status, 200); }, end(body) { resolve(JSON.parse(body)); },
+        });
+      } catch (error) { reject(error); }
+    });
+  }
+  const ghidraHistory = (await auditRequest('ghidra')).data;
+  const reverseHistory = (await auditRequest('reverse')).data;
+  assert.deepEqual(ghidraHistory.rows.map(row => row.detail.note), ['ghidra-omitted-target-and-engine', 'sync-ghidra-destination', 'ghidra-omitted-engine']);
+  assert.deepEqual(reverseHistory.rows.map(row => row.detail.note), ['legacy-reverse-engine', 'reverse-explicit-engine']);
+  assert.equal(ghidraHistory.total, 3); assert.equal(reverseHistory.total, 2);
+  assert.equal(auditWorkerCalls, 0, 'history filtering stays in the local read-only route');
+} finally { fs.rmSync(auditScratch, { recursive: true, force: true }); }
+
 
 const inactive = makeRoute(false);
 assert.equal((await inactive.request('?type=funcs')).body.error, 'no open target');
@@ -292,6 +349,10 @@ const workerContext = {
   },
 };
 const WorkerManager = vm.runInNewContext(source.slice(workerStart, workerEnd) + '\nWorkerManager;', workerContext);
+const producerManager = new WorkerManager(cfg);
+const producerEvidence = producerManager.evidence({ target: 'C:\\fixtures\\inferred.exe', engine: 'ghidra', artifactId: 'sample-identity' });
+assert.equal(producerEvidence.target, 'C:\\fixtures\\inferred.exe', 'executed evidence must retain the inferred target independent of AI arguments');
+assert.equal(producerEvidence.engine, 'ghidra');
 const leaseManager = new WorkerManager(cfg), leaseChild = new EventEmitter();
 leaseChild.exitCode = null; leaseChild.signalCode = null; let killRequests = 0, releasedAttachments = 0;
 leaseChild.kill = () => { killRequests++; };
@@ -369,4 +430,4 @@ const missingRuntime = new WorkerManager({ ...cfg, pythonExe: path.join(process.
 await assert.rejects(missingRuntime.open('C:\\fixtures\\sample.exe'), /ENOENT/);
 assert.equal(missingRuntime.sessions.size, 0, 'early spawn failure must be caught rather than become an uncaught error');
 
-console.log('IG5 data route and metadata: approval isolation, user_only, inactive sessions, and success/failure Reverse redaction passed.');
+console.log('IG5 data route and metadata: approval isolation, executed engine/target audit attribution, user_only, inactive sessions, and success/failure Reverse redaction passed.');
