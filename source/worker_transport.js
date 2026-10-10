@@ -1,6 +1,15 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
-import { StringDecoder } from 'node:string_decoder';
+import { TextDecoder } from 'node:util';
+import { terminateTree } from '../engine_runtime.js';
+
+export const WORKER_RECEIVE_LIMITS = Object.freeze({ lineBytes: 16 * 1024 * 1024, bufferBytes: 32 * 1024 * 1024, backlogBytes: 8 * 1024 * 1024, backlogMessages: 256 });
+function receiveLimits(value = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !Object.hasOwn(WORKER_RECEIVE_LIMITS, key))) throw new Error('Invalid worker receive limits');
+  const result = { ...WORKER_RECEIVE_LIMITS, ...value };
+  for (const [key, maximum] of Object.entries(WORKER_RECEIVE_LIMITS)) if (!Number.isSafeInteger(result[key]) || result[key] < 1 || result[key] > maximum) throw new Error('Invalid bounded worker receive limit');
+  return result;
+}
 
 /** Engine-specific paths/environment; the JSONL transport below is engine neutral. */
 export function workerLaunch(cfg, engine, pluginRoot) {
@@ -45,23 +54,35 @@ export function spawnWorker(cfg, engine, pluginRoot, { spawnProcess = spawn, for
 
 /** JSONL framing and subprocess/request lifetime. Queues, approvals and revisions stay in the host. */
 export class WorkerClient {
-  constructor(proc, { formatError = error => error, timers = { setTimeout, clearTimeout } } = {}) {
+  constructor(proc, { formatError = error => error, timers = { setTimeout, clearTimeout }, limits, terminate = child => { if (typeof child.kill === 'function') terminateTree(child); } } = {}) {
     this.proc = proc;
     this.formatError = formatError;
     this.timers = timers;
-    this.decoder = new StringDecoder('utf8');
-    this.buffer = '';
+    this.limits = receiveLimits(limits);
+    this.terminate = terminate;
+    this.decoder = new TextDecoder('utf-8', { fatal: true });
+    this.buffer = Buffer.alloc(0);
     this.stderrTail = '';
     this.backlog = [];
+    this.backlogBytes = 0;
     this.waiters = new Set();
     this.ready = false;
     this.failure = null;
     this.disposed = false;
+    this.exitNotified = false;
+    this.transportTerminated = false;
     this.dataListener = data => {
-      this.buffer += Buffer.isBuffer(data) ? this.decoder.write(data) : String(data);
+      if (this.failure || this.disposed) return;
+      const bytes = Buffer.isBuffer(data) ? data : Buffer.from(String(data), 'utf8');
+      if (bytes.length > this.limits.bufferBytes - this.buffer.length) { this.protocolFailure('bufferBytes'); return; }
+      this.buffer = this.buffer.length ? Buffer.concat([this.buffer, bytes]) : bytes;
       let end;
-      while ((end = this.buffer.indexOf('\n')) >= 0) {
-        const line = this.buffer.slice(0, end).trim(); this.buffer = this.buffer.slice(end + 1);
+      while ((end = this.buffer.indexOf(10)) >= 0) {
+        if (end > this.limits.lineBytes) { this.protocolFailure('lineBytes'); return; }
+        const byteLength = end + 1, raw = this.buffer.subarray(0, end); this.buffer = this.buffer.subarray(end + 1);
+        let line;
+        try { line = this.decoder.decode(raw).trim(); }
+        catch { this.protocolFailure('invalidUtf8'); return; }
         if (!line) continue;
         let message; try { message = JSON.parse(line); } catch { continue; }
         if (!message || typeof message !== 'object' || Array.isArray(message)) continue;
@@ -71,8 +92,14 @@ export class WorkerClient {
           this.waiters.clear();
         }
         if (this.onMessage) this.deliver(message);
-        else this.backlog.push(message);
+        else {
+          if (this.backlog.length >= this.limits.backlogMessages) { this.protocolFailure('backlogMessages'); return; }
+          if (byteLength > this.limits.backlogBytes - this.backlogBytes) { this.protocolFailure('backlogBytes'); return; }
+          this.backlog.push(message); this.backlogBytes += byteLength;
+        }
+        if (this.failure || this.disposed) return;
       }
+      if (this.buffer.length > this.limits.lineBytes) this.protocolFailure('lineBytes');
     };
     this.stderrListener = data => {
       this.stderrTail = (this.stderrTail + String(data)).slice(-4000);
@@ -93,8 +120,9 @@ export class WorkerClient {
     if (formatError) this.formatError = formatError;
     if (onMessage !== undefined) this.onMessage = onMessage;
     if (onExit !== undefined) this.onExit = onExit;
-    for (const message of this.backlog.splice(0)) this.deliver(message);
-    if (this.failure) this.onExit?.(this.failure);
+    const backlog = this.backlog.splice(0); this.backlogBytes = 0;
+    for (const message of backlog) { if (this.failure || this.disposed) break; this.deliver(message); }
+    if (this.failure) this.notifyFailure();
     return this;
   }
 
@@ -118,13 +146,44 @@ export class WorkerClient {
 
   fail(value) {
     if (this.failure || this.disposed) return;
-    this.failure = this.formatError(value);
+    try { this.failure = this.formatError(value); }
+    catch (error) { this.failure = Object.assign(new Error('Worker failure formatter failed'), { code: value?.code || 'WORKER_FAILED', cause: error }); }
+    if (!this.failure) this.failure = value instanceof Error ? value : new Error('Worker failed');
     this.ready = false;
+    this.buffer = Buffer.alloc(0); this.backlog.length = 0; this.backlogBytes = 0;
     if (this.session) this.session.ready = false;
     for (const waiter of this.waiters) { this.timers.clearTimeout(waiter.timer); waiter.reject(this.failure); }
     this.waiters.clear();
     this.rejectPending(this.failure);
-    this.onExit?.(this.failure);
+    if (value?.code === 'WORKER_PROTOCOL_LIMIT') this.terminateOwned();
+    this.notifyFailure();
+  }
+
+  notifyFailure() {
+    if (this.exitNotified || typeof this.onExit !== 'function') return;
+    this.exitNotified = true;
+    try { this.onExit(this.failure); }
+    catch (error) {
+      // Preserve cleanup failure as evidence without throwing from the stdout event pump.
+      if (this.failure && typeof this.failure === 'object') this.failure.cleanupError = error;
+      this.terminateOwned();
+    }
+  }
+
+  terminateOwned() {
+    if (this.transportTerminated) return;
+    this.transportTerminated = true;
+    this.proc.__ig5TransportTerminated = true;
+    try { this.terminate(this.proc); }
+    catch (error) { if (this.failure && typeof this.failure === 'object') this.failure.cleanupError = error; }
+  }
+
+  protocolFailure(reason) {
+    if (this.failure || this.disposed) return;
+    const failure = Object.assign(new Error(`Worker protocol receive limit exceeded (${reason}); its worker was recycled`), { code: 'WORKER_PROTOCOL_LIMIT', limit: reason });
+    // Terminate only the child created for this transport. Later onExit notification still
+    // performs host bookkeeping; its caller can skip duplicate tree termination via the flag.
+    this.fail(failure);
   }
 
   rejectPending(error) {
@@ -175,6 +234,7 @@ export class WorkerClient {
   dispose(error = new Error('worker 已被关闭')) {
     if (this.disposed) return;
     this.disposed = true; this.ready = false;
+    this.buffer = Buffer.alloc(0); this.backlogBytes = 0;
     for (const waiter of this.waiters) { this.timers.clearTimeout(waiter.timer); waiter.reject(error); }
     this.waiters.clear(); this.rejectPending(error);
     this.proc.stdout?.removeListener('data', this.dataListener);

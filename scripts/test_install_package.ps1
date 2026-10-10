@@ -69,13 +69,16 @@ try {
     Put-Json (Join-Path $fixture 'package.json') @{name='dsh-infinite-gen-5';version='1.0.0'}
     Put (Join-Path $fixture 'index.js') 'export default {};'
     Put (Join-Path $fixture 'client.js') 'export default {};'
-    foreach ($file in @('engine_runtime.js','advanced_tools.js','integration_tools.js','workflow.js','semantic_diff.js','semantic_diff_async.js','semantic_diff_worker.js',
-        'source/project_store.js','source/address_ref.js','source/host_platform.js','source/worker_transport.js','worker/ig5_worker.py','worker/advanced_analysis.py','worker/execution_analysis.py','worker/memory_image.py','worker/cpu_emulator.py','worker/vendor/NOTICE.txt',
+    foreach ($file in @('engine_runtime.js','advanced_tools.js','analysis_tools.js','integration_tools.js','workflow.js','semantic_diff.js','semantic_diff_async.js','semantic_diff_worker.js',
+        'source/analysis_artifacts.js','source/analysis_jobs.js','source/analysis_worker.js','source/crypto_analysis.js','source/crypto_recovery.js','source/protocol_analysis.js','source/protocol_inference.js','worker/scan_analysis.py',
+        'source/project_store.js','source/attachment_lease.js','source/audit_history.js','source/patch_export.js','source/history_index.js','source/address_ref.js','source/host_platform.js','source/worker_transport.js','worker/ig5_worker.py','worker/advanced_analysis.py','worker/execution_analysis.py','worker/memory_image.py','worker/cpu_emulator.py','worker/vendor/NOTICE.txt',
         'adapters/ghidra/worker.py','adapters/ghidra/pcode_view.py','adapters/ghidra/jpype-patch/JPypeContext.java','adapters/ghidra/jpype-patch/upstream/org.jpype.jar',
         'adapters/ghidra/jpype-patch/LICENSE','adapters/ghidra/jpype-patch/UPSTREAM-NOTICE','adapters/ghidra/jpype-patch/NOTICE.txt','adapters/ghidra/jpype-patch/unicode-bootstrap.patch',
-        'scripts/patch_ghidra_jpype.ps1','adapters/x64dbg/adapter.py','adapters/x64dbg/native/ig5-bridge.dp32','adapters/x64dbg/native/ig5-bridge.dp64','adapters/x64dbg/native/sha256.json',
+        'scripts/patch_ghidra_jpype.ps1','scripts/patch_ghidra_project_paths.ps1','adapters/ghidra/local-project-path/build_patch.py',
+        'adapters/ghidra/local-project-path/local-project-path.patch','adapters/ghidra/local-project-path/NOTICE.txt','adapters/ghidra/local-project-path/README.md',
+        'adapters/x64dbg/adapter.py','adapters/x64dbg/native/ig5-bridge.dp32','adapters/x64dbg/native/ig5-bridge.dp64','adapters/x64dbg/native/sha256.json',
         'cordis.patch.yml','README.md','HARNESS_PLUGIN.md','LICENSE','THIRD_PARTY_NOTICES.txt')) { Put (Join-Path $fixture $file) }
-    foreach ($skill in @('ig5-triage','ig5-deep-dive','ig5-patch-and-sign','ig5-diff','ig5-debug-live')) { Put (Join-Path $fixture "skills/$skill/SKILL.md") }
+    foreach ($skill in @('ig5-triage','ig5-deep-dive','ig5-patch-and-sign','ig5-diff','ig5-debug-live','ig5-crypto','ig5-protocol')) { Put (Join-Path $fixture "skills/$skill/SKILL.md") }
     Put (Join-Path $fixture 'third_party\sources\upstream\LICENSE') 'upstream license/source asset'
     Put (Join-Path $fixture 'third_party\sources\upstream\code.cpp') 'source audit asset'
     Put (Join-Path $fixture 'worker\vendor\unicorn\lib\unicorn.dll') 'vendor fixture binary'
@@ -128,7 +131,7 @@ try {
     Put (Join-Path $installed 'keep.txt')
     $before = [IO.File]::ReadAllText($profilePath)
     $backups = @(Get-ChildItem -LiteralPath (Split-Path $profilePath) -Filter '*.bak-*').Count
-    foreach ($critical in @('index.js','adapters/ghidra/worker.py')) {
+    foreach ($critical in @('index.js','adapters/ghidra/worker.py','source/attachment_lease.js','source/audit_history.js','source/patch_export.js','source/history_index.js')) {
         $criticalPath = Join-Path $fixture $critical
         $criticalText = Read-IG5Text $criticalPath
         [IO.File]::Delete((ConvertTo-IG5IOPath $criticalPath))
@@ -136,7 +139,7 @@ try {
         Check-NoMutation $dsh $before $backups
         Put $criticalPath $criticalText
     }
-    Pass 'missing host or adapter fails plugin preflight before changing the existing installation'
+    Pass 'missing host, adapter, lease or history/export modules fail preflight before changing the existing installation'
     Check ((Get-IG5Hash $deepPath) -eq (Get-IG5Hash (Join-Path $installed $deepRelative))) 'long source path was changed or dropped by installer'
     Pass 'source paths beyond 300 characters enumerate, hash and install without truncation'
     $bridge = Join-Path $runtime 'x64dbg\snapshot\release\x32\plugins\ig5-bridge.dp32'

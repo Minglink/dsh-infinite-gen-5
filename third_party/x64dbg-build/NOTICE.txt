@@ -1,0 +1,23 @@
+IG5 maintained x64dbg source build, 2026-10-09
+
+Upstream x64dbg: https://github.com/x64dbg/x64dbg
+Commit: 9c8ca1cae0b6d56cc44f31fddcb10e3b02ffbb87
+Its original license text is preserved verbatim in x64dbg-LICENSE.txt.
+0001-headless-only.patch modifies that upstream generated CMake build file.
+0003-one-shot-pause-breakpoint.patch modifies only the temporary pause breakpoint's
+lifecycle in src/dbg/commands/cmd-debug-control.cpp: UE_SINGLESHOOT prevents
+software-breakpoint restoration from consuming a subsequent user single-step.
+This x64dbg change retains the upstream x64dbg licensing context.
+
+Upstream TitanEngine: https://github.com/x64dbg/TitanEngine
+Commit: ec7a8b9352c47eb0f8cc63f033d36f705d658743
+Its original LGPL license text is preserved verbatim in TitanEngine-LICENSE.txt.
+0002-hardware-callback-replacement.patch modifies its debugger callback handling.
+The modified source is reproducible by applying the retained patch to the
+unchanged source archive in third_party/sources/x64dbg-runtime.
+
+The patch files retain their upstream licensing context. The IG5 project-level
+noncommercial license does not replace or restrict these third-party licenses.
+The four exact gitlinks and remaining prebuilt dependency libraries are listed
+in build-lock.json. Source presence and headless builds are not claims that the
+upstream GUI or every dependency was rebuilt or every function exposed by IG5.

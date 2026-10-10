@@ -1,7 +1,8 @@
 param(
-  [string]$RuntimeRoot = (Join-Path $PSScriptRoot '..\runtimes\ghidra')
+  [string]$RuntimeRoot
 )
 $ErrorActionPreference = 'Stop'
+if (-not $PSBoundParameters.ContainsKey('RuntimeRoot')) { $RuntimeRoot = Join-Path $PSScriptRoot '..\runtimes\ghidra' }
 $RuntimeRoot = [IO.Path]::GetFullPath($RuntimeRoot)
 $cache = Join-Path $RuntimeRoot 'downloads'
 New-Item -ItemType Directory -Path $cache -Force | Out-Null
@@ -78,6 +79,8 @@ $manifest = @{
 $manifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $RuntimeRoot 'runtime.json') -Encoding utf8
 & (Join-Path $PSScriptRoot 'patch_ghidra_jpype.ps1') -RuntimeRoot $RuntimeRoot
 if (-not $?) { throw 'JPype Unicode bootstrap patch failed' }
+& (Join-Path $PSScriptRoot 'patch_ghidra_project_paths.ps1') -RuntimeRoot $RuntimeRoot
+if (-not $?) { throw 'Ghidra local project path patch failed' }
 & (Join-Path $pythonHome 'python.exe') -I -B -c 'import sys,pyghidra,jpype; print(sys.version); print("pyghidra",pyghidra.__version__,"jpype",jpype.__version__)'
 if ($LASTEXITCODE -ne 0) { throw 'Independent Python dependency check failed' }
 & (Join-Path $javaHome 'bin\java.exe') -version

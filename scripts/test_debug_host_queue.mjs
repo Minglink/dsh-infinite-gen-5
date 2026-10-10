@@ -19,6 +19,7 @@ const publicEngineError = vm.runInNewContext(source.slice(errorStart, errorEnd) 
 
 class MemoryProjects {
   constructor() { this.closed = []; this.counter = 0; }
+  recoverAttachments() { return { recovered: [], retained: [] }; }
   listAttachments() { return []; }
   open() { return { projectId: 'project-fixture', artifactId: 'artifact-fixture', sha256: 'fixture-hash' }; }
   attachEngine() { return { attachmentId: 'attachment-' + ++this.counter, dbRevision: 0 }; }
@@ -152,4 +153,15 @@ function harness(owner = 'agent-one') {
   console.log('PASS priority control: suspend bypasses pending cont; an aborted normal write never executes');
 }
 
-console.log('=== DEBUG HOST QUEUE REGRESSIONS PASSED (5 scenarios, no native process) ===');
+{
+  const h = harness(); h.debug.runtime.previousRegisters = { rax: 'stale' };
+  h.mgr.rpc = async () => ({ ...paused(3), ok: false, event: null, eventName: 'history-gap',
+    historyGap: { droppedCount: 10 }, cacheInvalidated: true, registers: { rax: 'fresh' } });
+  const result = await h.run(h.reverse, { op: 'regs' });
+  assert.equal(result.ok, false); assert.equal(h.debug.runtime.previousRegisters, undefined);
+  assert.equal(h.debug.runtime.registers.rax, 'fresh'); assert.equal(h.debug.runtime.stopSeq, 3);
+  assert.equal(terminated.includes(h.debug.proc), false);
+  console.log('PASS history gap: stale context is removed, fresh stop evidence retained, owner process preserved');
+}
+
+console.log('=== DEBUG HOST QUEUE REGRESSIONS PASSED (6 scenarios, no native process) ===');

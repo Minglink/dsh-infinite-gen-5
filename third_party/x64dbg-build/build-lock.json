@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/x64dbg/x64dbg",
+  "commit": "9c8ca1cae0b6d56cc44f31fddcb10e3b02ffbb87",
+  "gitlinks": [
+    {
+      "directory": "x64dbg-runtime/deps",
+      "repository": "https://github.com/x64dbg/deps",
+      "commit": "4a830e113bdb56efe828eed132b1511fb8259c72",
+      "archiveURL": "https://codeload.github.com/x64dbg/deps/zip/4a830e113bdb56efe828eed132b1511fb8259c72",
+      "archiveSHA256": "9433cd0f39457e5f038cd79c2c6b2a6f0e7b16dcbdfda0da9c577cec8f941e84",
+      "gitTreeProof": "provenance/x64dbg-deps-4a830e113bdb56efe828eed132b1511fb8259c72.tree.json",
+      "treeTruncated": false,
+      "gitBlobContentsVerified": true,
+      "verifiedGitBlobs": 30,
+      "materializedSymlinks": [],
+      "submodules": [],
+      "allDeclaredGitlinksPopulated": true
+    },
+    {
+      "directory": "x64dbg-runtime/src/dbg/btparser",
+      "repository": "https://github.com/x64dbg/btparser",
+      "commit": "6daea14014e4c07b70a7d4ee14eca997a05576b3",
+      "archiveURL": "https://codeload.github.com/x64dbg/btparser/zip/6daea14014e4c07b70a7d4ee14eca997a05576b3",
+      "archiveSHA256": "5901c06a8e51b89cb84d03f5c5ff47ee4e0cffca21f7e5a163998b4920b4832d",
+      "gitTreeProof": "provenance/x64dbg-btparser-6daea14014e4c07b70a7d4ee14eca997a05576b3.tree.json",
+      "treeTruncated": false,
+      "gitBlobContentsVerified": true,
+      "verifiedGitBlobs": 199,
+      "materializedSymlinks": [],
+      "submodules": [],
+      "allDeclaredGitlinksPopulated": true
+    },
+    {
+      "directory": "x64dbg-runtime/src/third_party/GleeBug",
+      "repository": "https://github.com/x64dbg/GleeBug",
+      "commit": "1ee94ba319d7c03f518dfbdc77ec22e8ca1087a5",
+      "archiveURL": "https://codeload.github.com/x64dbg/GleeBug/zip/1ee94ba319d7c03f518dfbdc77ec22e8ca1087a5",
+      "archiveSHA256": "4601a687ac5fcc1c1e836349210c34faff74781a55a598f70577738862e0a29a",
+      "gitTreeProof": "provenance/x64dbg-GleeBug-1ee94ba319d7c03f518dfbdc77ec22e8ca1087a5.tree.json",
+      "treeTruncated": false,
+      "gitBlobContentsVerified": true,
+      "verifiedGitBlobs": 97,
+      "materializedSymlinks": [],
+      "submodules": [],
+      "allDeclaredGitlinksPopulated": true
+    },
+    {
+      "directory": "x64dbg-runtime/src/third_party/TitanEngine",
+      "repository": "https://github.com/x64dbg/TitanEngine",
+      "commit": "ec7a8b9352c47eb0f8cc63f033d36f705d658743",
+      "archiveURL": "https://codeload.github.com/x64dbg/TitanEngine/zip/ec7a8b9352c47eb0f8cc63f033d36f705d658743",
+      "archiveSHA256": "f82d4ec3a7af444715f0076a2498d57222509faeb9243ac7b2e43d013a944ce8",
+      "gitTreeProof": "provenance/x64dbg-TitanEngine-ec7a8b9352c47eb0f8cc63f033d36f705d658743.tree.json",
+      "treeTruncated": false,
+      "gitBlobContentsVerified": true,
+      "verifiedGitBlobs": 163,
+      "materializedSymlinks": [],
+      "submodules": [],
+      "allDeclaredGitlinksPopulated": true
+    }
+  ],
+  "sourceInventory": "../sources/provenance/x64dbg-runtime.files.json",
+  "upstreamCMakeSHA256": "a69c8aa2acfda13a7fb2f976505c41cdece3d5eb26934a488f7e75b93366cead",
+  "patchedCMakeSHA256": "af320f9a0bd4403770b30ca3f26209e52db0cd99d334616f191d3ffca854930c",
+  "patches": [
+    "0001-headless-only.patch",
+    "0002-hardware-callback-replacement.patch",
+    "0003-one-shot-pause-breakpoint.patch"
+  ],
+  "prebuiltLinkedDependencies": [
+    "dbghelp",
+    "DeviceNameResolver",
+    "jansson",
+    "lz4",
+    "ntdll import libraries",
+    "XEDParse",
+    "LLVMDemangle"
+  ],
+  "note": "Core/headless/bridge/TitanEngine compiled from fixed source. Listed dependency libraries remain upstream prebuilt pinned bytes; no claim of entire GUI or all dependency source rebuilding.",
+  "modifiedFiles": [
+    {
+      "path": "CMakeLists.txt",
+      "upstreamSHA256": "a69c8aa2acfda13a7fb2f976505c41cdece3d5eb26934a488f7e75b93366cead",
+      "patchedSHA256": "af320f9a0bd4403770b30ca3f26209e52db0cd99d334616f191d3ffca854930c",
+      "patchedBytes": 15986,
+      "patch": "0001-headless-only.patch"
+    },
+    {
+      "path": "src/third_party/TitanEngine/TitanEngine/TitanEngine.Debugger.DebugLoop.cpp",
+      "upstreamSHA256": "7259dbe598ee47c427acbc1febd6ece02a17058104fdeb69d7526a2a820bdc4e",
+      "patchedSHA256": "7decd430eb3f1f1dc0a1ad8e3e51b64591bf4b7b2351a1c958738f203079437f",
+      "patchedBytes": 72120,
+      "patch": "0002-hardware-callback-replacement.patch"
+    },
+    {
+      "path": "src/dbg/commands/cmd-debug-control.cpp",
+      "upstreamSHA256": "1bee0d25d15c146879d7bb8c413ec9808294dd4d10b48b0950d3dcd48298f3d0",
+      "patchedSHA256": "c0084d6cada5f9eb123a8a205970411eae8917d617e3609c69e818ba99ebccdd",
+      "patchedBytes": 20011,
+      "patch": "0003-one-shot-pause-breakpoint.patch"
+    }
+  ],
+  "maintenanceFixes": [
+    "hardware-callback replacement preserves new slot",
+    "asynchronous pause uses a native one-shot breakpoint; self-loop user step reaches its callback"
+  ]
+}

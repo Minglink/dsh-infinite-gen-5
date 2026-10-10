@@ -156,8 +156,8 @@ class NativeClient:
                 break
             time.sleep(0.025)
         hello = self.request("hello")
-        if hello.get("pid") != pid or hello.get("protocol") != 2:
-            raise RpcError("ETRANSPORT", "native bridge handshake mismatch; this adapter requires IG5 bridge protocol 2")
+        if hello.get("pid") != pid or hello.get("protocol") != 2 or hello.get("eventHistoryVersion") != 2:
+            raise RpcError("ETRANSPORT", "native bridge handshake mismatch; IG5 bridge protocol 2 with event history recovery is required")
 
     def close(self):
         if self.handle:
@@ -200,12 +200,15 @@ class NativeClient:
     def drain(self):
         result = self.request("events", after=self.event_sequence)
         if result.get("truncated"):
-            raise RpcError("ETRANSPORT", "native event history overflowed")
+            self.adapter.note_history_gap(result)
         for event in result["events"]:
             self.event_sequence = event["seq"]
-            evt = SimpleNamespace(event_type=event["type"], event_data=event["data"])
+            evt = SimpleNamespace(event_type=event["type"], event_data=event["data"],
+                                  native_seq=event["seq"], native_stop_seq=event.get("stopSeq"),
+                                  native_run_epoch=event.get("nativeRunEpoch"))
             for listener in self.listeners.get(event["type"], []):
                 listener(evt)
+        self.event_sequence = max(self.event_sequence, integer(result["eventSeq"]))
 
     def watch_debug_event(self, kind, callback):
         self.listeners.setdefault(str(kind), []).append(callback)
@@ -213,11 +216,13 @@ class NativeClient:
     def is_debugging(self):
         self.drain()
         state = self.request("state")
-        self.adapter.pid, self.adapter.tid = state["pid"], state["tid"]
+        self.adapter.sync_native_state(state)
         return state["debugging"]
 
     def is_running(self):
-        return self.request("state")["running"]
+        snapshot = self.request("state")
+        self.adapter.sync_native_state(snapshot)
+        return snapshot["running"]
 
     def get_debugger_pid(self):
         return self.request("hello")["pid"]
@@ -287,6 +292,11 @@ class Adapter:
         self.target = None
         self.run_id = None
         self.stop_seq = self.event_seq = 0
+        self.native_run_epoch = None
+        self.expected_native_run_epoch = None
+        self.history_gap = None
+        self.pending_history_gap = False
+        self.gap_serial = 0
         self.pid = self.tid = None
         self.events = collections.deque(maxlen=256)
         self.event_lock = threading.Lock()
@@ -357,13 +367,91 @@ class Adapter:
             if "ExceptionInformation" in data:
                 data["ExceptionInformation"] = [hex(v) if isinstance(v, int) else v for v in data["ExceptionInformation"]]
         with self.event_lock:
-            self.event_seq += 1
-            if typ == "EVENT_PAUSE_DEBUG":
+            self.event_seq = integer(evt.native_seq) if hasattr(evt, "native_seq") else self.event_seq + 1
+            if getattr(evt, "native_stop_seq", None) is not None:
+                self.stop_seq = integer(evt.native_stop_seq)
+            elif typ == "EVENT_PAUSE_DEBUG":
                 self.stop_seq += 1
             if typ == "EVENT_CREATE_PROCESS":
                 self.pid, self.tid = data.get("dwProcessId"), data.get("dwThreadId")
-            self.events.append({"seq": self.event_seq, "eventName": EVENT_NAMES.get(typ, typ.lower().replace("event_", "").replace("_", "-")),
-                                "type": typ, "data": data, "stopSeq": self.stop_seq, "runId": self.run_id})
+            event = {"seq": self.event_seq, "eventName": EVENT_NAMES.get(typ, typ.lower().replace("event_", "").replace("_", "-")),
+                     "type": typ, "data": data, "stopSeq": self.stop_seq, "runId": self.run_id}
+            if getattr(evt, "native_run_epoch", None) is not None:
+                event["nativeRunEpoch"] = integer(evt.native_run_epoch)
+            self.events.append(event)
+
+    def note_history_gap(self, snapshot):
+        """History loss invalidates evidence, not the pipe or the owned process."""
+        with self.event_lock:
+            self.events.clear()
+            self.gap_serial += 1
+            self.history_gap = {"reason": "event-history-overflow", "dropped": dict(snapshot.get("dropped") or {}),
+                                "firstAvailableSeq": snapshot.get("firstAvailableSeq"),
+                                "nativeEventSeq": snapshot.get("eventSeq"), "serial": self.gap_serial}
+            self.pending_history_gap = True
+
+    def sync_native_state(self, snapshot):
+        """Resynchronize epochs from native counters, including lost pause callbacks."""
+        epoch = snapshot.get("nativeRunEpoch")
+        if epoch is not None:
+            epoch = integer(epoch)
+            approved_start = self.expected_native_run_epoch is not None and epoch == self.expected_native_run_epoch
+            if approved_start:
+                self.expected_native_run_epoch = None
+            if self.native_run_epoch is not None and epoch != self.native_run_epoch and not approved_start:
+                self.run_id = uuid.uuid4().hex
+                self.note_history_gap({"eventSeq": snapshot.get("eventSeq")})
+                self.history_gap["reason"] = "native-run-changed"
+            self.native_run_epoch = epoch
+        if "stopSeq" in snapshot:
+            self.stop_seq = integer(snapshot["stopSeq"])
+        self.pid = snapshot.get("pid") if snapshot.get("debugging") else None
+        self.tid = snapshot.get("tid") if snapshot.get("debugging") else None
+
+    def history_gap_result(self, state=None, safe_pause=False):
+        """A missing stop event must never be reported as a breakpoint/step hit.
+
+        An active execution wait is brought to a bounded pause when possible.
+        Read-only state refreshes never implicitly control a running target.
+        """
+        state = state or self.state()
+        pause_attempted, recovery_error = False, None
+        previous_deadline = self.deadline
+        try:
+            if safe_pause and state["state"] == "running":
+                pause_attempted = True
+                self.deadline = time.monotonic() + 2
+                if not self.call("cmd_sync", "pause"):
+                    recovery_error = "debugger rejected the recovery pause"
+                else:
+                    end = time.monotonic() + 1.5
+                    while time.monotonic() < end:
+                        state = self.state()
+                        if state["state"] != "running":
+                            break
+                        time.sleep(0.025)
+                    if state["state"] == "running":
+                        recovery_error = "recovery pause was not confirmed"
+            context = self.context() if state["state"] != "running" else dict(state)
+        except RpcError as error:
+            if error.code != "ETIMEDOUT":
+                raise
+            recovery_error = "recovery state could not be confirmed within its budget"
+            context = dict(state)
+        finally:
+            self.deadline = previous_deadline
+        context["exception"] = None
+        for key in ("state", "stateCode", "debuggerPid", "pid", "tid", "runId", "stopSeq", "mode", "nativeRunEpoch"):
+            if key in context:
+                state[key] = context[key]
+        result = {"ok": False, "event": None, "eventName": "history-gap", "historyGap": dict(self.history_gap or {}),
+                  "cacheInvalidated": True, "context": context, "regs": None, "exception": None,
+                  "cleanedUp": False, "resynced": recovery_error is None,
+                  "recoveryRequired": recovery_error is not None or state["state"] == "running",
+                  "pauseAttempted": pause_attempted, **state}
+        if recovery_error:
+            result["recoveryError"] = recovery_error
+        return result
 
     def event_list(self, after=0):
         with self.event_lock:
@@ -374,10 +462,15 @@ class Adapter:
             return {"state": "no-task", "stateCode": -1, "runId": self.run_id, "stopSeq": self.stop_seq, "mode": self.mode}
         debugging = bool(self.call("is_debugging"))
         running = bool(self.call("is_running")) if debugging else False
-        return {"state": "running" if running else "suspended" if debugging else "no-task",
+        result = {"state": "running" if running else "suspended" if debugging else "no-task",
                 "stateCode": 1 if running else 0 if debugging else -1, "debuggerPid": self.proc.pid if self.proc else None,
                 "pid": self.pid if debugging else None, "tid": self.tid if debugging else None,
                 "runId": self.run_id, "stopSeq": self.stop_seq, "mode": self.mode}
+        if self.native_run_epoch is not None:
+            result["nativeRunEpoch"] = self.native_run_epoch
+        if self.pending_history_gap:
+            result.update(historyGap=dict(self.history_gap), cacheInvalidated=True)
+        return result
 
     def evaluate(self, expression):
         value, ok = self.call("eval_sync", expression)
@@ -640,7 +733,12 @@ class Adapter:
                 self.finish_request(request["id"])
 
     def wait_result(self, mark, expected, state, context):
-        observed = self.event_list(mark)
+        if self.pending_history_gap:
+            result = self.history_gap_result(state)
+            if expected == "no-task" and result["state"] == "no-task":
+                result["ok"] = True
+            return result
+        observed = [e for e in self.event_list(mark) if e.get("nativeRunEpoch") in (None, self.native_run_epoch)]
         # Classify the final pause epoch, never an earlier exception/breakpoint
         # from another stop that happened during a high-priority control.
         resumes = [e["seq"] for e in observed if e["type"] == "EVENT_RESUME_DEBUG"]
@@ -671,8 +769,13 @@ class Adapter:
                     result["terminalReason"] = "stopped-by-control"
                 return result
             self.check()
-            observed = self.event_list(mark)
             state = self.state()
+            observed = [e for e in self.event_list(mark) if e.get("nativeRunEpoch") in (None, self.native_run_epoch)]
+            if self.pending_history_gap:
+                result = self.history_gap_result(state, safe_pause=expected != "no-task")
+                if expected == "no-task" and result["state"] == "no-task":
+                    result["ok"] = True  # termination is authoritative; no hit is claimed
+                return result
             fresh_stop = any(e["type"] in ("EVENT_PAUSE_DEBUG", "EVENT_STEPPED", "EVENT_EXCEPTION", "EVENT_BREAKPOINT", "EVENT_SYSTEMBREAKPOINT") for e in observed)
             fresh_exit = any(e["type"] in ("EVENT_EXIT_PROCESS", "EVENT_STOP_DEBUG") for e in observed)
             if (state["state"] == expected and (fresh_stop if expected == "suspended" else fresh_exit)) or (fresh_exit and state["state"] == "no-task"):
@@ -689,14 +792,31 @@ class Adapter:
             self.launch()
             return {"ok": True, "op": op, "debugger": "x64dbg", "targetExecuted": False, **self.state()}
         if op == "state":
-            return {"ok": True, **self.context()}
+            context = self.context()
+            result = {"ok": True, **context, "context": context}
+            # A fresh authoritative state is an explicit recovery acknowledgement.
+            # The response still carries the gap so host caches clear old evidence.
+            self.pending_history_gap = False
+            return result
         if op == "event":
             state = self.state()  # drain the native callback ring first
-            events = self.event_list(integer(p.get("after", 0)))
-            return {"ok": True, "events": events[-128:], "eventSeq": self.event_seq,
-                    "truncated": len(events) > 128 or (bool(self.events) and integer(p.get("after", 0)) + 1 < self.events[0]["seq"]), **state}
-        if op == "stop" and (not self.client or self.state()["state"] == "no-task"):
-            return {"ok": True, "op": op, **self.state()}
+            after = integer(p.get("after", 0))
+            events = self.event_list(after)
+            first = self.events[0]["seq"] if self.events else self.event_seq + 1
+            dropped = {"from": after + 1, "to": first - 1, "count": first - after - 1} if after + 1 < first else None
+            return {"ok": not self.pending_history_gap, "events": events[-128:], "eventSeq": self.event_seq,
+                    "dropped": dropped, "truncated": len(events) > 128 or dropped is not None, **state}
+        if op == "stop":
+            current = self.state()
+            # init starts a native thread. A high-priority stop must not declare
+            # success in its transient no-task window and then allow that thread
+            # to launch the target after the stop response.
+            while self.client and current["state"] == "no-task" and self.expected_native_run_epoch is not None:
+                self.check()
+                time.sleep(0.01)
+                current = self.state()
+            if not self.client or current["state"] == "no-task":
+                return {"ok": True, "op": op, **current}
         if op == "start":
             if p.get("path"):
                 target = inspect_pe(p["path"])
@@ -707,6 +827,11 @@ class Adapter:
             if self.state()["state"] != "no-task":
                 raise RpcError("ESTATE", "a debuggee is already active")
             self.run_id, self.stop_seq = uuid.uuid4().hex, 0
+            # init is asynchronous: native state may still expose the old epoch
+            # before CB_INITDEBUG arrives. Exactly the next epoch is approved;
+            # later or unrelated epoch changes still invalidate the run.
+            self.expected_native_run_epoch = self.native_run_epoch + 1 if self.native_run_epoch is not None else None
+            self.pending_history_gap, self.history_gap = False, None
             with self.event_lock:
                 self.events.clear()
             mark = self.event_seq
@@ -715,12 +840,15 @@ class Adapter:
             command = 'init "{}", "{}", "{}"'.format(quoted(self.target["path"]), quoted(p.get("args", "")), quoted(p.get("dir") or Path(self.target["path"]).parent))
             accepted = self.call("start_target", self.target["path"], str(p.get("args", "")), str(p.get("dir") or Path(self.target["path"]).parent)) if isinstance(self.client, NativeClient) else self.call("cmd_sync", command)
             if not accepted:
+                self.expected_native_run_epoch = None
                 return {"ok": False, "op": op, "error": "debugger rejected target launch", **self.state()}
             return {"op": op, **self.wait_state(mark)}
         if not self.client:
             raise RpcError("ESTATE", "debugger is not loaded")
         if op in ("regs", "setreg", "bpt", "unbpt", "step", "stepover", "cont", "readmem", "writemem", "modules", "trace", "threads", "callstack"):
             self.require_pause()
+            if self.pending_history_gap:
+                return {"op": op, **self.history_gap_result()}
         if op in ("threads", "callstack"):
             name = "get_threads" if op == "threads" else "get_callstack"
             if not hasattr(self.client, name):
@@ -864,6 +992,15 @@ class Adapter:
             self.log = None
         self.proc = None
         self.pid = self.tid = None
+        self.native_run_epoch = None
+        self.expected_native_run_epoch = None
+        self.pending_history_gap, self.history_gap = False, None
+        # Native event sequence numbers belong to the debugger process. A new
+        # headless process starts at zero; retaining the old wait mark would
+        # reject every callback from a subsequent approved start after cleanup.
+        with self.event_lock:
+            self.events.clear()
+            self.event_seq = 0
 
     def dispatch(self, method, params, reset_cancel=True):
         if reset_cancel:

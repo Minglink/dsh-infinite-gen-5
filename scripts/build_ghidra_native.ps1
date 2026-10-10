@@ -1,5 +1,5 @@
 param(
-  [string]$SourceRoot = (Join-Path $PSScriptRoot '..\third_party\sources\ghidra-12.1.4'),
+  [string]$SourceRoot,
   [string]$BuildRoot = (Join-Path $env:USERPROFILE '.dsh\ig5\artifacts\ghidra-build\native-win-x64'),
   [string]$CMake = 'cmake',
   [string]$Generator = 'Visual Studio 18 2026',
@@ -7,6 +7,7 @@ param(
   [int]$Parallel = 4
 )
 $ErrorActionPreference = 'Stop'
+if (-not $PSBoundParameters.ContainsKey('SourceRoot')) { $SourceRoot = Join-Path $PSScriptRoot '..\third_party\sources\ghidra-12.1.4' }
 $SourceRoot = [IO.Path]::GetFullPath($SourceRoot)
 $BuildRoot = [IO.Path]::GetFullPath($BuildRoot)
 $properties = Get-Content -LiteralPath (Join-Path $SourceRoot 'Ghidra\application.properties') -Raw

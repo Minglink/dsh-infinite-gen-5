@@ -1,29 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { normalizeHex } from './address_ref.js';
+import { captureAttachmentLease, probeAttachmentLease, processCreationIdentity, validAttachmentLease } from './attachment_lease.js';
 
 const SCHEMA_VERSION = 1;
 const clone = value => value === undefined ? undefined : structuredClone(value);
 const canonicalPath = value => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
 let ownProcessIdentity;
 
-function processIdentity(pid) {
-  try {
-    if (process.platform === 'win32') {
-      const identity = execFileSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
-        `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks.ToString()`],
-      { encoding: 'utf8', windowsHide: true, timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-      return /^\d+$/.test(identity) ? identity : null;
-    }
-    if (process.platform === 'linux') {
-      const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
-      return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19] || null;
-    }
-  } catch {}
-  return null;
-}
+const processIdentity = processCreationIdentity;
 
 function physicalIdentity(filename) {
   try {
@@ -241,9 +227,10 @@ export class ProjectStore {
     return { ...attachment, databasePath: path.resolve(this.root, database.databasePath), dbRevision: database.dbRevision };
   }
 
-  attachEngine({ projectId, artifactId, engine, sessionId, databasePath, reuseAttachmentId } = {}) {
+  attachEngine({ projectId, artifactId, engine, sessionId, databasePath, reuseAttachmentId, workerPid } = {}) {
     required(projectId, 'projectId'); required(artifactId, 'artifactId'); required(sessionId, 'sessionId');
     if (typeof engine !== 'string' || !/^[a-z][a-z0-9_-]{0,47}$/.test(engine)) fail('INVALID_ARGUMENT', 'engine must be a normalized identifier');
+    const lease = workerPid === undefined ? undefined : captureAttachmentLease(workerPid, ownProcessIdentity);
     return this._write(data => {
       const project = found(data.projects, projectId, 'Project');
       if (!project.artifactIds.includes(artifactId)) fail('PROJECT_IDENTITY_MISMATCH', 'Artifact is not part of this project');
@@ -266,6 +253,7 @@ export class ProjectStore {
         const attachment = found(data.attachments, reuseAttachmentId, 'Engine attachment');
         if (attachment.projectId !== projectId || attachment.artifactId !== artifactId || attachment.engine !== engine || attachment.sessionId !== sessionId || attachment.state !== 'active') fail('ATTACHMENT_IDENTITY_MISMATCH', 'Only the owning session can explicitly reuse its active attachment');
         if (databasePath !== undefined && attachment.databaseId !== databaseId) fail('DATABASE_IDENTITY_MISMATCH', 'Explicit reuse cannot change the database path');
+        if (lease && (!validAttachmentLease(attachment.lease) || ['host', 'worker'].some(key => lease[key].pid !== attachment.lease[key].pid || !lease[key].creationIdentity || lease[key].creationIdentity !== attachment.lease[key].creationIdentity))) fail('ATTACHMENT_IDENTITY_MISMATCH', 'Explicit reuse cannot replace or guess an attachment process owner');
         return this._attachment(data, reuseAttachmentId);
       }
       if (database?.activeAttachmentId) fail('DATABASE_IN_USE', 'Database already has an active attachment; explicitly reuse that attachment or close it first');
@@ -275,7 +263,7 @@ export class ProjectStore {
       database.aliases = [...new Set([...(database.aliases || []), location.stored])];
       database.physicalIdentity = location.physicalIdentity;
       database.activeAttachmentId = attachmentId;
-      data.attachments[attachmentId] = { attachmentId, projectId, artifactId, engine, sessionId, databaseId, state: 'active', createdAt: now };
+      data.attachments[attachmentId] = { attachmentId, projectId, artifactId, engine, sessionId, databaseId, state: 'active', createdAt: now, ...(lease ? { lease } : {}) };
       return this._attachment(data, attachmentId);
     });
   }
@@ -293,6 +281,47 @@ export class ProjectStore {
       const database = found(data.databases, attachment.databaseId, 'Engine database');
       if (database.activeAttachmentId === id) database.activeAttachmentId = null;
       return this._attachment(data, id);
+    });
+  }
+
+  /** Startup recovery never infers a worker owner from a legacy sessionId string. */
+  recoverAttachments({ limit = 64 } = {}) {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 256) fail('INVALID_ARGUMENT', 'Attachment recovery limit must be 1..256');
+    const active = Object.values(this._read().attachments).filter(item => item.state === 'active');
+    const result = { recovered: [], retained: [], examined: Math.min(limit, active.length), truncated: active.length > limit };
+    for (const attachment of active.slice(0, limit)) {
+      const check = probeAttachmentLease(attachment.lease);
+      if (!check.releasable) { result.retained.push({ attachmentId: attachment.attachmentId, reason: check.reason }); continue; }
+      try {
+        const recovered = this.recoverAttachment(attachment.attachmentId, attachment.lease.nonce);
+        if (recovered.recovered || recovered.alreadyClosed) result.recovered.push(attachment.attachmentId);
+        else result.retained.push({ attachmentId: attachment.attachmentId, reason: recovered.reason });
+      } catch (error) {
+        if (error.code !== 'ATTACHMENT_OWNER_CHANGED') throw error;
+        result.retained.push({ attachmentId: attachment.attachmentId, reason: 'owner-changed' });
+      }
+    }
+    return result;
+  }
+
+  /** Nonce and complete owner identity are rechecked under the metadata lock. */
+  recoverAttachment(id, nonce) {
+    const snapshot = found(this._read().attachments, id, 'Engine attachment');
+    if (!validAttachmentLease(snapshot.lease) || snapshot.lease.nonce !== nonce) fail('ATTACHMENT_OWNER_CHANGED', 'Attachment recovery owner does not match; lease was retained');
+    if (snapshot.state === 'closed') return { attachmentId: id, nonce, recovered: false, alreadyClosed: true };
+    const check = probeAttachmentLease(snapshot.lease);
+    if (!check.releasable) return { attachmentId: id, nonce, recovered: false, reason: check.reason };
+    return this._write(data => {
+      const attachment = found(data.attachments, id, 'Engine attachment');
+      if (JSON.stringify(attachment.lease) !== JSON.stringify(snapshot.lease)) fail('ATTACHMENT_OWNER_CHANGED', 'Attachment owner changed during recovery; replacement lease was retained');
+      if (attachment.state === 'closed') return { attachmentId: id, nonce, recovered: false, alreadyClosed: true };
+      const finalCheck = probeAttachmentLease(attachment.lease);
+      if (!finalCheck.releasable) return { attachmentId: id, nonce, recovered: false, reason: finalCheck.reason };
+      attachment.state = 'closed'; attachment.closedAt = new Date().toISOString();
+      attachment.recovery = { nonce, reason: 'both-owners-dead', at: attachment.closedAt };
+      const database = found(data.databases, attachment.databaseId, 'Engine database');
+      if (database.activeAttachmentId === id) database.activeAttachmentId = null;
+      return { attachmentId: id, nonce, recovered: true, alreadyClosed: false };
     });
   }
   /** Call after a successful engine commit. expectedRevision protects stale plans; it is not an engine transaction. */

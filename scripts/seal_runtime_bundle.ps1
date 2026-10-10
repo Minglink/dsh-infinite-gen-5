@@ -1,7 +1,8 @@
-# Maintainer command: seal actual, local runtimes into a complete distribution.
+﻿# Maintainer command: seal actual, local runtimes into a complete distribution.
 [CmdletBinding()]
-param([string]$RuntimeRoot = (Join-Path $PSScriptRoot '..\runtimes'))
+param([string]$RuntimeRoot)
 $ErrorActionPreference = 'Stop'
+if (-not $RuntimeRoot) { $RuntimeRoot = Join-Path $PSScriptRoot '..\runtimes' }
 . (Join-Path $PSScriptRoot 'runtime_pack.ps1')
 $base = Get-IG5FullPath $RuntimeRoot
 $source = Get-IG5FullPath (Join-Path $PSScriptRoot '..')
@@ -19,7 +20,9 @@ try {
     [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
     $validated = Assert-IG5RuntimePack $base
     Write-Output "SEALED_FILES=$($validated.Files)"
-    Write-Output "SEALED_BYTES=$(($records | Measure-Object -Property bytes -Sum).Sum)"
+    $totalBytes = [long]0
+    foreach ($record in $records) { $totalBytes += [long]$record.bytes }
+    Write-Output "SEALED_BYTES=$totalBytes"
 } catch {
     if ($null -ne $prior) { [IO.File]::WriteAllBytes($manifestPath, $prior) }
     else { Remove-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue }

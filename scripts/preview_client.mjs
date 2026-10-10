@@ -27,7 +27,7 @@ const runtime = bundle.slice(0, boot) + `\nexport { ${reactBinding} as React, ${
 const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>IG5 本地交互预览</title><style>
 body{margin:0;background:#0d1420;color:#e2e8f0;font:14px system-ui}#preview-note{padding:12px 20px;border-bottom:1px solid #334155;background:#172033}#composer{display:block;width:calc(100% - 40px);margin:12px 20px;min-height:75px;color:#e2e8f0;background:#172033;border:1px solid #475569;border-radius:8px}#root{height:calc(100vh - 170px)}
 :root{--dsw-alias-bg-layer-1:#141f30;--dsw-alias-bg-layer-2:#19273a;--dsw-alias-bg-layer-3:#0d1420;--dsw-alias-bg-module-platform:#0d1420;--dsw-alias-label-primary:#e2e8f0;--dsw-alias-label-secondary:#9caec6;--dsw-alias-label-tertiary:#6a7d99;--dsw-alias-border-l1:#23354d;--dsw-alias-border-l2:#334863;--dsw-alias-brand-primary:#69a6ff;--dsw-alias-state-error-primary:#f58c8c;--dsw-alias-state-success-primary:#67d4ab;--dsw-alias-state-warn-primary:#f6ce71}
-</style></head><body><div id="preview-note">本地交互预览 · 使用内置 React 与模拟分析数据 · 不连接分析引擎，不执行写操作</div><textarea id="composer" aria-label="会话草稿预览" placeholder="结构体草稿插入后显示于此；不会发送"></textarea><div id="root"></div><script type="module">
+</style></head><body><div id="preview-note">本地交互预览 · 使用内置 React 与模拟分析数据 · 不连接分析引擎，不执行写操作</div><textarea id="composer" aria-label="会话草稿预览" placeholder="结构体／数据分析草稿插入后显示于此；不会发送"></textarea><div id="root"></div><script type="module">
 import {React,ReactDOM} from '/runtime.js';
 let plugin;
 window.__ModuleLoader__={load(v){plugin=v.factory(name=>{if(name==='react')return React;throw Error(name)});}};
@@ -43,6 +43,14 @@ const target='C:\\\\fixtures\\\\sample.exe', declaration='struct Packet {\\n  un
 const variables=[{name:'key',type:'unsigned int',size:4,is_arg:true},{name:'buffer',type:'char *',size:8,is_arg:true},{name:'i',type:'int',size:4,is_arg:false}];
 const code='int decode_packet(unsigned int key, char *buffer)\\n{\\n  for (int i = 0; i < 32; ++i)\\n    buffer[i] ^= key;\\n  return key != 0;\\n}';
 const journal=Array.from({length:50},(_,i)=>({ts:'2026-10-09T12:'+String(i).padStart(2,'0')+':00Z',tool:i%3?'ig5_patch_bytes':'ig5_comment',args:{target,engine:i%2?'ghidra':'reverse',ea:'0x140001000'},detail:i%3?{before:'90 90',after:'CC 90',fileOffset:i}: {note:'人工审阅备注 <scr'+'ipt>仅显示文本</scr'+'ipt>'},isError:i===7}));
+const scan={schemaVersion:2,sourceEngine:'ghidra',idb_modified:false,
+entropies:[{name:'.rdata',segment:'.rdata',ea:'0x140003000',size:8192,sampledBytes:4096,entropy:7.6543,flag:true,truncated:true,readFailures:0,coverage:[{start:'0x140003000',size:4096}],interpretation:'high entropy is only a compression/encryption/random-data clue'}],
+crypto_markers:[{name:'AES S-box',marker:'AES S-box',ea:'0x140003110',kind:'cipher',constantRole:'substitution-table',confidence:'constant-match',evidence:{byteOrder:'byte-array',verifiedBytes:256,segment:'.rdata',claim:'constant bytes match; algorithm use and keys are unproven'}}],
+suspicious_apis:[{module:'bcrypt.dll',api:'BCryptDecrypt',category:'crypto',ea:'0x140005100',addressRole:'import-slot',addressSpace:'memory',interpretation:'import presence is a lead; behavior is unproven'},{module:'ws2_32.dll',api:'recv',category:'network',ea:'0x140005108',addressRole:'import-slot',addressSpace:'memory'}],
+coverage:{bytesRead:4096,segments:1,imports:12,strings:3,sampling:'bounded prefix/middle/suffix; unobserved bytes are not classified'},limits:{max_bytes:4096,max_imports:128},truncated:true};
+const analysisRows=[{id:'00000000-0000-4000-8000-000000000001',kind:'protocol',action:'decode',createdAt:'2026-10-10T09:00:00Z',association:{target,engine:'ghidra',artifactId:'artifact_fixture_hash',dbRevision:1}},{id:'00000000-0000-4000-8000-000000000002',kind:'crypto',action:'transform',createdAt:'2026-10-10T08:50:00Z'}];
+const analysisResults={};analysisResults[analysisRows[0].id]={...analysisRows[0],input:{ref:'sha256:'+('1'.repeat(64)),bytes:7,result_id:analysisRows[0].id,origin:{kind:'inline'}},output:{ref:'sha256:'+('2'.repeat(64)),bytes:7,result_id:analysisRows[0].id},responseTruncated:false,value:{schemaVersion:'ig5.protocol.v1',action:'decode',complete:true,truncated:false,framing:{type:'length-prefix',size:2,endian:'big',headerLength:2},frames:[{index:0,offset:0,length:7,dataRef:{ref:'sha256:'+('2'.repeat(64)),bytes:7,result_id:analysisRows[0].id},previewHex:'000548656c6c6f',fields:[{name:'length',type:'u16',value:5,span:{offset:0,inputOffset:0,length:2}},{name:'payload',type:'utf8',value:'Hello',span:{offset:2,inputOffset:2,length:5}}]}],evidence:{source:'supplied-bytes',checksumVerified:false},note:'模拟协议结果；字段与分帧来自显式假设，并非未知协议自动还原。'}};
+analysisResults[analysisRows[1].id]={...analysisRows[1],input:{ref:'sha256:'+('3'.repeat(64)),bytes:5,result_id:analysisRows[1].id},output:{ref:'sha256:'+('4'.repeat(64)),bytes:5,result_id:analysisRows[1].id},responseTruncated:false,value:{action:'transform',algorithm:'xor',previewHex:'48656c6c6f',previewUtf8:'Hello',note:'模拟解密结果，用户提供算法与参数；没有执行样本或恢复密钥。 <scr'+'ipt>文本原样显示</scr'+'ipt>'}};
 const config={host:{id:'win32-x64',supported:true,execution:'local-node-host'},runtimeSource:{ghidra:'bundled',x64dbg:'bundled'},engines:[{id:'reverse',available:true},{id:'ghidra',available:true,source:'bundled'},{id:'x64dbg',available:true,source:'bundled'}]};
 window.__ig5Requests=[];window.__ig5Focuses=[];
 window.fetch=async(url,options)=>{
@@ -58,6 +66,10 @@ window.fetch=async(url,options)=>{
  case 'calls':data={rows:[{ea:'0x140002000',name:'check_header'}]};break;
  case 'xrefs':data={rows:[{from:'0x140001000',func_ea:'0x140001000',func_name:'decode_packet'}]};break;
  case 'strings':data={strings:[{ea:'0x140003000',str:'packet-key',length:10}],total:1};break;
+ case 'scan':data={...scan,sourceEngine:engine};break;
+ case 'fingerprint':data={abi:'MSVC',total_functions:2,library_functions_count:0,user_functions_count:2,library_ratio:0,sample_library_funcs:[]};break;
+ case 'analyses':{const selected=analysisRows.filter(item=>(!q.get('target')||(item.association&&item.association.target===q.get('target')))&&(!q.get('engine')||(item.association&&item.association.engine===q.get('engine'))));data={items:selected,total:selected.length,offset:0,limit:20};break;}
+ case 'analysis_result':data=analysisResults[q.get('id')];if(!data)return {ok:true,status:200,json:async()=>({error:'模拟结果不存在'})};break;
  case 'ir':data={kind:'ghidra-pcode',level:q.get('level'),operations:[{opcode:'INT_XOR',inputs:['key','buffer[i]'],output:'buffer[i]'}],truncated:false};break;
  case 'debug_state':data={state:'paused',runId:'run_fixture',stopSeq:4,regs:{rip:'0x7ff712341000',rax:'0x2a'},note:'模拟暂停快照；没有实际调试进程。'};break;
  case 'disasm':data={ea:q.get('ea'),rows:[{ea:q.get('ea'),bytes:'48 31 C0',text:'xor rax, rax',size:3},{ea:'0x140001003',bytes:'C3',text:'ret',size:1}],total:2};break;

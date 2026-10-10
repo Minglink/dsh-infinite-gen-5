@@ -16,6 +16,9 @@ static volatile LONG ending = 0;
 static CRITICAL_SECTION eventLock;
 static json_t* ring[256] = {};
 static unsigned long long eventSeq = 0;
+// Counters survive event-history truncation and describe the actual native run.
+// Protected by eventLock together with the ring, never inferred from retained events.
+static unsigned long long runEpoch = 0, stopSeq = 0, lastPauseEventSeq = 0, lastResumeEventSeq = 0;
 static int pluginHandle = 0;
 
 static void str(json_t* obj, const char* key, const char* value) { json_object_set_new(obj, key, json_string(value ? value : "")); }
@@ -98,6 +101,10 @@ static void callback(CBTYPE type, void* info) {
     auto event = json_object(); str(event, "type", name); json_object_set_new(event, "data", data);
     EnterCriticalSection(&eventLock);
     const auto seq = ++eventSeq; num(event, "seq", seq);
+    if(type == CB_INITDEBUG) { ++runEpoch; stopSeq = 0; lastPauseEventSeq = lastResumeEventSeq = 0; }
+    if(type == CB_PAUSEDEBUG) { ++stopSeq; lastPauseEventSeq = seq; }
+    if(type == CB_RESUMEDEBUG) lastResumeEventSeq = seq;
+    num(event,"nativeRunEpoch",runEpoch); num(event,"stopSeq",stopSeq);
     const auto index = (seq - 1) % 256;
     if(ring[index]) json_decref(ring[index]);
     ring[index] = event;
@@ -108,10 +115,14 @@ static json_t* execute(json_t* req) {
     const char* method = text(req, "method");
     auto p = json_object_get(req, "params");
     if(!p) p = req;
-    if(!strcmp(method, "hello")) { auto r = json_object(); str(r, "bridge", "ig5-native"); num(r, "protocol", 2); num(r, "pid", GetCurrentProcessId()); num(r, "bits", sizeof(duint) * 8); flag(r,"ownerOnly",true); flag(r,"remoteClientsRejected",true); flag(r,"typedRequests",true); return r; }
+    if(!strcmp(method, "hello")) { auto r = json_object(); str(r, "bridge", "ig5-native"); num(r, "protocol", 2); num(r,"eventHistoryVersion",2); num(r, "pid", GetCurrentProcessId()); num(r, "bits", sizeof(duint) * 8); flag(r,"ownerOnly",true); flag(r,"remoteClientsRejected",true); flag(r,"typedRequests",true); return r; }
     if(!strcmp(method, "state")) {
         auto r = json_object(); flag(r, "debugging", DbgIsDebugging()); flag(r, "running", DbgIsRunning());
-        num(r, "pid", DbgIsDebugging() ? DbgGetProcessId() : 0); num(r, "tid", DbgIsDebugging() ? DbgGetThreadId() : 0); return r;
+        num(r, "pid", DbgIsDebugging() ? DbgGetProcessId() : 0); num(r, "tid", DbgIsDebugging() ? DbgGetThreadId() : 0);
+        EnterCriticalSection(&eventLock);
+        num(r,"nativeRunEpoch",runEpoch); num(r,"stopSeq",stopSeq); num(r,"eventSeq",eventSeq);
+        num(r,"lastPauseEventSeq",lastPauseEventSeq); num(r,"lastResumeEventSeq",lastResumeEventSeq);
+        LeaveCriticalSection(&eventLock); return r;
     }
     if(!strcmp(method, "events")) {
         auto result = json_object(), events = json_array(); const auto after = value(p, "after");
@@ -125,7 +136,10 @@ static json_t* execute(json_t* req) {
             if(!copy) { copied = false; break; }
             json_array_append_new(events,copy);
         }
-        num(result, "eventSeq", eventSeq); flag(result, "truncated", after && after + 1 < first);
+        num(result, "eventSeq", eventSeq); num(result,"firstAvailableSeq",first);
+        const bool truncated = after < first - 1;
+        flag(result, "truncated", truncated);
+        if(truncated) { auto lost = json_object(); num(lost,"from",after + 1); num(lost,"to",first - 1); num(lost,"count",first - after - 1); json_object_set_new(result,"dropped",lost); }
         LeaveCriticalSection(&eventLock);
         if(!copied) { json_decref(events); json_decref(result); return failure("event snapshot allocation failed"); }
         json_object_set_new(result, "events", events); return result;

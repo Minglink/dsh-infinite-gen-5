@@ -1,0 +1,9 @@
+Ghidra local project directory compatibility change for Infinite Gen 5.
+Original GhidraURL.java: Ghidra 12.1.4, National Security Agency.
+Upstream commit: 8b6bbb857accdfa20dc5b2f5dea471178c2e9fbc.
+The original and modified Ghidra source retain the Apache License, Version 2.0.
+This change permits valid local filesystem dot directories such as .dsh.
+It continues to reject dot traversal and does not relax project/domain/repository
+names or paths. All other uncompressed Project.jar/Project-src.zip entries are
+verified unchanged. It is an IG5 maintained modification, not an upstream release.
+The project NC license does not override the Apache terms of this component.

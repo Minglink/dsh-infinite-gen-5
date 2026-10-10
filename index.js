@@ -10,6 +10,9 @@ import { runtimeConfiguration, engineId, terminateTree } from './engine_runtime.
 import { spawnWorker, attachWorker, doctorWorker } from './source/worker_transport.js';
 import { ProjectStore } from './source/project_store.js';
 import { defineIntegrationTools } from './integration_tools.js';
+import { defineAnalysisTools } from './analysis_tools.js';
+import { exportPatchDiff } from './source/patch_export.js';
+import { readAuditPage, targetIdentity } from './source/audit_history.js';
 
 // ── 无限五代（IG5）v1.0.0 ──────────────────────────────────────────────────
 // DeepSeek Harness 逆向插件：隔离多引擎 Worker 池 + ig5_* 工具面 + ig5dash 投影。
@@ -106,15 +109,8 @@ class WorkerManager {
     this.debugOwners = new Map();
     this.debugQueues = new Map();
     this.admissions = Promise.resolve();
-    // A crashed host cannot retain an exclusive metadata lease indefinitely.
-    for (const attachment of this.projects.listAttachments?.() || []) {
-      if (attachment.state !== 'active') continue;
-      const pid = Number(String(attachment.sessionId).split('-')[0]);
-      if (!Number.isSafeInteger(pid) || pid <= 0) continue;
-      try { process.kill(pid, 0); } catch (error) {
-        if (error.code === 'ESRCH') this.projects.closeAttachment(attachment.attachmentId);
-      }
-    }
+    // A lease is recoverable only after both recorded owners are proven dead.
+    this.attachmentRecovery = this.projects.recoverAttachments();
   }
 
   sessionKey(target, engine = this.scope.getStore()?.engine || this.cfg.defaultEngine || 'reverse') {
@@ -263,8 +259,8 @@ class WorkerManager {
         timers: { setTimeout, clearTimeout },
         onExit: () => {
           // Includes pipe/protocol failures as well as actual exit; never leave an untracked worker alive.
-          terminateTree(proc);
-          if (session.attachmentId) { try { this.projects.closeAttachment(session.attachmentId); } catch {} }
+          if (!proc.__ig5TransportTerminated) terminateTree(proc);
+          this.releaseAttachmentAfterExit(session);
           if (this.sessions.get(key) === session) this.sessions.delete(key);
           if (session.engine === 'x64dbg') this.debugOwners.delete(path.resolve(session.target).toLowerCase());
           session.runtime = null; session.controlOwner = null;
@@ -286,7 +282,7 @@ class WorkerManager {
       ); } catch (error) { this.killSession(key); throw error; }
       let attachment;
       try { attachment = this.projects.attachEngine({ projectId: session.projectId, artifactId: session.artifactId,
-        engine, sessionId: `${process.pid}-${proc.pid}-${session.startedAt}`,
+        engine, sessionId: `${process.pid}-${proc.pid}-${session.startedAt}`, workerPid: proc.pid,
         databasePath: session.info?.databasePath || session.info?.idb_path });
       } catch (error) { this.killSession(key); throw error; }
       session.attachmentId = attachment.attachmentId;
@@ -431,6 +427,7 @@ class WorkerManager {
     }
     if (result?.ok !== false && ['load', 'start'].includes(params.op)) this.debugOwners.set(targetKey, debuggerEngine);
     if (params.op === 'stop' && result?.ok !== false) this.debugOwners.delete(targetKey);
+    if (result?.cacheInvalidated || result?.historyGap) debugSession.runtime = null;
     if (result?.context || result?.runId || result?.state) debugSession.runtime = { ...debugSession.runtime, ...result };
     if (result?.state === 'no-task') { this.debugOwners.delete(targetKey); debugSession.controlOwner = null; }
     if (!readOnly && result?.ok !== false) debugSession.controlOwner = params.op === 'stop' || params.control === 'release' || result?.state === 'no-task' ? null : caller;
@@ -479,6 +476,22 @@ class WorkerManager {
     await this.close(oldest.target, true, oldest.engine);
   }
 
+  releaseAttachmentAfterExit(session) {
+    if (!session.attachmentId || session.attachmentReleased || session.attachmentExitWait) return;
+    const release = () => {
+      session.attachmentExitWait = false;
+      if (session.attachmentReleased) return;
+      try { this.projects.closeAttachment(session.attachmentId); session.attachmentReleased = true; }
+      catch (error) { diagAppend(this.cfg, `host: attachment release deferred: ${publicEngineError(error, this.cfg)}`); }
+    };
+    // A kill request and a broken pipe do not prove that the database owner exited.
+    if (session.databaseClosed || session.proc?.exitCode != null || session.proc?.signalCode != null) release();
+    else if (typeof session.proc?.once === 'function') {
+      session.attachmentExitWait = true;
+      session.proc.once('exit', release);
+    }
+  }
+
   killSession(key) {
     const s = this.sessions.get(key);
     if (!s) return;
@@ -490,12 +503,12 @@ class WorkerManager {
     s.pending.clear();
     s.client?.dispose();
     try {
-      terminateTree(s.proc);
+      if (!s.proc.__ig5TransportTerminated) terminateTree(s.proc);
     } catch {
       // already dead
     }
     this.sessions.delete(key);
-    if (s.attachmentId) { try { this.projects.closeAttachment(s.attachmentId); } catch {} }
+    this.releaseAttachmentAfterExit(s);
     if (s.engine === 'x64dbg') this.debugOwners.delete(path.resolve(s.target).toLowerCase());
     s.runtime = null; s.controlOwner = null;
   }
@@ -520,6 +533,7 @@ class WorkerManager {
         if (this.alive(s) && s.lastOp !== 'open') {
           const result = await this.rpc(s, 'close', {}, 10_000);
           if (result?.ok === false) throw new Error('Engine refused to checkpoint and close; session was retained');
+          s.databaseClosed = true;
         }
       } catch (error) {
         if (!force) { s.closing = false; throw error; }
@@ -788,7 +802,7 @@ function installDataRoute(ctx, mgr, cfg) {
     'funcs', 'decompile', 'xrefs', 'strings', 'listing', 'calls', 'bytes',
     'search', 'scan', 'struct', 'cfg', 'slice', 'fingerprint', 'approvals',
     'disasm', 'stack', 'switches', 'vtables', 'microcode',
-    'ir', 'debug_state',
+    'ir', 'debug_state', 'analyses', 'analysis_result',
   ]);
   ctx.inject(['webServer'], (subCtx) => {
     let ws = null;
@@ -822,6 +836,22 @@ function installDataRoute(ctx, mgr, cfg) {
             send(400, { error: 'Unsupported read-only data type' });
             return;
           }
+          if (type === 'analyses' || type === 'analysis_result') {
+            try {
+              if (!mgr.analysis) throw new Error('Data analysis service is unavailable');
+              const data = type === 'analyses'
+                ? mgr.analysis.list({ target: target || undefined, engine, archived: url.searchParams.get('archived') === 'true', offset: Number(url.searchParams.get('offset') || 0), limit: Number(url.searchParams.get('limit') || 20) })
+                : mgr.analysis.result(url.searchParams.get('id'), url.searchParams.get('select') || undefined);
+              if (type === 'analyses') {
+                Promise.resolve(data).then(value => send(200, { target, engine, type, data: value }), error => send(200, { error: publicEngineError(error, cfg) }));
+                return;
+              }
+              if (type === 'analysis_result' && target && (!data.association?.target || mgr.sessionKey(data.association.target, engine) !== mgr.sessionKey(target, engine))) throw new Error('Analysis result belongs to another target');
+              if (type === 'analysis_result' && engine && data.association?.engine && data.association.engine !== engine) throw new Error('Analysis result belongs to another engine');
+              send(200, { target, engine, type, data });
+            } catch (error) { send(200, { error: publicEngineError(error, cfg) }); }
+            return;
+          }
           if (type === 'debug_state') {
             if (engine && engine !== 'x64dbg') { send(400, { error: 'debug_state requires engine=x64dbg' }); return; }
             const debug = target ? mgr.sessions.get(mgr.sessionKey(target, 'x64dbg')) : [...mgr.sessions.values()].find((s) => s.engine === 'x64dbg');
@@ -847,16 +877,12 @@ function installDataRoute(ctx, mgr, cfg) {
               send(200, { target: session.target, type, data: { rows: [], total: 0, offset: params.offset, limit: params.limit } });
               return;
             }
-            try {
-              const rawLines = fs.readFileSync(auditFile, 'utf8').split('\n').filter(Boolean);
-              const items = rawLines.map((l) => { try { return JSON.parse(l); } catch { return null; } })
-                .filter((item) => item?.args?.target && mgr.sessionKey(item.args.target, session.engine) === mgr.sessionKey(session.target, session.engine)
-                  && (!session.engine || (item.detail?.destination?.engine || item.args.engine || 'reverse') === session.engine)).reverse();
-              const offset = Math.max(0, params.offset || 0), limit = Math.max(1, Math.min(params.limit || 30, 200));
-              send(200, { target: session.target, type, data: { rows: items.slice(offset, offset + limit), total: items.length, offset, limit } });
-            } catch (err) {
-              send(200, { error: publicEngineError(err, cfg) });
-            }
+            const scope = mgr.sessionKey(session.target, session.engine);
+            readAuditPage(auditFile, { offset: params.offset || 0, limit: params.limit || 30,
+              cursor: url.searchParams.get('cursor') || undefined, scope,
+              predicate: item => item?.args?.target && mgr.sessionKey(item.args.target, session.engine) === scope
+                && (!session.engine || (item.detail?.destination?.engine || item.args.engine || 'reverse') === session.engine) })
+              .then(data => send(200, { target: session.target, type, data }), err => send(200, { error: publicEngineError(err, cfg) }));
             return;
           }
           if (type === 'funcs') {
@@ -1005,13 +1031,13 @@ function defineIg5Tools(ctx, mgr, cfg) {
     {
       name: 'ig5_profile',
       description:
-        'Return IG5 engines, projects, active tools and skills. Optionally switch toolset to core (8 frequent tools) or full (all 36 tools) for this plugin instance. Switching is immediate across sessions and is not persisted.',
-      parameters: { type: 'object', properties: { toolset: { type: 'string', enum: ['core', 'full'] } }, additionalProperties: false },
+        'Return IG5 engines, projects, active tools and skills. Optionally switch core (8 frequent tools) or full (38 tools) for the calling agent on hosts supporting agent scopes; older hosts explicitly report plugin-instance scope. History stats/archive/restore manage saved analysis reports without changing engine databases; archive retains result IDs and data refs.',
+      parameters: { type: 'object', properties: { toolset: { type: 'string', enum: ['core', 'full'] }, history: { type: 'object', properties: { action: { type: 'string', enum: ['stats', 'archive', 'restore'] }, ids: { type: 'array', minItems: 1, maxItems: 1000, items: { type: 'string' } } }, required: ['action'], additionalProperties: false } }, additionalProperties: false },
       output: { schema: { type: 'object', additionalProperties: true }, render: textRender },
-      execute(args = {}) {
+      async execute(args = {}, execution) {
         if (args.toolset !== undefined) {
           if (!mgr.workflow) throw new Error('IG5 workflow is not ready');
-          mgr.workflow.setToolset(args.toolset);
+          mgr.workflow.setToolset(args.toolset, execution);
         }
         return {
           plugin: PLUGIN_ID,
@@ -1021,7 +1047,8 @@ function defineIg5Tools(ctx, mgr, cfg) {
           runtimeSource: Object.fromEntries(['ghidra', 'x64dbg'].map(id => [id, cfg[id]?.source || null])),
           engines: mgr.engines?.() || [],
           projects: mgr.projects?.listProjects?.() || [],
-          ...(mgr.workflow?.snapshot() || { toolset: cfg.toolset || 'core' }),
+          ...(mgr.workflow?.snapshot(execution) || { toolset: cfg.toolset || 'core' }),
+          ...(args.history ? { history: await mgr.analysis.history(args.history) } : {}),
           engineConfigured: !cfg.defaultEngine || cfg.defaultEngine === 'reverse' ? !!cfg.idaDir : !!cfg[cfg.defaultEngine]?.available,
           pythonConfigured: !cfg.defaultEngine || cfg.defaultEngine === 'reverse' ? !!cfg.pythonExe : !!cfg[cfg.defaultEngine]?.pythonExe,
           requestTimeoutMs: cfg.requestTimeoutMs,
@@ -1034,6 +1061,7 @@ function defineIg5Tools(ctx, mgr, cfg) {
             'ig5_undo*', 'ig5_run_idapython*', 'ig5_dbg*', 'ig5_struct*', 'ig5_close', 'ig5_profile',
             'ig5_stack', 'ig5_switches', 'ig5_switch_repair*', 'ig5_vtables', 'ig5_microcode', 'ig5_bindiff', 'ig5_emulate*',
             'ig5_ir', 'ig5_sync*',
+            'ig5_crypto', 'ig5_protocol',
           ],
           writeGated: [...IG5_WRITE_TOOLS],
           lineage: 'dsh-infinite-gen-4 (提示词层) -> dsh-infinite-gen-5 (纯逆向工具面, 零提示词注入)',
@@ -1574,16 +1602,24 @@ function defineIg5Tools(ctx, mgr, cfg) {
     {
       name: 'ig5_scan',
       description:
-        'Static intelligence sweep: crypto constants (AES/MD5/SHA-256/CRC32 markers), suspicious imported APIs, per-segment entropy (>7.2 flagged as packed/encrypted), string families. Returns a structured recon report. Read-only.',
+        'Bounded static sweep in Reverse/Ghidra: AES, MD5/shared initial-state, SHA-256/SHA-512 and CRC constants; communication/crypto imports; sampled segment entropy and string families. Returns addresses, evidence, coverage and truncation. Hits and high entropy are clues, not proof of an algorithm or encryption. Read-only.',
       parameters: {
         type: 'object',
-        properties: { target: { type: 'string', description: 'Target path previously opened with ig5_open' } },
+        properties: {
+          target: { type: 'string', description: 'Target path previously opened with ig5_open' },
+          max_bytes: { type: 'number', description: 'Global sampled bytes: default 8 MiB, maximum 64 MiB' },
+          max_segment_bytes: { type: 'number', description: 'Per-segment sampled bytes: default 1 MiB, maximum 16 MiB' },
+          max_matches: { type: 'number' }, max_imports: { type: 'number' }, max_strings: { type: 'number' },
+          max_segments: { type: 'number' }, max_api_matches: { type: 'number' }, max_string_chars: { type: 'number' },
+        },
         required: ['target'],
       },
       output: { schema: { type: 'object', additionalProperties: true }, render: textRender },
       async execute(args) {
         const target = requireString(args, 'target');
-        return mgr.rpc(mgr.get(target), 'scan', {});
+        const params = {};
+        for (const key of ['max_bytes', 'max_segment_bytes', 'max_matches', 'max_imports', 'max_strings', 'max_segments', 'max_api_matches', 'max_string_chars']) if (args[key] !== undefined) params[key] = args[key];
+        return mgr.rpc(mgr.get(target), 'scan', params);
       },
     },
     {
@@ -1672,67 +1708,7 @@ function defineIg5Tools(ctx, mgr, cfg) {
       },
       output: { schema: { type: 'object', additionalProperties: true }, render: textRender },
       async execute(args) {
-        const target = requireString(args, 'target');
-        const auditFile = path.join(cfg.artifactDir, 'approvals.jsonl');
-        if (!fs.existsSync(auditFile)) return { target, patches: 0, note: '无审计记录' };
-        const patches = [];
-        for (const line of fs.readFileSync(auditFile, 'utf8').split('\n')) {
-          if (!line.trim()) continue;
-          let rec;
-          try {
-            rec = JSON.parse(line);
-          } catch {
-            continue;
-          }
-          if (!['ig5_patch_bytes', 'ig5_sync'].includes(rec.tool) || rec.isError) continue;
-          if (path.resolve(rec.args?.target ?? '') !== path.resolve(target)) continue;
-          if ((rec.detail?.destination?.engine || rec.args?.engine || 'reverse') !== (mgr.get(target)?.engine || 'reverse')) continue;
-          const candidates = rec.tool === 'ig5_sync' ? (rec.detail?.applied || []).filter((row) => row.kind === 'patch').map((row) => row.result) : [rec.detail];
-          for (const d of candidates) {
-            if (typeof d?.fileOffset !== 'number' || !d.after || !d.applied) continue;
-            patches.push(d);
-          }
-        }
-        if (!patches.length) return { target, patches: 0, note: '该目标没有已应用的字节补丁记录' };
-        const original = fs.readFileSync(target);
-        const session = mgr.get(target);
-        if (session?.sha256 && createHash('sha256').update(original).digest('hex') !== session.sha256) throw new Error('Target file changed; reopen it before exporting');
-        const patched = Buffer.from(original);
-        const lines = ['# IG5 补丁报告', '', `目标: ${target}`, '', '| EA | 文件偏移 | before | after |', '|---|---|---|---|'];
-        const ranges = [];
-        for (const p of patches) {
-          if (p.fileOffset < 0 || p.fileOffset + p.size > patched.length) {
-            lines.push(`| ${p.ea} | ${p.fileOffset} | ${p.before} | (越界，跳过) |`);
-            continue;
-          }
-          const current = await mgr.rpc(mgr.get(target), 'bytes', { ea: p.ea, size: p.size });
-          const bytes = Buffer.from(current.hex || '', 'hex');
-          if (bytes.length !== p.size) throw new Error('Could not read a complete audited patch region');
-          bytes.copy(patched, p.fileOffset);
-          ranges.push(p);
-        }
-        let applied = 0;
-        const seen = new Set();
-        for (const p of ranges) {
-          const key = `${p.fileOffset}:${p.size}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          const before = original.subarray(p.fileOffset, p.fileOffset + p.size).toString('hex');
-          const after = patched.subarray(p.fileOffset, p.fileOffset + p.size).toString('hex');
-          if (before === after) continue;
-          applied++;
-          lines.push(`| ${p.ea} | ${p.fileOffset} | ${before} | ${after} |`);
-        }
-        const slug = path.basename(target).replace(/[^\w.-]+/g, '_');
-        const exportDir = path.join(cfg.artifactDir, 'exports', session?.artifactId || slug, session?.engine || 'reverse');
-        fs.mkdirSync(exportDir, { recursive: true });
-        const outBin = path.join(exportDir, `${slug}.ig5-patched`);
-        const outMd = path.join(exportDir, `${slug}.changes.md`);
-        fs.writeFileSync(outBin, patched);
-        fs.writeFileSync(outMd, lines.join('\n') + '\n', 'utf8');
-        const derived = mgr.projects?.open(outBin, { projectId: session.projectId, ...(applied ? { derivedFrom: session.artifactId } : {}) });
-        return { target, patches: applied, auditedRegions: ranges.length, patchedBinary: outBin, report: outMd,
-          ...(derived ? { projectId: derived.projectId, derivedArtifactId: derived.artifactId } : {}) };
+        return exportPatchDiff({ target: requireString(args, 'target'), mgr, cfg });
       },
     },
     {
@@ -1834,6 +1810,7 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     ...defineAdvancedTools(mgr, cfg, textRender),
     ...defineIntegrationTools(mgr, cfg, textRender),
+    ...defineAnalysisTools(mgr, cfg, textRender),
   ];
 }
 
@@ -1901,10 +1878,11 @@ export function apply(ctx, config = {}) {
   ctx.effect(() => {
     const definitions = defineIg5Tools(ctx, mgr, cfg).map((definition) => {
       const execute = definition.execute;
-      const isGlobal = ['ig5_profile', 'ig5_status'].includes(definition.name);
+      const isGlobal = ['ig5_profile', 'ig5_status', 'ig5_crypto', 'ig5_protocol'].includes(definition.name);
+      const isData = ['ig5_crypto', 'ig5_protocol'].includes(definition.name);
       definition.parameters.properties.engine = { type: 'string', enum: definition.name === 'ig5_doctor'
         ? ['reverse', 'ghidra', 'x64dbg'] : ['reverse', 'ghidra'],
-        description: 'Explicit backend. Omit to use the configured primary static engine; results identify their source.' };
+        description: isData ? 'Optional result association or static source backend; standalone byte/file/ref analysis does not require an engine.' : 'Explicit backend. Omit to use the configured primary static engine; results identify their source.' };
       if (IG5_WRITE_TOOLS.has(definition.name) && definition.name !== 'ig5_sync') definition.parameters.properties.expected_revision = {
         type: 'number', description: 'Reject this operation if the selected database revision has changed since planning' };
       definition.execute = (args = {}, execution) => mgr.scope.run({ engine: args.engine || (definition.name === 'ig5_ir' ? 'ghidra' : cfg.defaultEngine), agentId: execution?.agent?.id || execution?.agent?.sessionId, signal: execution?.signal }, async () => {
@@ -1913,7 +1891,7 @@ export function apply(ctx, config = {}) {
         const selected = !args.target && !isGlobal && !['ig5_open', 'ig5_doctor', 'ig5_bindiff', 'ig5_sync'].includes(definition.name)
           && !definition.parameters.required?.includes('target') ? mgr.selectedTarget() : args.target;
         if (selected) args = { ...args, target: selected };
-        const session = selected ? mgr.get(selected) : null;
+        const session = selected && !isData ? mgr.get(selected) : null;
         const perform = async () => {
         if (session?.state === 'opening') {
           await mgr.launching.get(session.key);
@@ -1937,6 +1915,7 @@ export function apply(ctx, config = {}) {
     mgr.workflow = workflow;
     return async () => {
       await workflow.dispose();
+      await mgr.analysis?.dispose();
       await Promise.all([...mgr.sessions.values()].filter((s) => s.engine !== 'x64dbg').map((s) => mgr.close(s.target, true, s.engine, { force: true })));
       await Promise.all([...mgr.sessions.values()].map((s) => mgr.close(s.target, true, s.engine, { force: true })));
     };

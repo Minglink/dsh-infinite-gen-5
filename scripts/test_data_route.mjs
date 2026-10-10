@@ -8,6 +8,7 @@ import path from 'node:path';
 import vm from 'node:vm';
 import { defineAdvancedTools } from '../advanced_tools.js';
 import { defineIntegrationTools } from '../integration_tools.js';
+import { defineAnalysisTools } from '../analysis_tools.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { engineId } from '../engine_runtime.js';
 import { spawnWorker, attachWorker, doctorWorker } from '../source/worker_transport.js';
@@ -166,13 +167,14 @@ const toolsEnd = source.indexOf('// ── ig5dash', toolsStart);
 assert.ok(toolsStart >= 0 && toolsEnd > toolsStart, 'tool definitions must be present');
 const defineIg5Tools = vm.runInNewContext(
   source.slice(toolsStart, toolsEnd) + '\ndefineIg5Tools;',
-  { path, fs, publicEngineError, defineAdvancedTools, defineIntegrationTools, doctorWorker,
+  { path, fs, publicEngineError, defineAdvancedTools, defineIntegrationTools, defineAnalysisTools, doctorWorker,
     IG5_WRITE_TOOLS: vm.runInNewContext(source.slice(source.indexOf('const IG5_WRITE_TOOLS'), source.indexOf('function installApprovalGate')) + '\nIG5_WRITE_TOOLS;'),
     PLUGIN_ID: 'dsh-infinite-gen-5', PLUGIN_VERSION: '1.0.0', setTimeout, clearTimeout },
 );
 let killed = false;
 let doctorMode = 'success';
 const mockManager = {
+  analysis: { execute() { throw new Error('Data route fixture must not run analysis'); } },
   status: () => [],
   spawnWorker() {
     if (doctorMode === 'spawnThrow') throw new Error(diagnostic);
@@ -203,7 +205,7 @@ const mockManager = {
   },
 };
 const definitions = defineIg5Tools({}, mockManager, cfg);
-assert.equal(definitions.length, 36);
+assert.equal(definitions.length, 38);
 for (const definition of definitions) {
   assert.doesNotMatch(definition.description, /\bIDA\b|IDAPython|idalib|Hex-Rays|ida_[a-z]/i);
 }
@@ -237,11 +239,12 @@ const workerContext = {
   spawnWorker: (cfg, engine, root, options) => spawnWorker(cfg, engine, root, { ...options, spawnProcess: (...args) => workerContext.spawn(...args) }),
   terminateTree: (proc) => proc?.kill(),
   ProjectStore: class {
+    recoverAttachments() { return { recovered: [], retained: [] }; }
     open() { return { projectId: 'p', artifactId: 'a', sha256: 'h' }; }
     attachEngine() { return { attachmentId: 'at', dbRevision: 0 }; }
     closeAttachment() {}
   },
-  path, process, publicEngineError, WORKER: 'mock-worker.py', setTimeout, clearTimeout,
+  path, process, publicEngineError, diagAppend: () => {}, WORKER: 'mock-worker.py', setTimeout, clearTimeout,
   spawn() {
     if (workerMode === 'spawnThrow') throw new Error(diagnostic);
     const child = new EventEmitter();
@@ -289,6 +292,23 @@ const workerContext = {
   },
 };
 const WorkerManager = vm.runInNewContext(source.slice(workerStart, workerEnd) + '\nWorkerManager;', workerContext);
+const leaseManager = new WorkerManager(cfg), leaseChild = new EventEmitter();
+leaseChild.exitCode = null; leaseChild.signalCode = null; let killRequests = 0, releasedAttachments = 0;
+leaseChild.kill = () => { killRequests++; };
+leaseManager.projects.closeAttachment = () => { releasedAttachments++; };
+const leaseSession = { attachmentId: 'living-worker', proc: leaseChild, pending: new Map(), engine: 'reverse' };
+leaseManager.sessions.set('lease-test', leaseSession); leaseManager.killSession('lease-test');
+assert.equal(killRequests, 1); assert.equal(leaseManager.sessions.size, 0);
+assert.equal(releasedAttachments, 0, 'a requested termination must retain the living database owner lease');
+assert.equal(leaseSession.attachmentExitWait, true);
+leaseChild.exitCode = 1; leaseChild.emit('exit', 1); leaseChild.emit('exit', 1);
+assert.equal(releasedAttachments, 1, 'actual worker exit releases its lease exactly once');
+leaseManager.releaseAttachmentAfterExit({ attachmentId: 'checkpoint-closed', databaseClosed: true, proc: new EventEmitter() });
+assert.equal(releasedAttachments, 2, 'a confirmed database close may release before process exit');
+const failedRelease = { attachmentId: 'store-failure', databaseClosed: true, proc: new EventEmitter() };
+leaseManager.projects.closeAttachment = () => { throw new Error('STORE_BUSY'); };
+leaseManager.releaseAttachmentAfterExit(failedRelease);
+assert.notEqual(failedRelease.attachmentReleased, true, 'failed metadata release must not claim the lease closed');
 assert.doesNotMatch(JSON.stringify(new WorkerManager(cfg).snapshot()), /\bIDA\b|9\.2|pythonExe|idaDir/);
 const manager = new WorkerManager(cfg);
 await manager.open('C:\\fixtures\\sample.exe');

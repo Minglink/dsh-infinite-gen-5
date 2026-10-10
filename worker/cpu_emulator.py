@@ -2,7 +2,7 @@
 import os
 import sys
 import time
-from memory_image import MemoryImage, MEMORY_BUDGET, PAGE_SIZE, integer, page_range
+from memory_image import MemoryImage, MEMORY_BUDGET, PAGE_SIZE, PERM_READ, PERM_WRITE, integer, page_range
 
 
 def emulate_image(image, params):
@@ -36,6 +36,7 @@ def emulate_image(image, params):
     if not isinstance(captures, list) or len(captures) > 32:
         raise ValueError('capture must contain at most 32 memory ranges')
     buffers, requests, pages = [], [], set(image.pages)
+    permissions = dict(image.page_permissions)
     for item in memory:
         if not isinstance(item, dict):
             raise ValueError('invalid memory buffer')
@@ -46,7 +47,12 @@ def emulate_image(image, params):
         data = bytes.fromhex(payload)
         if not 1 <= len(data) <= 65536:
             raise ValueError('memory payload must contain 1..65536 bytes')
-        pages.update(page_range(address, len(data), bits))
+        buffer_pages = page_range(address, len(data), bits)
+        pages.update(buffer_pages)
+        for page in buffer_pages:
+            # User buffers initialize copied memory, but must not grant write
+            # or execute permission to a pre-existing engine page.
+            permissions.setdefault(page, PERM_READ | PERM_WRITE)
         buffers.append((address, data))
     for item in captures:
         if not isinstance(item, dict):
@@ -62,12 +68,15 @@ def emulate_image(image, params):
     if pages & stack_pages:
         raise ValueError('synthetic stack collides with target memory')
     pages.update(stack_pages)
+    permissions.update({page: PERM_READ | PERM_WRITE for page in stack_pages})
+    # emu_start's end address is checked before fetching a return instruction.
+    permissions[sentinel] = 0
     if len(pages) * PAGE_SIZE > MEMORY_BUDGET:
         raise ValueError('emulation memory budget exceeded (64 MiB)')
     vendor = os.path.join(os.path.dirname(__file__), 'vendor')
     if vendor not in sys.path:
         sys.path.insert(0, vendor)
-    from unicorn import Uc, UcError, UC_ARCH_X86, UC_ARCH_ARM64, UC_MODE_32, UC_MODE_64, UC_MODE_ARM, UC_HOOK_CODE, UC_HOOK_MEM_INVALID, UC_QUERY_TIMEOUT, UC_HOOK_INSN, UC_HOOK_INTR
+    from unicorn import Uc, UcError, UC_ARCH_X86, UC_ARCH_ARM64, UC_MODE_32, UC_MODE_64, UC_MODE_ARM, UC_HOOK_CODE, UC_HOOK_MEM_INVALID, UC_QUERY_TIMEOUT, UC_HOOK_INSN, UC_HOOK_INTR, UC_MEM_READ_PROT, UC_MEM_WRITE_PROT, UC_MEM_FETCH_PROT, UC_MEM_READ_UNMAPPED, UC_MEM_WRITE_UNMAPPED, UC_MEM_FETCH_UNMAPPED
     if arch == 'arm64':
         import unicorn.arm64_const as regs
         mu = Uc(UC_ARCH_ARM64, UC_MODE_ARM)
@@ -86,7 +95,7 @@ def emulate_image(image, params):
         arg_registers = ('rcx', 'rdx', 'r8', 'r9') if abi == 'win64' else (('rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9') if abi == 'sysv64' else ())
         sp = stack_base + stack_size - (0x2008 if bits == 64 else 0x1004)
     for page in sorted(pages):
-        mu.mem_map(page, PAGE_SIZE)
+        mu.mem_map(page, PAGE_SIZE, PERM_READ | PERM_WRITE)
     zero_filled = 0
     for address, data, missing in image.chunks():
         if data is not None:
@@ -105,12 +114,31 @@ def emulate_image(image, params):
         mu.reg_write(register(name), value)
     for address, data in buffers:
         mu.mem_write(address, data)
+    # Protect only after engine snapshots, synthetic stack and user buffers
+    # have been initialized. Coalesce equal adjacent pages into bounded runs.
+    ordered_pages = sorted(pages)
+    first = previous = ordered_pages[0]
+    permission = permissions[first]
+    for page in ordered_pages[1:]:
+        if page == previous + PAGE_SIZE and permissions[page] == permission:
+            previous = page
+            continue
+        mu.mem_protect(first, previous - first + PAGE_SIZE, permission)
+        first = previous = page
+        permission = permissions[page]
+    mu.mem_protect(first, previous - first + PAGE_SIZE, permission)
     state = {'instructions': 0, 'fault': None, 'last_address': None, 'last_size': 0, 'system': None}
     def trace(uc, address, size, _):
         state['instructions'] += 1
         state['last_address'], state['last_size'] = address, size
     def invalid(uc, access, address, size, value, _):
-        state['fault'] = {'access': access, 'ea': hex(address), 'size': size}
+        access_types = {UC_MEM_READ_PROT: 'read', UC_MEM_WRITE_PROT: 'write', UC_MEM_FETCH_PROT: 'execute',
+                        UC_MEM_READ_UNMAPPED: 'read', UC_MEM_WRITE_UNMAPPED: 'write', UC_MEM_FETCH_UNMAPPED: 'execute'}
+        protection = access in (UC_MEM_READ_PROT, UC_MEM_WRITE_PROT, UC_MEM_FETCH_PROT)
+        state['fault'] = {'access': access, 'accessType': access_types.get(access, 'unknown'),
+                          'kind': 'protection' if protection else 'unmapped',
+                          'ea': hex(address), 'size': size,
+                          'permissions': permissions.get(address & ~(PAGE_SIZE - 1))}
         return False
     mu.hook_add(UC_HOOK_CODE, trace)
     mu.hook_add(UC_HOOK_MEM_INVALID, invalid)
@@ -132,17 +160,24 @@ def emulate_image(image, params):
     returned = ip == sentinel
     timed_out = bool(mu.query(UC_QUERY_TIMEOUT))
     halted = arch == 'x86' and state['last_size'] == 1 and state['last_address'] is not None and bytes(mu.mem_read(state['last_address'], 1)) == b'\xf4'
-    reason = 'unsupported-system' if state['system'] else ('returned' if returned else ('unmapped-memory' if state['fault'] else ('emulator-error' if error else ('timeout' if timed_out else ('halt' if halted else ('instruction-limit' if state['instructions'] >= max_instructions else 'cpu-stopped'))))))
+    fault_reason = 'memory-protection' if state['fault'] and state['fault']['kind'] == 'protection' else 'unmapped-memory'
+    reason = 'unsupported-system' if state['system'] else ('returned' if returned else (fault_reason if state['fault'] else ('emulator-error' if error else ('timeout' if timed_out else ('halt' if halted else ('instruction-limit' if state['instructions'] >= max_instructions else 'cpu-stopped'))))))
     result_memory = []
     for address, size in requests:
         try:
             result_memory.append({'ea': hex(address), 'size': size, 'hex': bytes(mu.mem_read(address, size)).hex()})
         except UcError as exc:
             result_memory.append({'ea': hex(address), 'error': str(exc)})
+    limitations = ['CPU and copied memory only; no OS APIs, TLS setup, or imported function emulation',
+                   'Permissions use 4096-byte pages; byte-disjoint regions sharing a page use their permission union']
+    if image.unknown_permission_regions:
+        limitations.append('Unknown engine permissions use compatible RWX pages; those pages do not reproduce target protection')
     return {'ok': returned and not state['system'], 'engine': 'Unicorn', 'isolated': True, 'sourceEngine': image.source,
             'ea': hex(image.entry), 'bits': bits, 'arch': arch, 'abi': abi, 'reason': reason,
             'return_value': hex(mu.reg_read(result_reg)), 'ip': hex(ip), 'instructions': state['instructions'],
             'elapsedMs': int((time.monotonic() - started) * 1000),
             'registers': {name: hex(mu.reg_read(register(name))) for name in allowed_regs},
             'memory': result_memory, 'fault': state['fault'], 'systemInstruction': state['system'], 'error': error, 'zeroFilledBytes': zero_filled,
-            'limitations': ['CPU and copied memory only; no OS APIs, TLS setup, or imported function emulation']}
+            'protectionMode': 'engine-page-permissions-with-unknown-rwx' if image.unknown_permission_regions else 'engine-page-permissions',
+            'unknownPermissionRegions': image.unknown_permission_regions, 'unknownPermissionPages': image.unknown_permission_pages,
+            'pagePermissionMerges': image.page_permission_merges, 'pageSize': PAGE_SIZE, 'limitations': limitations}

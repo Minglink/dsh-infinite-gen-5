@@ -161,7 +161,7 @@ def m_emulate(params):
     import ida_bytes
     import ida_segment
     import ida_ida
-    from memory_image import MemoryImage, MemoryRegion
+    from memory_image import MemoryImage, MemoryRegion, PERM_READ, PERM_WRITE, PERM_EXEC
     from cpu_emulator import emulate_image
     if ida_ida.inf_get_procname() != 'metapc':
         raise ValueError('Reverse memory provider currently supports x86/x64 targets only')
@@ -172,9 +172,15 @@ def m_emulate(params):
         base, size = segment.start_ea, segment.end_ea - segment.start_ea
         if size <= 0:
             continue
+        native_permissions = getattr(segment, 'perm', None)
+        # Reverse defines perm=0 as "no information", not no-access.
+        permissions = None if not native_permissions else (
+            (PERM_READ if native_permissions & ida_segment.SEGPERM_READ else 0) |
+            (PERM_WRITE if native_permissions & ida_segment.SEGPERM_WRITE else 0) |
+            (PERM_EXEC if native_permissions & ida_segment.SEGPERM_EXEC else 0))
         # Preserve the previous provider's zero-filled uninitialized ranges, now reported explicitly.
         regions.append(MemoryRegion(base, size,
             lambda offset, length, base=base: ida_bytes.get_bytes(base + offset, length),
-            name=ida_segment.get_segm_name(segment), zero_fill=True))
+            name=ida_segment.get_segm_name(segment), zero_fill=True, permissions=permissions))
     image = MemoryImage('x86', 64 if ida_ida.inf_is_64bit() else 32, fn.start_ea, regions, source='reverse')
     return emulate_image(image, params)

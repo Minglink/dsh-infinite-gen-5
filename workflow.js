@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SKILL_NAMES = Object.freeze([
   'ig5-triage', 'ig5-deep-dive', 'ig5-patch-and-sign', 'ig5-diff', 'ig5-debug-live',
+  'ig5-crypto', 'ig5-protocol',
 ]);
 
 /** The eight schemas advertised by the core toolset. Full uses all supplied definitions. */
@@ -50,9 +51,8 @@ function pathInput(input) {
 }
 
 /**
- * Own IG5 tools, bundled skills, and the native /ig5 command for one plugin instance.
- * The selected toolset applies to every session using this instance, and is not
- * persisted to cordis.yml. Optional skills/commands services may arrive later.
+ * Own the global core baseline and agent-owned advanced tools when scoped DSH
+ * registries are available. Older hosts explicitly retain instance-wide mode.
  * @param {object} ctx Cordis context with the injected tools service.
  * @param {object} options Resolved cfg, worker mgr, all definitions, and optional formatError(error, cfg).
  * @returns {{getToolset: function, setToolset: function, snapshot: function, dispose: function}} Lifecycle controller; dispose may be awaited.
@@ -65,19 +65,55 @@ export function installWorkflow(ctx, { cfg, mgr, definitions, formatError = (err
   const activeSkills = new Set();
   const activeCommands = new Set();
   const fibers = [];
+  const listeners = [];
+  const scopedTools = new Map();
+  const closedScopes = new WeakSet();
+  const scoped = typeof ctx.tools.restrict === 'function' && typeof ctx.on === 'function';
+  const defaultToolset = cfg.toolset ?? 'core';
   let toolset;
   let disposed = false;
   let disposing;
 
-  const snapshot = () => ({
-    toolset,
-    toolsetScope: 'plugin-instance',
-    toolsetPersistent: false,
-    activeTools: [...activeTools.keys()],
-    availableTools: [...catalog.keys()],
-    skills: [...activeSkills],
-    commands: [...activeCommands],
-  });
+  function subjectOf(subject) {
+    const agent = subject?.agent ?? (subject?.ctx ? subject : undefined);
+    const agentCtx = agent?.ctx ?? subject?.agentCtx ?? (subject?.tools ? subject : undefined);
+    return { agent, agentCtx };
+  }
+
+  function scopedState(subject) {
+    if (disposed) throw new Error('IG5 workflow has been disposed');
+    const { agent, agentCtx } = subjectOf(subject);
+    if (!agentCtx) return null;
+    if (agentCtx === ctx || closedScopes.has(agentCtx)) throw new Error('IG5 agent scope is unavailable or disposed');
+    let state = scopedTools.get(agentCtx);
+    if (state) return state;
+    const service = agentCtx.tools;
+    if (typeof service?.register !== 'function' || typeof service?.restrict !== 'function') throw new Error('DSH agent context does not support scoped tools');
+    // An empty deny mask changes no capabilities but the real DSH implementation
+    // rejects an unscoped service. Never trust a different-looking global proxy.
+    const proof = service.restrict({ deny: [] });
+    if (typeof proof !== 'function') throw new Error('DSH scoped tool registry must return a disposer');
+    proof();
+    state = { agent, agentCtx, service, mode: 'core', tools: new Map() };
+    scopedTools.set(agentCtx, state);
+    try { changeTools(state.tools, service, defaultToolset === 'full' ? [...catalog.keys()].filter(name => !CORE_TOOL_NAMES.includes(name)) : []); state.mode = defaultToolset; }
+    catch (error) { scopedTools.delete(agentCtx); throw error; }
+    return state;
+  }
+
+  function snapshot(subject) {
+    const state = scoped && subject ? scopedState(subject) : null;
+    return {
+      toolset: state?.mode ?? toolset,
+      toolsetScope: scoped ? 'agent' : 'plugin-instance',
+      toolsetPersistent: false,
+      ...(scoped ? { defaultToolset, agentScopeAvailable: !!state, ...(state?.agent?.id ? { agentId: state.agent.id } : {}) } : {}),
+      activeTools: [...activeTools.keys(), ...(state ? state.tools.keys() : [])],
+      availableTools: [...catalog.keys()],
+      skills: [...activeSkills],
+      commands: [...activeCommands],
+    };
+  }
 
   function register(service, definition) {
     const dispose = service.register(definition);
@@ -85,27 +121,47 @@ export function installWorkflow(ctx, { cfg, mgr, definitions, formatError = (err
     return dispose;
   }
 
-  function setToolset(mode) {
-    if (disposed) throw new Error('IG5 workflow has been disposed');
-    if (mode !== 'core' && mode !== 'full') throw new Error('toolset 必须为 core 或 full');
-    const wanted = new Set(mode === 'core' ? CORE_TOOL_NAMES : catalog.keys());
+  function changeTools(owned, service, names) {
+    const wanted = new Set(names);
     const additions = [];
     try {
       for (const name of wanted) {
-        if (activeTools.has(name)) continue;
-        const dispose = register(ctx.tools, catalog.get(name));
-        activeTools.set(name, dispose);
+        if (owned.has(name)) continue;
+        const dispose = register(service, catalog.get(name));
+        owned.set(name, dispose);
         additions.push(name);
       }
     } catch (error) {
-      for (const name of additions.reverse()) { activeTools.get(name)(); activeTools.delete(name); }
+      for (const name of additions.reverse()) { owned.get(name)(); owned.delete(name); }
       throw error;
     }
-    for (const [name, dispose] of activeTools) {
-      if (!wanted.has(name)) { dispose(); activeTools.delete(name); }
+    for (const [name, dispose] of owned) {
+      if (!wanted.has(name)) { dispose(); owned.delete(name); }
     }
-    toolset = mode;
-    return snapshot();
+  }
+
+  function setToolset(mode, subject) {
+    if (disposed) throw new Error('IG5 workflow has been disposed');
+    if (mode !== 'core' && mode !== 'full') throw new Error('toolset 必须为 core 或 full');
+    if (scoped) {
+      const state = scopedState(subject);
+      if (!state) throw Object.assign(new Error('Changing IG5 tools requires the current agent context'), { code: 'AGENT_SCOPE_REQUIRED' });
+      changeTools(state.tools, state.service, mode === 'full' ? [...catalog.keys()].filter(name => !CORE_TOOL_NAMES.includes(name)) : []);
+      state.mode = mode;
+    } else {
+      changeTools(activeTools, ctx.tools, mode === 'core' ? CORE_TOOL_NAMES : catalog.keys());
+      toolset = mode;
+    }
+    return snapshot(subject);
+  }
+
+  function removeScope(agentCtx) {
+    const state = scopedTools.get(agentCtx);
+    if (state) {
+      for (const remove of [...state.tools.values()].reverse()) remove();
+      state.tools.clear(); scopedTools.delete(agentCtx);
+    }
+    if (agentCtx && typeof agentCtx === 'object') closedScopes.add(agentCtx);
   }
 
   function selectedTarget(input, engine) {
@@ -151,7 +207,7 @@ export function installWorkflow(ctx, { cfg, mgr, definitions, formatError = (err
         } else if (action === 'export') {
           result = await readCommandTool('ig5_export_diff', { target: selectedTarget(input, engine), ...(engine ? { engine } : {}) }, invocation);
         } else if (action === 'toolset') {
-          result = input ? setToolset(input.toLowerCase()) : snapshot();
+          result = input ? setToolset(input.toLowerCase(), invocation) : snapshot(invocation);
         } else throw new Error('用法：/ig5 status | open <path> | export [path] | toolset [core|full]');
         return { kind: 'success', text: JSON.stringify(result, null, 2) };
       } catch (error) {
@@ -163,6 +219,8 @@ export function installWorkflow(ctx, { cfg, mgr, definitions, formatError = (err
   async function dispose() {
     if (disposing) return disposing;
     disposed = true;
+    for (const remove of listeners.splice(0).reverse()) remove();
+    for (const agentCtx of [...scopedTools.keys()]) removeScope(agentCtx);
     for (const remove of [...activeTools.values()].reverse()) remove();
     activeTools.clear();
     disposing = Promise.all(fibers.map((fiber) => fiber.dispose())).then(() => {
@@ -173,7 +231,18 @@ export function installWorkflow(ctx, { cfg, mgr, definitions, formatError = (err
   }
 
   try {
-    setToolset(cfg.toolset ?? 'core');
+    if (defaultToolset !== 'core' && defaultToolset !== 'full') throw new Error('toolset 必须为 core 或 full');
+    if (scoped) {
+      changeTools(activeTools, ctx.tools, CORE_TOOL_NAMES); toolset = 'core';
+      listeners.push(ctx.on('agent/created', ({ agent }) => { scopedState(agent); }));
+      listeners.push(ctx.on('agent/disposed', ({ agent }) => { removeScope(agent?.ctx); }));
+      fibers.push(ctx.inject(['agents'], (scope) => {
+        if (disposed) return;
+        const agents = scope.get('agents');
+        const existing = typeof agents?.list === 'function' ? agents.list() : [];
+        for (const agent of existing) scopedState(agent);
+      }));
+    } else setToolset(defaultToolset);
     const skills = loadSkills();
     fibers.push(ctx.inject(['skills'], (scope) => {
       if (disposed) return;
@@ -197,9 +266,12 @@ export function installWorkflow(ctx, { cfg, mgr, definitions, formatError = (err
       activeCommands.add(command.name);
       return () => { remove(); activeCommands.delete(command.name); };
     }));
+    // Agent registries own their effects independently of the plugin fiber.
+    // Explicitly lift those effects when this workflow owner unloads or reloads.
+    ctx.effect(() => () => dispose());
   } catch (error) {
     void dispose();
     throw error;
   }
-  return { getToolset: () => toolset, setToolset, snapshot, dispose };
+  return { getToolset: subject => snapshot(subject).toolset, setToolset, snapshot, dispose };
 }

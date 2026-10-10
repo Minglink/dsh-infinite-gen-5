@@ -1,12 +1,15 @@
 param(
-  [string]$BuildRoot = (Join-Path $PSScriptRoot '..\.downloads\x64dbg-build'),
-  [string]$RuntimeRoot = (Join-Path $PSScriptRoot '..\runtimes\x64dbg'),
+  [string]$BuildRoot,
+  [string]$RuntimeRoot,
   [string]$CMake = 'C:\Program Files\CMake\bin\cmake.exe',
-  [string]$Python = (Join-Path $PSScriptRoot '..\runtimes\ghidra\python\python.exe'),
+  [string]$Python,
   [ValidateSet('x64','x86','both')][string]$Architecture = 'both',
   [switch]$InstallBuiltRuntime
 )
 $ErrorActionPreference = 'Stop'
+if (-not $PSBoundParameters.ContainsKey('BuildRoot')) { $BuildRoot = Join-Path $PSScriptRoot '..\.downloads\x64dbg-build' }
+if (-not $PSBoundParameters.ContainsKey('RuntimeRoot')) { $RuntimeRoot = Join-Path $PSScriptRoot '..\runtimes\x64dbg' }
+if (-not $PSBoundParameters.ContainsKey('Python')) { $Python = Join-Path $PSScriptRoot '..\runtimes\ghidra\python\python.exe' }
 $pluginRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $BuildRoot = [IO.Path]::GetFullPath($BuildRoot)
 $RuntimeRoot = [IO.Path]::GetFullPath($RuntimeRoot)
@@ -67,6 +70,8 @@ $proof = [ordered]@{
   schemaVersion=1; engine='x64dbg'; upstreamCommit=$lock.commit;
   upstreamRepository=$lock.repository; gitlinks=$lock.gitlinks;
   patches=@($lock.patches | ForEach-Object { [ordered]@{path=$_;sha256=(Get-IG5Hash (Join-Path $overlay $_))} });
+  buildLockSHA256=(Get-IG5Hash (Join-Path $overlay 'build-lock.json'));
+  patchedSourceFiles=$lock.modifiedFiles; maintenanceFixes=$lock.maintenanceFixes;
   sourceInventorySHA256=(Get-IG5Hash (Join-Path $pluginRoot 'third_party\sources\provenance\x64dbg-runtime.files.json'));
   cmake=(& $CMake --version | Select-Object -First 1);
   headlessOnly=$true; builtFromSource=@('bridge','dbg','headless','loaddll','zydis_wrapper','btparser','TitanEngine','scylla_wrapper','distorm');

@@ -31,7 +31,7 @@ try {
     artifactDir: path.join(scratch, 'artifacts'),
     toolset: 'full',
   });
-  assert.equal(tools.size, 36, 'all 36 tools must be registered in full mode');
+  assert.equal(tools.size, 38, 'all 38 tools must be registered in full mode');
 
   const call = (name, args = {}) => tools.get(name).execute({ target, ...args });
   const core = await call('ig5_profile', { toolset: 'core' });
@@ -39,8 +39,8 @@ try {
   assert.equal(tools.size, 8);
   assert.equal(tools.has('ig5_patch_bytes'), false);
   const full = await call('ig5_profile', { toolset: 'full' });
-  assert.equal(full.activeTools.length, 36);
-  assert.equal(tools.size, 36);
+  assert.equal(full.activeTools.length, 38);
+  assert.equal(tools.size, 38);
   const info = await call('ig5_open', { path: target, background: false });
   assert.ok(info.n_funcs > 0, 'fixture must contain analyzed functions');
   const funcs = await call('ig5_funcs', { limit: 30 });

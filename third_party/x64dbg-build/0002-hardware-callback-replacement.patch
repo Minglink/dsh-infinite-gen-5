@@ -1,0 +1,78 @@
+--- a/src/third_party/TitanEngine/TitanEngine/TitanEngine.Debugger.DebugLoop.cpp
++++ b/src/third_party/TitanEngine/TitanEngine/TitanEngine.Debugger.DebugLoop.cpp
+@@ -744,9 +744,17 @@
+                                 synchronizedStep = true;
+                                 SetThreadContext(hActiveThread, &myDBGContext);
+                             }
++                            const auto hitBreakpoint = DebugRegister[0];
+                             myCustomHandler = (fCustomHandler)(DebugRegister[0].DrxCallBack);
+                             myCustomHandler((void*)myDBGContext.Dr0);
+-                            if(DebugRegister[0].DrxEnabled)
++                            // IG5: the paused callback may replace this slot. Preserve
++                            // the new breakpoint instead of disabling its first access.
++                            if(DebugRegister[0].DrxEnabled &&
++                                    DebugRegister[0].DrxBreakAddress == hitBreakpoint.DrxBreakAddress &&
++                                    DebugRegister[0].DrxBreakPointType == hitBreakpoint.DrxBreakPointType &&
++                                    DebugRegister[0].DrxBreakPointSize == hitBreakpoint.DrxBreakPointSize &&
++                                    DebugRegister[0].DrxCallBack == hitBreakpoint.DrxCallBack &&
++                                    DebugRegister[0].DrxExecution == hitBreakpoint.DrxExecution)
+                             {
+                                 memcpy(&DebugRegisterX, &DebugRegister[0], sizeof(HARDWARE_DATA));
+                                 DebugRegisterXId = UE_DR0;
+@@ -776,9 +784,17 @@
+                                 synchronizedStep = true;
+                                 SetThreadContext(hActiveThread, &myDBGContext);
+                             }
++                            const auto hitBreakpoint = DebugRegister[1];
+                             myCustomHandler = (fCustomHandler)(DebugRegister[1].DrxCallBack);
+                             myCustomHandler((void*)myDBGContext.Dr1);
+-                            if(DebugRegister[1].DrxEnabled)
++                            // IG5: the paused callback may replace this slot. Preserve
++                            // the new breakpoint instead of disabling its first access.
++                            if(DebugRegister[1].DrxEnabled &&
++                                    DebugRegister[1].DrxBreakAddress == hitBreakpoint.DrxBreakAddress &&
++                                    DebugRegister[1].DrxBreakPointType == hitBreakpoint.DrxBreakPointType &&
++                                    DebugRegister[1].DrxBreakPointSize == hitBreakpoint.DrxBreakPointSize &&
++                                    DebugRegister[1].DrxCallBack == hitBreakpoint.DrxCallBack &&
++                                    DebugRegister[1].DrxExecution == hitBreakpoint.DrxExecution)
+                             {
+                                 memcpy(&DebugRegisterX, &DebugRegister[1], sizeof(HARDWARE_DATA));
+                                 DebugRegisterXId = UE_DR1;
+@@ -808,9 +824,17 @@
+                                 synchronizedStep = true;
+                                 SetThreadContext(hActiveThread, &myDBGContext);
+                             }
++                            const auto hitBreakpoint = DebugRegister[2];
+                             myCustomHandler = (fCustomHandler)(DebugRegister[2].DrxCallBack);
+                             myCustomHandler((void*)myDBGContext.Dr2);
+-                            if(DebugRegister[2].DrxEnabled)
++                            // IG5: the paused callback may replace this slot. Preserve
++                            // the new breakpoint instead of disabling its first access.
++                            if(DebugRegister[2].DrxEnabled &&
++                                    DebugRegister[2].DrxBreakAddress == hitBreakpoint.DrxBreakAddress &&
++                                    DebugRegister[2].DrxBreakPointType == hitBreakpoint.DrxBreakPointType &&
++                                    DebugRegister[2].DrxBreakPointSize == hitBreakpoint.DrxBreakPointSize &&
++                                    DebugRegister[2].DrxCallBack == hitBreakpoint.DrxCallBack &&
++                                    DebugRegister[2].DrxExecution == hitBreakpoint.DrxExecution)
+                             {
+                                 memcpy(&DebugRegisterX, &DebugRegister[2], sizeof(HARDWARE_DATA));
+                                 DebugRegisterXId = UE_DR2;
+@@ -840,9 +864,17 @@
+                                 synchronizedStep = true;
+                                 SetThreadContext(hActiveThread, &myDBGContext);
+                             }
++                            const auto hitBreakpoint = DebugRegister[3];
+                             myCustomHandler = (fCustomHandler)(DebugRegister[3].DrxCallBack);
+                             myCustomHandler((void*)myDBGContext.Dr3);
+-                            if(DebugRegister[3].DrxEnabled)
++                            // IG5: the paused callback may replace this slot. Preserve
++                            // the new breakpoint instead of disabling its first access.
++                            if(DebugRegister[3].DrxEnabled &&
++                                    DebugRegister[3].DrxBreakAddress == hitBreakpoint.DrxBreakAddress &&
++                                    DebugRegister[3].DrxBreakPointType == hitBreakpoint.DrxBreakPointType &&
++                                    DebugRegister[3].DrxBreakPointSize == hitBreakpoint.DrxBreakPointSize &&
++                                    DebugRegister[3].DrxCallBack == hitBreakpoint.DrxCallBack &&
++                                    DebugRegister[3].DrxExecution == hitBreakpoint.DrxExecution)
+                             {
+                                 memcpy(&DebugRegisterX, &DebugRegister[3], sizeof(HARDWARE_DATA));
+                                 DebugRegisterXId = UE_DR3;

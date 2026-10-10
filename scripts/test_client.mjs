@@ -47,6 +47,7 @@ function markup(node) {
   const escape = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   if (typeof node === 'string' || typeof node === 'number') return escape(node);
   if (!node) return '';
+  assert.ok(node.props && Array.isArray(node.children), 'Objects are not valid as a React child');
   assert.equal(node.props.dangerouslySetInnerHTML, undefined, 'renderer must not inject HTML');
   return `<${typeof node.type === 'string' ? node.type : 'component'}>${(node.children || []).map(markup).join('')}</${typeof node.type === 'string' ? node.type : 'component'}>`;
 }
@@ -328,4 +329,260 @@ test('runtime replacement at the same path hides the old artifact snapshot', asy
   h.render({ sessions: [{ ...session, artifactId: 'new', attachmentId: 'new-attachment' }], refresh: 1 }); h.render();
   assert.ok(!text(h.tree).includes('old-run')); assert.ok(!text(h.tree).includes('0xAAA'));
   next.resolve(response({ runId: 'new-run' })); await settle(); h.render(); assert.match(text(h.tree), /new-run/); h.unmount();
+});
+
+const scanFixture = (marker = 'AES S-box') => ({ schemaVersion: 2, sourceEngine: 'ghidra',
+  entropies: [{ name: '.rdata', ea: '0x140003000', size: 8192, sampledBytes: 4096, entropy: 7.6543, truncated: true,
+    interpretation: 'high entropy is only a compression/encryption/random-data clue', coverage: [{ start: '0x140003000', size: 4096 }] }],
+  crypto_markers: [{ name: marker, marker, ea: '0x140003110', kind: 'cipher', constantRole: 'substitution-table',
+    evidence: { byteOrder: 'byte-array', verifiedBytes: 256, segment: '.rdata', claim: 'constant bytes match; algorithm use and keys are unproven' } }],
+  suspicious_apis: [{ module: 'bcrypt.dll', api: 'BCryptDecrypt', category: 'crypto', ea: '0x140005100',
+    addressRole: 'import-slot', addressSpace: 'memory', interpretation: 'import presence is a lead; behavior is unproven' }],
+  coverage: { bytesRead: 4096, sampling: 'bounded prefix/middle/suffix; unobserved bytes are not classified' },
+  truncated: true, limits: { max_bytes: 4096 }, idb_modified: false,
+});
+const fingerprintFixture = { abi: 'MSVC', total_functions: 4, library_functions_count: 1, library_ratio: 0.25, user_functions_count: 3, sample_library_funcs: [{ name: 'memcpy' }] };
+function control(tree, label) { const found = nodes(tree, n => n.props?.['aria-label'] === label)[0]; assert.ok(found, `control ${label}`); return found; }
+function edit(h, label, value) { control(h.tree, label).props.onChange({ target: { value } }); h.render(); }
+
+test('scan normalization accepts canonical structured markers/API evidence and legacy aliases', () => {
+  const canonical = ui.normalizeScan(scanFixture());
+  assert.equal(canonical.crypto_markers[0].name, 'AES S-box'); assert.equal(canonical.suspicious_apis[0].api, 'BCryptDecrypt');
+  assert.equal(canonical.suspicious_apis[0].module, 'bcrypt.dll'); assert.equal(canonical.entropies[0].sampledBytes, 4096); assert.equal(canonical.truncated, true);
+  const legacy = ui.normalizeScan({ entropy: [{ segment: '.data', entropy: 6.5 }], crypto: ['MD5 IV', { marker: 'SHA-256 K', ea: '0x2000' }], suspiciousApis: ['recv', { name: 'CryptDecrypt', module: 'advapi32.dll' }] });
+  assert.equal(legacy.entropies[0].name, '.data'); assert.equal(legacy.crypto_markers[1].name, 'SHA-256 K');
+  assert.equal(legacy.suspicious_apis[0].api, 'recv'); assert.equal(legacy.suspicious_apis[1].api, 'CryptDecrypt');
+  assert.equal(ui.normalizeScan({ crypto_markers: [], crypto: ['stale legacy'] }).crypto_markers.length, 0);
+});
+
+test('scan renderer uses structured canonical hits as text rather than React object children', async () => {
+  const urls = [];
+  request = (url, options) => { assert.equal(options, undefined); urls.push(url); return Promise.resolve(response(new URL(url, 'http://test').searchParams.get('type') === 'scan' ? scanFixture('<script>sample-marker</script>') : fingerprintFixture)); };
+  const h = harness(ui.ScanView, { target: 'sample.exe', engine: 'ghidra' }); h.render(); await settle(); h.render();
+  assert.match(text(h.tree), /bcrypt.dll!BCryptDecrypt/); assert.match(text(h.tree), /7.654/); assert.match(text(h.tree), /采样或截断/);
+  assert.ok(markup(h.tree).includes('&lt;script&gt;sample-marker&lt;/script&gt;')); assert.ok(!markup(h.tree).includes('<script>'));
+  assert.ok(!text(h.tree).includes('[object Object]')); assert.ok(urls.every(url => new URL(url, 'http://test').searchParams.get('engine') === 'ghidra'));
+  h.unmount();
+});
+
+test('scan target and engine changes hide old evidence before late responses arrive', async () => {
+  const reads = [];
+  request = url => { const q = new URL(url, 'http://test').searchParams; const d = deferred(); reads.push({ target: q.get('target'), engine: q.get('engine'), type: q.get('type'), d }); return d.promise; };
+  const h = harness(ui.ScanView, { target: 'A.exe', engine: 'reverse' }); h.render();
+  h.render({ target: 'B.exe', engine: 'ghidra' });
+  for (const r of reads.filter(r => r.target === 'B.exe')) r.d.resolve(response(r.type === 'scan' ? scanFixture('CURRENT') : { ...fingerprintFixture, abi: 'CURRENT-ABI' }));
+  await settle(); h.render(); assert.match(text(h.tree), /CURRENT/);
+  for (const r of reads.filter(r => r.target === 'A.exe')) r.d.resolve(response(r.type === 'scan' ? scanFixture('STALE') : { ...fingerprintFixture, abi: 'STALE-ABI' }));
+  await settle(); h.render(); assert.ok(!text(h.tree).includes('STALE'));
+  h.render({ target: 'B.exe', engine: 'reverse' }); assert.ok(!text(h.tree).includes('CURRENT'));
+  for (const r of reads.filter(r => r.target === 'B.exe' && r.engine === 'reverse')) r.d.resolve(response(r.type === 'scan' ? scanFixture('NEW-ENGINE') : fingerprintFixture));
+  await settle(); h.render(); assert.match(text(h.tree), /NEW-ENGINE/); h.unmount();
+});
+
+test('analysis draft serializes explicit data/schema and refuses JSON source/action overrides', () => {
+  const input = { encoding: 'hex', data: '000141' };
+  const draft = ui.buildAnalysisDraft('protocol', 'decode', input, '{"schema":{"fields":[{"name":"len","type":"u16","offset":0}]},"framing":{"type":"length-prefix"}}', 'A.exe');
+  const args = JSON.parse(draft.slice(draft.indexOf('{')));
+  assert.deepEqual(args.input, input); assert.equal(args.action, 'decode'); assert.equal(args.target, 'A.exe'); assert.equal(args.schema.fields[0].name, 'len');
+  for (const key of ['input', 'action', 'target', 'engine', '__proto__', 'constructor', 'prototype']) assert.throws(() => ui.buildAnalysisDraft('crypto', 'inspect', input, `{"${key}":"override"}`, 'A.exe'), /不能覆盖/);
+  for (const params of ['[]', 'null', '"string"', 'invalid JSON']) assert.throws(() => ui.buildAnalysisDraft('crypto', 'inspect', input, params, 'A.exe'));
+  assert.throws(() => ui.buildAnalysisDraft('protocol', 'transform', input, '{}'), /无效/); assert.throws(() => ui.buildAnalysisDraft('unknown', 'inspect', input, '{}'));
+  assert.equal({}.override, undefined);
+});
+
+test('data analysis editor inserts an editable draft and never fetches/submits/executes', () => {
+  request = () => assert.fail('draft editing must not call HTTP');
+  const calls = [], span = { revision: 5, start: 8, end: 8 };
+  const h = harness(ui.AnalysisDraft, { target: 'A.exe', inputActions: { captureInsertion: () => span, insertText: (...args) => { calls.push(['insert', ...args]); return true; }, persistDraft: () => calls.push(['persist']), submit: () => assert.fail('must not submit'), execute: () => assert.fail('must not execute') } });
+  h.render(); edit(h, '数据分析领域', 'protocol'); edit(h, '数据分析操作', 'decode'); edit(h, '分析数据来源', 'hex'); edit(h, '分析输入文件或字节', '000141');
+  edit(h, '分析附加参数 JSON', '{"framing":{"type":"length-prefix"}}'); button(h.tree, '生成分析草稿').props.onClick(); h.render();
+  const draft = control(h.tree, '待发送数据分析草稿'); draft.props.onChange({ target: { value: draft.props.value + '\n请核查长度字段假设。' } }); h.render();
+  button(h.tree, '插入会话草稿（待发送）').props.onClick(); h.render();
+  assert.equal(calls[0][0], 'insert'); assert.equal(calls[0][2], span); assert.ok(calls[0][1].includes('请核查长度字段假设。')); assert.equal(calls[1][0], 'persist'); assert.match(text(h.tree), /尚未发送或执行/);
+  h.unmount();
+});
+
+test('analysis source/target edits clear old drafts and stale composer insertion does not persist', () => {
+  const h = harness(ui.AnalysisDraft, { target: 'A.exe', inputActions: { captureInsertion: () => ({}), insertText: () => false, persistDraft: () => assert.fail('must not persist refused insertion') } });
+  h.render(); edit(h, '分析输入文件或字节', 'C:/captures/one.pcap'); button(h.tree, '生成分析草稿').props.onClick(); h.render();
+  button(h.tree, '插入会话草稿（待发送）').props.onClick(); h.render(); assert.match(text(h.tree), /编辑器内容已变化/);
+  edit(h, '分析输入文件或字节', 'C:/captures/two.pcap'); assert.equal(nodes(h.tree, n => n.props?.['aria-label'] === '待发送数据分析草稿').length, 0);
+  button(h.tree, '生成分析草稿').props.onClick(); h.render(); assert.ok(control(h.tree, '待发送数据分析草稿').props.value.includes('two.pcap'));
+  h.render({ ...h.props, target: 'B.exe' }); h.render();
+  assert.equal(nodes(h.tree, n => n.props?.['aria-label'] === '待发送数据分析草稿').length, 0); h.unmount();
+});
+
+test('automatic recovery and inference editors create bounded templates without submitting or reading keys', () => {
+  request = () => assert.fail('draft templates must not execute or fetch');
+  const h = harness(ui.AnalysisDraft, { target: 'A.exe', engine: 'ghidra', inputActions: { submit: () => assert.fail('must not submit') } });
+  h.render(); edit(h, '分析数据来源', 'hex'); edit(h, '分析输入文件或字节', '010203');
+  edit(h, '数据分析操作', 'recover'); assert.match(text(h.tree), /完整候选可用 recipe.key_ref/);
+  button(h.tree, '填入分析参数模板').props.onClick(); h.render();
+  assert.equal(JSON.parse(control(h.tree, '分析附加参数 JSON').props.value).recovery.max_work_bytes, 16777216);
+  button(h.tree, '生成分析草稿').props.onClick(); h.render();
+  const recovered = control(h.tree, '待发送数据分析草稿').props.value;
+  const cryptoArgs = JSON.parse(recovered.slice(recovered.indexOf('{'))); assert.equal(cryptoArgs.action, 'recover'); assert.equal(cryptoArgs.engine, 'ghidra');
+  edit(h, '数据分析领域', 'protocol'); edit(h, '数据分析操作', 'infer'); assert.match(text(h.tree), /独立 holdout_samples/);
+  button(h.tree, '填入分析参数模板').props.onClick(); h.render();
+  assert.equal(JSON.parse(control(h.tree, '分析附加参数 JSON').props.value).inference.boundary, 'unknown');
+  button(h.tree, '生成分析草稿').props.onClick(); h.render();
+  const inferred = control(h.tree, '待发送数据分析草稿').props.value; assert.equal(JSON.parse(inferred.slice(inferred.indexOf('{'))).action, 'infer'); h.unmount();
+});
+
+test('same-target analysis engine changes hide drafts immediately and preserve the new engine', () => {
+  const h = harness(ui.AnalysisDraft, { target: 'A.exe', engine: 'reverse' }); h.render(); edit(h, '分析输入文件或字节', 'C:/one.bin');
+  button(h.tree, '生成分析草稿').props.onClick(); h.render(); assert.ok(control(h.tree, '待发送数据分析草稿').props.value.includes('reverse'));
+  h.render({ target: 'A.exe', engine: 'ghidra' }); assert.equal(nodes(h.tree, n => n.props?.['aria-label'] === '待发送数据分析草稿').length, 0);
+  h.render(); button(h.tree, '生成分析草稿').props.onClick(); h.render(); assert.ok(control(h.tree, '待发送数据分析草稿').props.value.includes('ghidra')); h.unmount();
+});
+
+test('explicit recovery and inferred decode drafts retain nested key references and delimiter framing', () => {
+  const keyRef = { ref: 'sha256:' + 'b'.repeat(64), result_id: '11111111-2222-3333-4444-555555555555' };
+  const draft = ui.buildAnalysisDraft('crypto', 'transform', { encoding: 'hex', data: 'ff' }, JSON.stringify({ recipe: { kind: 'xor', key_ref: keyRef } }), 'A.exe', 'ghidra');
+  const args = JSON.parse(draft.slice(draft.indexOf('{'))); assert.deepEqual(args.recipe.key_ref, keyRef); assert.equal(args.recipe.key, undefined);
+  const decoded = ui.buildAnalysisDraft('protocol', 'decode', { encoding: 'hex', data: '410a' }, JSON.stringify({ framing: { type: 'delimiter', delimiterHex: '0a', includeDelimiter: true }, schema: { fields: [] } }));
+  assert.equal(JSON.parse(decoded.slice(decoded.indexOf('{'))).framing.type, 'delimiter');
+});
+
+const analysisItem = (id, target = '', engine = 'ghidra') => ({ id, kind: 'protocol', action: 'decode', createdAt: '2026-10-10T09:00:00Z', ...(target ? { association: { target, engine } } : {}) });
+
+test('evidence reuse keeps producer, exact stream span and sensitive key refs without executing guesses', () => {
+  const report = { id: '11111111-2222-3333-4444-555555555555', input: { ref: 'sha256:' + 'a'.repeat(64) }, association: { target: 'A.exe', engine: 'ghidra' }, value: { inference: { format: 'stream' } } };
+  const protocol = { framing: { type: 'varint-prefix', maxBytes: 5 }, schema: { fields: [] }, decodeInput: { startOffset: 4, byteLength: 20 } };
+  const decoded = ui.analysisReuseDraft(report, protocol, 'protocol'), args = JSON.parse(decoded.slice(decoded.indexOf('{')));
+  assert.equal(args.offset, 4); assert.equal(args.length, 20); assert.equal(args.input.result_id, report.id); assert.equal(args.engine, 'ghidra');
+  assert.throws(() => ui.analysisReuseDraft({ ...report, value: { inference: { format: 'capture' } } }, protocol, 'protocol'), /捕获容器/);
+  assert.throws(() => ui.analysisReuseDraft(report, { ...protocol, decodeInput: { startOffset: -1, byteLength: 20 } }, 'protocol'), /范围/);
+  const key = { kind: 'xor', keyComplete: true, keyMaterial: { dataRef: { ref: 'sha256:' + 'b'.repeat(64), sensitive: true } } };
+  const decrypt = ui.analysisReuseDraft(report, key, 'crypto'), crypto = JSON.parse(decrypt.slice(decrypt.indexOf('{')));
+  assert.equal(crypto.recipe.key_ref.result_id, report.id); assert.equal(crypto.recipe.key, undefined);
+  assert.throws(() => ui.analysisReuseDraft(report, { ...key, keyComplete: false }, 'crypto'), /补齐/);
+});
+
+test('candidate table and byte preview produce editable reuse/archive drafts without submit or key reads', () => {
+  request = () => assert.fail('evidence view must not fetch');
+  const inserted = [], report = { id: '11111111-2222-3333-4444-555555555555', input: { ref: 'sha256:' + 'a'.repeat(64) }, value: { previewHex: '010203', inference: { format: 'stream', coverage: { status: 'partial', analyzedGroups: 1, eligibleGroups: 2, skippedGroups: 1 }, candidates: [{ framing: { type: 'tlv', typeSize: 1, lengthSize: 1 }, schema: { fields: [] }, score: 0.7, validation: { status: 'not-requested' }, decodeInput: { startOffset: 0, byteLength: 3 } }] } } };
+  const h = harness(ui.AnalysisEvidence, { report, inputActions: { captureInsertion: () => ({}), insertText: value => { inserted.push(value); return true; }, persistDraft() {}, submit: () => assert.fail('must not submit') } }); h.render();
+  assert.match(text(h.tree), /分析覆盖: partial/); assert.match(text(h.tree), /01 02 03/);
+  button(h.tree, '生成复用草稿').props.onClick(); h.render(); assert.match(control(h.tree, '证据复用草稿').props.value, /tlv/);
+  button(h.tree, '插入证据草稿（待发送）').props.onClick(); h.render(); assert.equal(inserted.length, 1); assert.match(text(h.tree), /尚未发送或执行/);
+  button(h.tree, '生成归档报告草稿').props.onClick(); h.render(); assert.equal(JSON.parse(control(h.tree, '证据复用草稿').props.value.split('\n').slice(1).join('\n')).history.action, 'archive');
+  h.render({ ...h.props, report: { ...report, id: 'another-report' } }); assert.equal(nodes(h.tree, node => node.props?.['aria-label'] === '证据复用草稿').length, 0); h.unmount();
+});
+
+test('partial audit pages advance opaque cursors, return to prior snapshot and reset on refresh', async () => {
+  const queries = []; request = url => { const query = new URL(url, 'http://test').searchParams; queries.push(query); return Promise.resolve(response({ rows: [], total: null, totalLowerBound: 1, hasMore: true, partial: true, nextCursor: query.get('cursor') ? 'older-cursor' : 'first-cursor', issues: ['invalid-json-row'] })); };
+  const h = harness(ui.PatchesView, { target: 'A.exe' }); h.render(); await settle(); h.render();
+  assert.match(text(h.tree), /有界审计视图/); assert.match(text(h.tree), /至少/); assert.equal(button(h.tree, '下一页').props.disabled, false);
+  button(h.tree, '下一页').props.onClick(); h.render(); await settle(); h.render(); assert.equal(queries.at(-1).get('cursor'), 'first-cursor');
+  button(h.tree, '上一页').props.onClick(); h.render(); await settle(); h.render(); assert.equal(queries.at(-1).get('cursor'), null);
+  button(h.tree, '下一页').props.onClick(); h.render(); await settle(); h.render(); button(h.tree, '刷新记录').props.onClick(); h.render(); await settle(); h.render(); assert.equal(queries.at(-1).get('cursor'), null); h.unmount();
+});
+
+test('partial analysis totals remain lower bounds and archived pages reset selection scope', async () => {
+  const queries = []; request = url => { const query = new URL(url, 'http://test').searchParams; queries.push(query); return Promise.resolve(response({ items: [analysisItem('partial-result')], total: null, totalLowerBound: 12, partial: true, indexing: true, hasMore: true })); };
+  const h = harness(ui.AnalysisView, {}); h.render(); await settle(); h.render(); assert.match(text(h.tree), /索引尚未完成/); assert.match(text(h.tree), /至少 12/); assert.equal(button(h.tree, '下一页分析结果').props.disabled, false);
+  button(h.tree, '下一页分析结果').props.onClick(); h.render(); await settle(); h.render(); assert.equal(queries.at(-1).get('offset'), '20');
+  button(h.tree, '活动报告').props.onClick(); h.render(); await settle(); h.render(); assert.equal(queries.at(-1).get('archived'), 'true'); assert.equal(queries.at(-1).get('offset'), '0'); h.unmount();
+});
+
+test('analysis ref editor keeps the explicit producer result ID inside input and clears changed drafts', () => {
+  const inserted = [];
+  request = () => assert.fail('draft editor must not fetch or execute');
+  const h = harness(ui.AnalysisDraft, { target: 'fixture.exe', inputActions: { captureInsertion: () => ({}), insertText: value => { inserted.push(value); return true; }, persistDraft() {}, submit: () => assert.fail('must not submit') } });
+  h.render();
+  nodes(h.tree, n => n.type === 'select' && n.props['aria-label'] === '分析数据来源')[0].props.onChange({ target: { value: 'ref' } }); h.render();
+  const ref = 'sha256:' + 'a'.repeat(64), resultId = '11111111-2222-3333-4444-555555555555';
+  nodes(h.tree, n => n.type === 'input' && n.props['aria-label'] === '分析输入文件或字节')[0].props.onChange({ target: { value: ref } }); h.render();
+  const producer = nodes(h.tree, n => n.type === 'input' && n.props['aria-label'] === '来源分析报告 ID')[0]; assert.ok(producer);
+  producer.props.onChange({ target: { value: resultId } }); h.render();
+  button(h.tree, '生成分析草稿').props.onClick(); h.render();
+  const draft = nodes(h.tree, n => n.type === 'textarea' && n.props['aria-label'] === '待发送数据分析草稿')[0];
+  const args = JSON.parse(draft.props.value.slice(draft.props.value.indexOf('{')));
+  assert.deepEqual(plain(args.input), { ref, result_id: resultId }); assert.equal(args.result_id, undefined);
+  button(h.tree, '插入会话草稿（待发送）').props.onClick(); assert.equal(inserted.length, 1);
+  nodes(h.tree, n => n.type === 'input' && n.props['aria-label'] === '来源分析报告 ID')[0].props.onChange({ target: { value: '' } }); h.render();
+  assert.equal(nodes(h.tree, n => n.type === 'textarea' && n.props['aria-label'] === '待发送数据分析草稿').length, 0);
+  button(h.tree, '生成分析草稿').props.onClick(); h.render();
+  const unbound = nodes(h.tree, n => n.type === 'textarea' && n.props['aria-label'] === '待发送数据分析草稿')[0];
+  assert.equal(JSON.parse(unbound.props.value.slice(unbound.props.value.indexOf('{'))).input.result_id, undefined);
+  h.unmount();
+});
+
+function analysisButton(tree, id) { const found = nodes(tree, n => n.type === 'button' && n.props.key === id)[0]; assert.ok(found, `analysis ${id}`); return found; }
+test('analysis index/result use GET without target or engine for all data and escape evidence', async () => {
+  const urls = [];
+  request = (url, options) => { assert.equal(options, undefined); urls.push(url); const q = new URL(url, 'http://test').searchParams;
+    return Promise.resolve(response(q.get('type') === 'analyses' ? { items: [analysisItem('all-1', 'G.exe', 'ghidra')], total: 1 } : { resultId: 'all-1', responseTruncated: true, note: '<img src=x onerror=alert(1)>' })); };
+  const h = harness(ui.AnalysisView, { target: '', engine: 'reverse' }); h.render(); await settle(); h.render();
+  analysisButton(h.tree, 'all-1').props.onClick(); h.render(); await settle(); h.render();
+  assert.ok(urls.every(url => { const q = new URL(url, 'http://test').searchParams; return ['analyses', 'analysis_result'].includes(q.get('type')) && !q.get('target') && !q.has('engine'); }));
+  assert.match(text(h.tree), /有界摘要/); assert.ok(markup(h.tree).includes('&lt;img')); assert.ok(!markup(h.tree).includes('<img')); h.unmount();
+});
+
+test('analysis target filter sends selected engine and clears late list/result from old scope', async () => {
+  const reads = [];
+  request = (url, options) => { assert.equal(options, undefined); const q = new URL(url, 'http://test').searchParams; const d = deferred(); reads.push({ q, d }); return d.promise; };
+  const h = harness(ui.AnalysisView, { target: 'A.exe', engine: 'ghidra' }); h.render();
+  reads[0].d.resolve(response({ items: [analysisItem('all-result')], total: 1 })); await settle(); h.render();
+  analysisButton(h.tree, 'all-result').props.onClick(); h.render();
+  button(h.tree, '全部数据结果').props.onClick(); h.render();
+  assert.equal(reads.at(-1).q.get('target'), 'A.exe'); assert.equal(reads.at(-1).q.get('engine'), 'ghidra');
+  h.render({ target: 'B.exe', engine: 'reverse' });
+  const newList = reads.at(-1); assert.equal(newList.q.get('target'), 'B.exe'); assert.equal(newList.q.get('engine'), 'reverse');
+  newList.d.resolve(response({ items: [analysisItem('current-B', 'B.exe', 'reverse')], total: 1 })); await settle(); h.render();
+  for (const old of reads.slice(1, -1)) old.d.resolve(response(old.q.get('type') === 'analyses' ? { items: [analysisItem('STALE-A', 'A.exe')], total: 1 } : { note: 'STALE-ALL-RESULT' }));
+  await settle(); h.render(); assert.ok(!text(h.tree).includes('STALE')); analysisButton(h.tree, 'current-B'); h.unmount();
+});
+
+test('analysis rapid selections reject late results and do not execute an analysis tool', async () => {
+  const pending = new Map(), urls = [];
+  request = (url, options) => { assert.equal(options, undefined); urls.push(url); const q = new URL(url, 'http://test').searchParams;
+    if (q.get('type') === 'analyses') return Promise.resolve(response({ items: [analysisItem('one'), analysisItem('two')] }));
+    assert.equal(q.get('type'), 'analysis_result'); const d = deferred(); pending.set(q.get('id'), d); return d.promise; };
+  const h = harness(ui.AnalysisView, {}); h.render(); await settle(); h.render();
+  analysisButton(h.tree, 'one').props.onClick(); h.render(); analysisButton(h.tree, 'two').props.onClick(); h.render();
+  pending.get('two').resolve(response({ marker: 'CURRENT-TWO' })); await settle(); h.render();
+  pending.get('one').resolve(response({ marker: 'STALE-ONE' })); await settle(); h.render();
+  assert.match(text(h.tree), /CURRENT-TWO/); assert.ok(!text(h.tree).includes('STALE-ONE')); assert.ok(urls.every(url => url.startsWith('/ig5-data?'))); h.unmount();
+});
+
+test('analysis current-target filter without a loaded target reports guidance without a request', async () => {
+  let reads = 0;
+  request = () => { reads++; return Promise.resolve(response({ items: [] })); };
+  const h = harness(ui.AnalysisView, { target: '' }); h.render(); await settle(); h.render();
+  button(h.tree, '全部数据结果').props.onClick(); h.render(); h.render();
+  assert.equal(reads, 1); assert.match(text(h.tree), /请载入目标或选择全部数据结果/); h.unmount();
+});
+
+test('analysis history paginates, rejects late page responses and resets offset when scope changes', async () => {
+  const reads = [];
+  request = (url, options) => { assert.equal(options, undefined); const q = new URL(url, 'http://test').searchParams; assert.equal(q.get('type'), 'analyses'); const d = deferred(); reads.push({ q, d }); return d.promise; };
+  const offset = () => Number(reads.at(-1).q.get('offset') || 0);
+  const h = harness(ui.AnalysisView, { target: 'A.exe', engine: 'ghidra' }); h.render();
+  assert.equal(offset(), 0);
+  reads[0].d.resolve(response({ items: [analysisItem('PAGE0')], total: 65, offset: 0 })); await settle(); h.render();
+  const next = button(h.tree, '下一页分析结果'); assert.equal(Boolean(next.props.disabled), false); next.props.onClick(); h.render();
+  assert.equal(offset(), 20); const latePage = reads.at(-1);
+  button(h.tree, '刷新分析结果').props.onClick(); h.render(); assert.equal(offset(), 20);
+  const freshPage = reads.at(-1); assert.notEqual(freshPage, latePage);
+  freshPage.d.resolve(response({ items: [analysisItem('CURRENT-PAGE20')], total: 65, offset: 20 })); await settle(); h.render();
+  latePage.d.resolve(response({ items: [analysisItem('STALE-PAGE20')], total: 65, offset: 20 })); await settle(); h.render();
+  analysisButton(h.tree, 'CURRENT-PAGE20'); assert.ok(!text(h.tree).includes('STALE-PAGE20'));
+  const previous = button(h.tree, '上一页分析结果'); assert.equal(Boolean(previous.props.disabled), false); previous.props.onClick(); h.render(); assert.equal(offset(), 0);
+  reads.at(-1).d.resolve(response({ items: [analysisItem('PAGE0-RETURN')], total: 65, offset: 0 })); await settle(); h.render();
+  button(h.tree, '下一页分析结果').props.onClick(); h.render(); const lateAllPage = reads.at(-1); assert.equal(offset(), 20);
+  button(h.tree, '全部数据结果').props.onClick(); h.render();
+  assert.equal(offset(), 0); assert.equal(reads.at(-1).q.get('target'), 'A.exe'); assert.equal(reads.at(-1).q.get('engine'), 'ghidra');
+  reads.at(-1).d.resolve(response({ items: [analysisItem('A-PAGE0', 'A.exe', 'ghidra')], total: 45, offset: 0 })); await settle(); h.render();
+  lateAllPage.d.resolve(response({ items: [analysisItem('STALE-ALL-PAGE20')], total: 65, offset: 20 })); await settle(); h.render();
+  analysisButton(h.tree, 'A-PAGE0'); assert.ok(!text(h.tree).includes('STALE-ALL'));
+  button(h.tree, '下一页分析结果').props.onClick(); h.render(); const lateTargetPage = reads.at(-1); assert.equal(offset(), 20);
+  h.render({ target: 'B.exe', engine: 'reverse' });
+  assert.equal(offset(), 0); assert.equal(reads.at(-1).q.get('target'), 'B.exe'); assert.equal(reads.at(-1).q.get('engine'), 'reverse');
+  reads.at(-1).d.resolve(response({ items: [analysisItem('B-PAGE0', 'B.exe', 'reverse')], total: 1, offset: 0 })); await settle(); h.render();
+  lateTargetPage.d.resolve(response({ items: [analysisItem('STALE-A-PAGE20', 'A.exe', 'ghidra')], total: 45, offset: 20 })); await settle(); h.render();
+  analysisButton(h.tree, 'B-PAGE0'); assert.ok(!text(h.tree).includes('STALE-A'));
+  assert.equal(button(h.tree, '上一页分析结果').props.disabled, true); assert.equal(button(h.tree, '下一页分析结果').props.disabled, true);
+  h.unmount();
 });

@@ -6,5 +6,6 @@ node_modules/
 .DS_Store
 Thumbs.db
 runtimes/
-third_party/
+third_party/*
+!third_party/x64dbg-build/
 .downloads/

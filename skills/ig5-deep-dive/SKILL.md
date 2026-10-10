@@ -11,7 +11,7 @@ description: "使用 IG5 深入解释函数或输入处理路径，结合调用�
 
 按问题使用 `ig5_stack` 核对帧偏移，`ig5_switches` 检查 case/default，`ig5_vtables` 读取 RTTI/虚槽；显式表地址加偏移的解析不能代替寄存器来源证明。`ig5_microcode` 可读取不同成熟度的真实 IR，或优化临时 IR；受限 `xor-self/sub-self` 规则必须检查实际 `rule_hits` 与前后 IR，命中为零时不声称改写，不宣传通用去平坦化。`ig5_switch_repair` 先 preview，应用必须审批且不在 Undo 范围内。
 
-只有用户已授权该目标的仿真或动态验证，才通过审批调用 `ig5_emulate` 验证已确定的 x86/x64 函数、ABI、整数参数与内存缓冲区；它没有 OS/import/TLS 环境，fault 或超时不能单独证明真实程序行为。没有执行授权时继续完成上述只读证据，不扩大到任意程序执行。
+只有用户已授权该目标的仿真或动态验证，才通过审批调用 `ig5_emulate` 验证实际 provider 支持的 x86/x64 或 Ghidra ARM64 函数、明确 ABI、整数参数与内存缓冲区；ARM64 使用 AAPCS64，已在 Windows CPU 仿真验证，不代表手机原生移植。它没有 OS/import/TLS 环境，fault、系统指令中止或超时不能单独证明真实程序行为。没有执行授权时继续完成上述只读证据，不扩大到任意程序执行。涉及解密/配置或报文解析时，按 `ig5-crypto` / `ig5-protocol` 建立显式参数、数据变换与独立验证证据；扫描命中不是算法确认。
 
 当用户需要沉淀理解时，通过正常工具调用提交 `ig5_rename`、`ig5_comment`、`ig5_set_type` 或 `ig5_struct action=define|apply`，每个写操作必须通过宿主审批。不可通过工作台 HTTP、直接 Worker RPC 或任意 Python 绕过审批。给出地址、证据、尚未确认的别名或类型，以及修改后的重新反编译结果。商业引擎称 Reverse，开源结果保留 Ghidra/x64dbg 来源。
 

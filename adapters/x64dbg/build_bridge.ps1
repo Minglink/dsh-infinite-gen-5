@@ -1,10 +1,13 @@
 param(
-  [string]$RuntimeRoot = (Join-Path $PSScriptRoot '..\..\runtimes\x64dbg'),
+  [string]$RuntimeRoot,
   [string]$Vcvars = 'C:\Program Files\Microsoft Visual Studio\18\Community\VC\Auxiliary\Build\vcvarsall.bat',
-  [string]$HeaderRoot = (Join-Path $PSScriptRoot '..\..\third_party\sources\x64dbg-runtime\src\dbg'),
-  [string]$CoreBuildRoot = (Join-Path $PSScriptRoot '..\..\.downloads\x64dbg-build')
+  [string]$HeaderRoot,
+  [string]$CoreBuildRoot
 )
 $ErrorActionPreference = 'Stop'
+if (-not $PSBoundParameters.ContainsKey('RuntimeRoot')) { $RuntimeRoot = Join-Path $PSScriptRoot '..\..\runtimes\x64dbg' }
+if (-not $PSBoundParameters.ContainsKey('HeaderRoot')) { $HeaderRoot = Join-Path $PSScriptRoot '..\..\third_party\sources\x64dbg-runtime\src\dbg' }
+if (-not $PSBoundParameters.ContainsKey('CoreBuildRoot')) { $CoreBuildRoot = Join-Path $PSScriptRoot '..\..\.downloads\x64dbg-build' }
 $RuntimeRoot = [IO.Path]::GetFullPath($RuntimeRoot)
 $sdk = Join-Path $RuntimeRoot 'snapshot\pluginsdk'
 $buildDir = Join-Path $RuntimeRoot 'native-build'
@@ -38,6 +41,6 @@ foreach ($arch in @('x64','x86')) {
 $nativeHashes = @{}
 foreach ($bits in @('32','64')) { $nativeHashes["ig5-bridge.dp$bits"] = (Get-FileHash -LiteralPath (Join-Path $PSScriptRoot "native\ig5-bridge.dp$bits") -Algorithm SHA256).Hash.ToLowerInvariant() }
 $nativeHashes | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $PSScriptRoot 'native\sha256.json') -Encoding utf8
-$proof = [ordered]@{schemaVersion=1;protocol=2;upstreamCommit='9c8ca1cae0b6d56cc44f31fddcb10e3b02ffbb87';built=$buildProof;createdUtc=[DateTime]::UtcNow.ToString('o')}
+$proof = [ordered]@{schemaVersion=1;protocol=2;eventHistoryVersion=2;upstreamCommit='9c8ca1cae0b6d56cc44f31fddcb10e3b02ffbb87';built=$buildProof;createdUtc=[DateTime]::UtcNow.ToString('o')}
 $proof | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $PSScriptRoot 'native\build-proof.json') -Encoding utf8
 $proof | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $RuntimeRoot 'native-build-proof.json') -Encoding utf8

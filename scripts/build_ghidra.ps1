@@ -1,7 +1,7 @@
 param(
-  [string]$SourceRoot = (Join-Path $PSScriptRoot '..\third_party\sources\ghidra-12.1.4'),
+  [string]$SourceRoot,
   [string]$BuildRoot = (Join-Path $env:USERPROFILE '.dsh\ig5\artifacts\ghidra-build\full-win-x64'),
-  [string]$JavaHome = (Join-Path $PSScriptRoot '..\runtimes\ghidra\jdk-21.0.12.1+1'),
+  [string]$JavaHome,
   [string]$GradleArchive,
   [string]$VsWherePath,
   [switch]$UseWindowsTcpPipe,
@@ -9,6 +9,8 @@ param(
   [int]$Workers = 4
 )
 $ErrorActionPreference = 'Stop'
+if (-not $PSBoundParameters.ContainsKey('SourceRoot')) { $SourceRoot = Join-Path $PSScriptRoot '..\third_party\sources\ghidra-12.1.4' }
+if (-not $PSBoundParameters.ContainsKey('JavaHome')) { $JavaHome = Join-Path $PSScriptRoot '..\runtimes\ghidra\jdk-21.0.12.1+1' }
 $SourceRoot = [IO.Path]::GetFullPath($SourceRoot)
 $BuildRoot = [IO.Path]::GetFullPath($BuildRoot)
 $JavaHome = [IO.Path]::GetFullPath($JavaHome)

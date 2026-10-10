@@ -8,6 +8,14 @@ or add conditions to their upstream licenses.
 
 Ghidra: https://github.com/NationalSecurityAgency/ghidra
 Runtime retains LICENSE, NOTICE and component licenses from the official release.
+The bundled Project.jar GhidraURL class and its Project-src.zip source entry
+contain the IG5 local project path compatibility modification. Legal hidden
+local directories such as .dsh are accepted; project/repository naming and
+dot traversal restrictions remain. The patch, fixed upstream/modified source,
+Apache-2.0 license, modification notice and per-entry/hash build proof are in
+adapters/ghidra/local-project-path/ and runtimes/ghidra/licenses/ig5-local-project-path/.
+Unrelated uncompressed JAR/source ZIP entries remain unchanged. The fixed
+third_party/sources snapshots and their recorded hashes are not modified.
 Eclipse Temurin/OpenJDK: https://adoptium.net/ -- runtime retains legal/ and notices.
 Python: https://www.python.org/ -- runtime retains LICENSE.txt.
 JPype: https://github.com/jpype-project/jpype -- wheel metadata/licenses retained.

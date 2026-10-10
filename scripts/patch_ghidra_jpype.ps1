@@ -1,7 +1,8 @@
 # Maintainer-only deterministic JPype 1.5.2 Unicode bootstrap shim build.
 [CmdletBinding()]
-param([string]$RuntimeRoot = (Join-Path $PSScriptRoot '..\runtimes\ghidra'))
+param([string]$RuntimeRoot)
 $ErrorActionPreference = 'Stop'
+if (-not $PSBoundParameters.ContainsKey('RuntimeRoot')) { $RuntimeRoot = Join-Path $PSScriptRoot '..\runtimes\ghidra' }
 $runtimeBase = [IO.Path]::GetFullPath($RuntimeRoot)
 $patchBase = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\adapters\ghidra\jpype-patch'))
 $runtimeFile = Join-Path $runtimeBase 'runtime.json'

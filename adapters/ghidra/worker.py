@@ -415,6 +415,64 @@ class Worker:
         offset, limit = max(0, int(params.get('offset', 0))), bounded(params)
         return {'total': len(rows), 'offset': offset, 'strings': rows[offset:offset + limit]}
 
+    def m_scan(self, params):
+        """The same bounded static-indicator schema as the Reverse provider."""
+        self.require()
+        shared = ADAPTER_ROOT.parent.parent / 'worker'
+        if str(shared) not in sys.path:
+            sys.path.insert(0, str(shared))
+        from scan_analysis import scan_image, scan_limits, api_category
+        from ghidra.program.util import DefinedDataIterator, GhidraProgramUtilities
+        limits = scan_limits(params)
+        default_space = self.program.getAddressFactory().getDefaultAddressSpace()
+        bits = int(default_space.getSize())
+
+        def segments():
+            for block in self.program.getMemory().getBlocks():
+                source = block.getStart()
+                same_space = source.getAddressSpace() == default_space
+                initialized = bool(block.isInitialized())
+                yield {'name': str(block.getName()), 'start': int(source.getOffset()) & ((1 << bits) - 1),
+                       'addressSpace': 'memory' if same_space else str(source.getAddressSpace().getName()),
+                       'sourceAddress': str(source),
+                       'size': int(block.getSize()), 'readable': same_space and initialized,
+                       'skipReason': 'non-default address space' if not same_space else 'uninitialized memory' if not initialized else None,
+                       'read': lambda offset, size, base=source: self.read_bytes(base.add(offset), size)}
+
+        def imports():
+            for symbol in each(self.program.getSymbolTable().getExternalSymbols()):
+                address, name = symbol.getAddress(), str(symbol.getName())
+                row = {'module': str(symbol.getParentNamespace()), 'api': name,
+                       'externalAddress': str(address), 'addressSpace': str(address.getAddressSpace().getName())}
+                if api_category(name):
+                    references = []
+                    refs = self.program.getReferenceManager().getReferencesTo(address)
+                    for _ in range(9):
+                        if not refs.hasNext():
+                            break
+                        reference = refs.next().getFromAddress()
+                        if reference.getAddressSpace() == default_space:
+                            references.append(addrstr(reference))
+                    row['referenceEas'] = references[:8]
+                    row['referencesTruncated'] = len(references) > 8 or bool(refs.hasNext())
+                    if references:
+                        row.update(ea=references[0], addressSpace='memory', addressRole='import-reference')
+                yield row
+
+        def strings():
+            predicate = self.jpype.JProxy('java.util.function.Predicate', dict(test=lambda data: bool(data.hasStringValue())))
+            for data in each(DefinedDataIterator.byDataInstance(self.program, predicate)):
+                # Avoid materializing arbitrary megabyte-sized Java strings.
+                # Short defined values preserve Ghidra's decoded character set.
+                if int(data.getLength()) > limits['max_string_chars'] * 4:
+                    yield {'text': '', 'truncated': True}
+                else:
+                    yield str(data.getValue())
+
+        result = scan_image(segments(), imports(), strings(), source_engine='ghidra', params=params)
+        return {**result, 'revision': self.revision, 'sourceHash': self.source_hash,
+                'analysisComplete': bool(GhidraProgramUtilities.isAnalyzed(self.program))}
+
     def decompile(self, params):
         from ghidra.app.decompiler import DecompInterface
         if self.decompiler is None:
@@ -453,9 +511,28 @@ class Worker:
         return {'ea': addrstr(address), 'size': len(data), 'hex': data.hex()}
 
     def m_fileoffset(self, params):
+        shared = ADAPTER_ROOT.parent.parent / 'worker'
+        if str(shared) not in sys.path:
+            sys.path.insert(0, str(shared))
+        from memory_image import integer
         address = self.address(params)
-        info = self.program.getMemory().getAddressSourceInfo(address)
-        return {'ea': addrstr(address), 'fileOffset': int(info.getFileOffset()) if info is not None else -1}
+        size = integer(params.get('size', 1), 'file mapping size')
+        if not 1 <= size <= 4096:
+            raise ValueError('file mapping size must be 1..4096')
+        memory = self.program.getMemory()
+        info = memory.getAddressSourceInfo(address)
+        first = int(info.getFileOffset()) if info is not None else -1
+        bits = int(address.getAddressSpace().getSize())
+        base = int(address.getOffset()) & ((1 << bits) - 1)
+        contiguous = first >= 0 and base + size <= (1 << bits)
+        if contiguous:
+            for offset in range(1, size):
+                info = memory.getAddressSourceInfo(address.add(offset))
+                if info is None or int(info.getFileOffset()) != first + offset:
+                    contiguous = False
+                    break
+        return {'ea': addrstr(address), 'fileOffset': first if contiguous else -1,
+                'size': size, 'contiguous': contiguous}
 
     def m_inspect(self, params):
         from ghidra.program.model.listing import CodeUnit
@@ -650,7 +727,7 @@ class Worker:
         shared = ADAPTER_ROOT.parent.parent / 'worker'
         if str(shared) not in sys.path:
             sys.path.insert(0, str(shared))
-        from memory_image import MemoryImage, MemoryRegion
+        from memory_image import MemoryImage, MemoryRegion, PERM_READ, PERM_WRITE, PERM_EXEC
         from cpu_emulator import emulate_image
         bits = int(self.program.getLanguage().getDefaultSpace().getSize())
         processor = str(self.program.getLanguage().getProcessor()).lower()
@@ -683,7 +760,10 @@ class Worker:
                     return None
                 return self.read_bytes(source.getStart().add(offset), size)
             regions.append(MemoryRegion(base, int(block.getSize()), reader,
-                                        name=str(block.getName()), zero_fill=not bool(block.isInitialized())))
+                                        name=str(block.getName()), zero_fill=not bool(block.isInitialized()),
+                                        permissions=(PERM_READ if block.isRead() else 0) |
+                                                    (PERM_WRITE if block.isWrite() else 0) |
+                                                    (PERM_EXEC if block.isExecute() else 0)))
         image = MemoryImage(arch, bits, int(entry.getOffset()) & ((1 << bits) - 1), regions, source='ghidra')
         return {**emulate_image(image, execution), 'idb_modified': False, 'revision': self.revision}
 

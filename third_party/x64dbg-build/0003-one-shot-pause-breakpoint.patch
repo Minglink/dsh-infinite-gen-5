@@ -1,0 +1,14 @@
+--- a/src/dbg/commands/cmd-debug-control.cpp
++++ b/src/dbg/commands/cmd-debug-control.cpp
+@@ -426,7 +426,10 @@
+         return false;
+     }
+     duint CIP = GetContextDataEx(hActiveThread, UE_CIP);
+-    if(!SetBPX(CIP, UE_BREAKPOINT, cbPauseBreakpoint))
++    // IG5: pause removes its temporary breakpoint before the paused callback.
++    // A persistent breakpoint would schedule restoration after that callback
++    // and swallow a user step forever when the instruction branches to itself.
++    if(!SetBPX(CIP, UE_SINGLESHOOT, cbPauseBreakpoint))
+     {
+         dprintf(QT_TRANSLATE_NOOP("DBG", "Error setting breakpoint at %p! (SetBPX)\n"), CIP);
+         if(ResumeThread(hActiveThread) == -1)

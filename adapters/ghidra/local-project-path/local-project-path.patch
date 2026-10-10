@@ -1,0 +1,63 @@
+--- a/ghidra/framework/protocol/ghidra/GhidraURL.java
++++ b/ghidra/framework/protocol/ghidra/GhidraURL.java
+@@ -376,8 +376,8 @@
+ 	 * If path starts with a drive letter (e.g., "c:/") it will have a "/" prepended 
+ 	 * (e.g., "/c:/", both forms are treated the same by the {@link File} class under Windows).
+ 	 * <p>
+-	 * Path element naming restrictions are imposed based upon 
+-	 * {@link NamingUtilities#checkName(String, String)} restrictions.  These restrictions
++	 * Local path elements use the {@link NamingUtilities#checkName(String, String)}
++	 * character restrictions, permitting leading dots except dot traversal. These restrictions
+ 	 * are imposed to ensure we can easily express the local project path in URL form.
+ 	 * 
+ 	 * @param absolutePath path to be checked and possibly modified.
+@@ -393,7 +393,7 @@
+ 		Matcher matcher = UNC_PATH_PATTERN.matcher(path);
+ 		if (matcher.matches()) {
+ 			// Handle UNC path
+-			checkValidProjectPath(path, 2);
++			checkValidLocalProjectPath(path, 2);
+ 			if (isDirectory && !path.endsWith("/")) {
+ 				path += "/";
+ 			}
+@@ -418,7 +418,7 @@
+ 			throw new IllegalArgumentException("Absolute path required");
+ 		}
+ 
+-		checkValidProjectPath(path, scanIndex);
++		checkValidLocalProjectPath(path, scanIndex);
+ 
+ 		if (isDirectory && !path.endsWith("/")) {
+ 			path += "/";
+@@ -433,6 +433,31 @@
+ 	 * @param startIndex index at which to start checking immediately after root path separator
+ 	 * @throws IllegalArgumentException if path contains invalid character
+ 	 */
++	/**
++	 * IG5 change: local filesystem project directories may contain legitimate
++	 * hidden directories, such as .dsh. Project names and domain/repository
++	 * paths continue to use the original strict checkValidProjectPath helper.
++	 */
++	private static void checkValidLocalProjectPath(String path, int startIndex) {
++		String str = path.substring(startIndex);
++		if (str.length() != 0) {
++			for (String element : str.split("/")) {
++				// Also reject Win32 aliases of dot traversal (e.g., ".. ").
++				if (element.startsWith(".")) {
++					if (element.matches("[. ]+")) {
++						throw new IllegalArgumentException("Dot path traversal is not permitted");
++					}
++					// Prefixing changes only the leading-dot rule; all characters
++					// still pass through the upstream whitelist validation.
++					NamingUtilities.checkName("ig5" + element, null);
++				}
++				else {
++					NamingUtilities.checkName(element, null);
++				}
++			}
++		}
++	}
++
+ 	private static void checkValidProjectPath(String path, int startIndex) {
+ 		String str = path.substring(startIndex);
+ 		if (str.length() != 0) {

@@ -1,5 +1,6 @@
-param([string]$RuntimeRoot = (Join-Path $PSScriptRoot '..\runtimes\x64dbg'))
+param([string]$RuntimeRoot)
 $ErrorActionPreference = 'Stop'
+if (-not $PSBoundParameters.ContainsKey('RuntimeRoot')) { $RuntimeRoot = Join-Path $PSScriptRoot '..\runtimes\x64dbg' }
 $RuntimeRoot = [IO.Path]::GetFullPath($RuntimeRoot)
 New-Item -ItemType Directory -Path $RuntimeRoot -Force | Out-Null
 $downloadDir = Join-Path $RuntimeRoot 'downloads'

@@ -606,11 +606,29 @@ def tif_from_serial(text):
 
 def m_fileoffset(params: dict) -> dict:
     import ida_loader
+    # The embedded engine can replace sys.path after loading a database. Match
+    # the extended-method loader so isolated production workers find this helper.
+    if _worker_module_dir not in sys.path:
+        sys.path.insert(0, _worker_module_dir)
+    from memory_image import integer
 
     if not _open:
         raise RuntimeError("no database open")
     ea = _resolve_ea(params)
-    return {"ea": hex(ea), "fileOffset": int(ida_loader.get_fileregion_offset(ea))}
+    size = integer(params.get('size', 1), 'file mapping size')
+    if not 1 <= size <= 4096:
+        raise ValueError('file mapping size must be 1..4096')
+    if ea < 0 or ea + size > (1 << 64):
+        return {"ea": hex(ea), "fileOffset": -1, "size": size, "contiguous": False}
+    first = int(ida_loader.get_fileregion_offset(ea))
+    contiguous = first >= 0
+    if contiguous:
+        for offset in range(1, size):
+            if int(ida_loader.get_fileregion_offset(ea + offset)) != first + offset:
+                contiguous = False
+                break
+    return {"ea": hex(ea), "fileOffset": first if contiguous else -1,
+            "size": size, "contiguous": contiguous}
 
 
 def m_idapython(params: dict) -> dict:
@@ -636,118 +654,57 @@ def m_idapython(params: dict) -> dict:
     return {"ok": err is None, "output": buf.getvalue()[-4000:], "error": err}
 
 
-CRYPTO_MARKERS = [
-    ("AES sbox", "637C777BF26B6FC5"),
-    ("MD5 init", "0123456789ABCDEF"),
-    ("SHA-256 K", "428A2F98D728AE22"),
-    ("CRC32 table", "0000000096300777"),
-]
-
-SUSPICIOUS_APIS = [
-    "VirtualAlloc", "VirtualProtect", "WriteProcessMemory", "CreateRemoteThread",
-    "WinExec", "ShellExecute", "URLDownloadToFile", "InternetOpenUrl",
-    "RegSetValue", "CryptEncrypt", "CryptDecrypt", "SetWindowsHookEx",
-    "LoadLibrary", "GetProcAddress", "IsDebuggerPresent", "CheckRemoteDebuggerPresent",
-]
-
-
 def m_scan(params: dict) -> dict:
-    """静态情报扫描（新造）：加密常数 / 可疑 API / 段熵 / 字符串族。"""
+    """Bounded read-only indicators from the same scanner as Ghidra."""
     import ida_bytes
     import ida_nalt
     import ida_segment
     import idautils
-    import math
+    if _worker_module_dir not in sys.path:
+        sys.path.insert(0, _worker_module_dir)
+    from scan_analysis import scan_image, scan_limits
 
     if not _open:
         raise RuntimeError("no database open")
+    limits = scan_limits(params)
 
-    # 1) 加密常数（find_bytes 精确命中）
-    crypto = []
-    for label, pat in CRYPTO_MARKERS:
-        try:
-            ea = ida_bytes.find_bytes(bytes.fromhex(pat), 0, flags=int(getattr(ida_bytes, "BIN_SEARCH_FORWARD", 1)) | int(getattr(ida_bytes, "BIN_SEARCH_NOSHOW", 0)))
-            if ea is not None and ea != ida_idaapi_badaddr():
-                crypto.append({"marker": label, "ea": hex(ea)})
-        except Exception:
-            pass
+    def segments():
+        for index in range(ida_segment.get_segm_qty()):
+            segment = ida_segment.getnseg(index)
+            if segment is None:
+                continue
+            start = int(segment.start_ea)
+            yield {"name": ida_segment.get_segm_name(segment), "start": start,
+                   "size": int(segment.end_ea - segment.start_ea),
+                   "read": lambda offset, size, base=start: ida_bytes.get_bytes(base + offset, size)}
 
-    # 2) 可疑导入 API
-    susp = []
-    try:
-        names = []
-        cur_mod = [""]
+    imports = []
+    for index in range(ida_nalt.get_import_module_qty()):
+        module = ida_nalt.get_import_module_name(index) or "#%d" % index
 
-        def cb(ea, name, ordinal):  # 原型：callback(ea, name, ordinal)
-            names.append((cur_mod[0], name or f"#{ordinal}"))
-            return True
+        def collect_import(ea, name, ordinal):
+            imports.append({"module": module, "api": name or "#%d" % ordinal,
+                            "ea": hex(ea), "addressSpace": "memory", "addressRole": "import-slot"})
+            return len(imports) <= limits["max_imports"]
 
-        for mi in range(ida_nalt.get_import_module_qty()):
-            cur_mod[0] = ida_nalt.get_import_module_name(mi) or f"#{mi}"
-            ida_nalt.enum_import_names(mi, cb)
-        mods = {}
-        for mod, name in names:
-            mods[mod] = mods.get(mod, 0) + 1
-            for api in SUSPICIOUS_APIS:
-                if api.lower() in (name or "").lower():
-                    susp.append({"module": mod, "api": name})
-                    break
-        import_summary = {"modules": len(mods), "functions": len(names), "byModule": dict(sorted(mods.items(), key=lambda kv: -kv[1])[:12])}
-    except Exception:
-        import_summary = {"error": "import enumeration failed"}
+        ida_nalt.enum_import_names(index, collect_import)
+        if len(imports) > limits["max_imports"]:
+            break
 
-    # 3) 段熵（采样每段前 64KB）
-    seg_entropy = []
-    for i in range(ida_segment.get_segm_qty()):
-        s = ida_segment.getnseg(i)
-        if s is None:
-            continue
-        span = min(int(s.end_ea - s.start_ea), 65536)
-        if span <= 0:
-            continue
-        data = ida_bytes.get_bytes(s.start_ea, span) or b""
-        if not data:
-            continue
-        freq = [0] * 256
-        for b in data:
-            freq[b] += 1
-        ent = 0.0
-        n = len(data)
-        for c in freq:
-            if c:
-                p = c / n
-                ent -= p * math.log2(p)
-        seg_entropy.append({"segment": ida_segment.get_segm_name(s), "entropy": round(ent, 2),
-                            "flag": ent > 7.2})
+    def strings():
+        strings = idautils.Strings()
+        # Numeric string kinds are required; the previous ["C"] silently lost
+        # strings on engines that reject that invalid setup argument.
+        strings.setup(strtypes=[ida_nalt.STRTYPE_C, ida_nalt.STRTYPE_C_16])
+        for string in strings:
+            if string is None:
+                continue
+            length = min(int(string.length), limits['max_string_chars'])
+            data = ida_bytes.get_strlit_contents(string.ea, length, string.strtype)
+            yield {'text': data.decode('utf-8', 'replace') if data is not None else '',
+                   'truncated': int(string.length) > length, 'readError': data is None}
 
-    # 4) 字符串族计数
-    families = {"crypto": 0, "network": 0, "exec": 0, "registry": 0, "total": 0}
-    try:
-        try:
-            import ida_strlist
-
-            ida_strlist.build_strlist()  # 显式重建串表（idautils.Strings 惰性缓存在新库上可能为空）
-        except Exception:
-            pass
-        idautils.Strings().setup(strtypes=["C"])
-        for st in idautils.Strings():
-            families["total"] += 1
-            if families["total"] > 20000:
-                break
-            t = str(st).lower()
-            if any(k in t for k in ("aes", "md5", "sha", "rsa", "base64", "des", "rc4")):
-                families["crypto"] += 1
-            if any(k in t for k in ("http", "tcp", "socket", "dns", "host")):
-                families["network"] += 1
-            if any(k in t for k in ("cmd", "powershell", "schtasks", "regsvr32")):
-                families["exec"] += 1
-            if any(k in t for k in ("software\\", "hkey_", "currentversion")):
-                families["registry"] += 1
-    except Exception:
-        pass
-
-    return {"crypto": crypto, "suspiciousApis": susp[:30], "entropy": seg_entropy,
-            "stringFamilies": families}
+    return scan_image(segments(), imports, strings(), source_engine="reverse", params=params)
 
 
 def m_dbg(params: dict) -> dict:

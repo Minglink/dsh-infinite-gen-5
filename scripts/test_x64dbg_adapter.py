@@ -275,5 +275,188 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(self.adapter.control_head["id"], 11)
         self.assertEqual(self.adapter.next_request()["id"], 11)
 
+    def gap_client(self, running=False):
+        """Real NativeClient drain/state implementation over a stub pipe RPC."""
+        class GapNative(FakeClient, mod.NativeClient):
+            is_debugging = mod.NativeClient.is_debugging
+            is_running = mod.NativeClient.is_running
+            def __init__(self, adapter):
+                super().__init__(adapter)
+                self.running, self.event_sequence = running, 0
+                self.native_seq, self.native_stop, self.native_epoch = 900, 9, 1
+                self.first = True
+                self.listeners = {typ: [adapter.record_event] for typ in ("EVENT_BREAKPOINT", "EVENT_PAUSE_DEBUG")}
+            def close(self): pass
+            def module_info(self, ea):
+                return {"found": True, "base": "0x140000000", "size": 0x4000,
+                        "name": "fake.exe", "path": "fake.exe"}
+            def request(self, method, **params):
+                if method == "events":
+                    if self.first:
+                        self.first = False
+                        return {"eventSeq": 900, "firstAvailableSeq": 645, "truncated": True,
+                                "dropped": {"from": 1, "to": 644, "count": 644},
+                                "events": [{"seq": 900, "type": "EVENT_BREAKPOINT", "stopSeq": 9,
+                                            "data": {"addr": "0x140001000"}}]}
+                    return {"eventSeq": self.native_seq, "truncated": False, "events": []}
+                if method == "state":
+                    return {"debugging": self.debugging, "running": self.running, "pid": 81, "tid": 82,
+                            "nativeRunEpoch": self.native_epoch, "stopSeq": self.native_stop, "eventSeq": self.native_seq}
+                raise AssertionError(method)
+            def cmd_sync(self, command):
+                self.commands.append(command)
+                if command == "pause":
+                    self.running = False
+                    self.native_stop += 1
+                    self.native_seq += 1
+                return True
+        self.client = self.adapter.client = GapNative(self.adapter)
+        return self.client
+
+    def test_native_first_read_history_loss_is_explicit_and_nonfatal(self):
+        self.adapter.record_event(SimpleNamespace(event_type="EVENT_EXCEPTION", event_data={"ExceptionCode": 1}))
+        native = self.gap_client()
+        result = self.dbg("event")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["historyGap"]["dropped"], {"from": 1, "to": 644, "count": 644})
+        self.assertEqual(result["stopSeq"], 9)
+        self.assertTrue(result["cacheInvalidated"])
+        self.assertIs(self.adapter.client, native)
+        self.assertNotIn("EVENT_EXCEPTION", [e["type"] for e in self.adapter.events])
+
+    def test_native_gap_resynchronizes_and_safely_pauses_without_claiming_hit(self):
+        native = self.gap_client(running=True)
+        self.adapter.deadline = time.monotonic() + 5
+        result = self.adapter.wait_state(0)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["eventName"], "history-gap")
+        self.assertIsNone(result["event"])
+        self.assertEqual(result["state"], "suspended")
+        self.assertEqual(result["stopSeq"], 10)
+        self.assertEqual(result["runId"], "test-run")
+        self.assertTrue(result["pauseAttempted"])
+        self.assertTrue(result["resynced"])
+        self.assertFalse(result["cleanedUp"])
+        self.assertFalse(result["recoveryRequired"])
+        self.assertIsNone(result["context"]["exception"])
+        self.assertEqual(native.commands, ["pause"])
+        self.assertIs(self.adapter.client, native)
+
+    def test_gap_blocks_writes_until_explicit_authoritative_state_refresh(self):
+        native = self.gap_client()
+        result = self.dbg("setreg", reg="rax", value=2)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["eventName"], "history-gap")
+        self.assertEqual(native.writes, [])
+        refreshed = self.dbg("state")
+        self.assertTrue(refreshed["ok"])
+        self.assertTrue(refreshed["cacheInvalidated"])
+        self.assertEqual(refreshed["stopSeq"], 9)
+        self.assertFalse(self.adapter.pending_history_gap)
+        self.assertTrue(self.dbg("setreg", reg="rax", value=2)["ok"])
+        self.assertEqual(native.writes, [("rax", 2)])
+
+    def test_gap_on_read_only_state_does_not_pause_a_running_target(self):
+        native = self.gap_client(running=True)
+        refreshed = self.dbg("state")
+        self.assertEqual(refreshed["state"], "running")
+        self.assertTrue(refreshed["cacheInvalidated"])
+        self.assertEqual(native.commands, [])
+        self.assertIs(self.adapter.client, native)
+
+    def test_unexpected_native_run_epoch_invalidates_previous_run(self):
+        self.adapter.native_run_epoch = 4
+        self.adapter.sync_native_state({"nativeRunEpoch": 5, "stopSeq": 2, "eventSeq": 77,
+                                        "debugging": True, "pid": 80, "tid": 81})
+        self.assertNotEqual(self.adapter.run_id, "test-run")
+        self.assertEqual(self.adapter.stop_seq, 2)
+        self.assertTrue(self.adapter.pending_history_gap)
+        self.assertEqual(self.adapter.history_gap["reason"], "native-run-changed")
+
+    def test_true_native_pipe_failure_still_cleans_up(self):
+        native = self.gap_client()
+        native.request = lambda *a, **kw: (_ for _ in ()).throw(mod.RpcError("ETRANSPORT", "disconnected"))
+        with self.assertRaises(mod.RpcError) as error:
+            self.dbg("state")
+        self.assertEqual(error.exception.code, "ETRANSPORT")
+        self.assertTrue(error.exception.detail["cleanedUp"])
+        self.assertIsNone(self.adapter.client)
+
+    def test_gap_recovery_pause_rejection_preserves_target_and_reports_uncertainty(self):
+        native = self.gap_client(running=True)
+        native.cmd_sync = lambda command: False
+        self.adapter.deadline = time.monotonic() + 5
+        result = self.adapter.wait_state(0)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["state"], "running")
+        self.assertTrue(result["recoveryRequired"])
+        self.assertFalse(result["resynced"])
+        self.assertFalse(result["cleanedUp"])
+        self.assertIsNone(result["event"])
+        self.assertNotIn("runtimeVA", result["context"])
+        self.assertIs(self.adapter.client, native)
+
+    def test_priority_result_does_not_reclassify_retained_hit_after_gap(self):
+        native = self.gap_client()
+        state = self.adapter.state()
+        result = self.adapter.wait_result(0, "suspended", state, {})
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["eventName"], "history-gap")
+        self.assertIsNone(result["event"])
+        self.assertIs(self.adapter.client, native)
+
+    def test_cleanup_resets_native_event_cursor_for_a_new_debugger_process(self):
+        self.adapter.record_event(SimpleNamespace(event_type="EVENT_PAUSE_DEBUG", event_data={},
+                                                  native_seq=400, native_stop_seq=100))
+        self.adapter.cleanup()
+        self.assertEqual(self.adapter.event_seq, 0)
+        self.assertEqual(list(self.adapter.events), [])
+        self.adapter.record_event(SimpleNamespace(event_type="EVENT_PAUSE_DEBUG", event_data={},
+                                                  native_seq=2, native_stop_seq=1))
+        self.assertEqual(self.adapter.event_list(0)[0]["seq"], 2)
+
+    def test_approved_asynchronous_start_does_not_look_like_an_external_run_change(self):
+        self.adapter.native_run_epoch = 0
+        self.adapter.expected_native_run_epoch = 1
+        for epoch, active in ((0, False), (0, False), (1, True)):
+            self.adapter.sync_native_state({"nativeRunEpoch": epoch, "stopSeq": 1 if active else 0,
+                                            "eventSeq": 3 if active else 0, "debugging": active, "pid": 80, "tid": 81})
+        self.assertEqual(self.adapter.run_id, "test-run")
+        self.assertFalse(self.adapter.pending_history_gap)
+        self.assertIsNone(self.adapter.expected_native_run_epoch)
+        self.adapter.sync_native_state({"nativeRunEpoch": 2, "stopSeq": 0, "eventSeq": 4,
+                                        "debugging": True, "pid": 90, "tid": 91})
+        self.assertNotEqual(self.adapter.run_id, "test-run")
+        self.assertTrue(self.adapter.pending_history_gap)
+
+    def test_priority_stop_waits_for_an_already_accepted_native_start(self):
+        self.adapter.expected_native_run_epoch = 1
+        original_state = self.adapter.state
+        polls = []
+        def state():
+            polls.append(1)
+            if len(polls) == 1:
+                return {"state": "no-task", "stateCode": -1}
+            self.adapter.expected_native_run_epoch = None
+            return original_state()
+        self.adapter.state = state
+        self.client.exit_on_command = True
+        result = self.dbg("stop")
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["state"], "no-task")
+        self.assertEqual(self.client.commands, ["stop"])
+        self.assertGreaterEqual(len(polls), 2)
+
+    def test_stop_classification_ignores_events_from_an_older_native_run(self):
+        self.adapter.native_run_epoch = 2
+        self.adapter.record_event(SimpleNamespace(event_type="EVENT_EXCEPTION", event_data={"ExceptionCode": 1},
+                                                  native_seq=12, native_stop_seq=1, native_run_epoch=1))
+        self.adapter.record_event(SimpleNamespace(event_type="EVENT_STEPPED", event_data={},
+                                                  native_seq=13, native_stop_seq=1, native_run_epoch=2))
+        result = self.adapter.wait_result(0, "suspended", {"state": "suspended"}, {})
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["eventName"], "step")
+        self.assertNotIn("exception", result["context"])
+
 
 if __name__ == "__main__": unittest.main(verbosity=2)
