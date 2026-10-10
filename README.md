@@ -87,6 +87,12 @@
 
 支持 scoped API 的 DSH 全局保留 Core8，Full 只展开到当前智能体会话，其他会话不受影响；`ig5_profile` 返回 `toolsetScope=agent`。旧宿主保留插件实例模式并明确返回 `plugin-instance`。切换不持久化，重载按配置初始化；不会授予运行或写权限。
 
+### 调查任务与单函数证据包
+
+Core8 保持不变。`ig5_decompile style=dossier` 在同一静态会话与数据库修订下聚合反编译、CFG、调用者/被调函数和栈帧，逐章返回成功、截断、不支持或错误，整个证据包保留实际来源与分析 partial；正文按 UTF-8 字节和每个数组的项数限制输出，结果在同会话修订内缓存。响应预算不等于全部后端计算预算，宜围绕问题选取少量函数。
+
+已打开目标可用 `ig5_profile target=... workspace={action:create,goal:...}` 建立持久调查任务，get/list 恢复进展，update 用返回的 `taskRevision` 作 `expected_task_revision` 防止覆盖并发修改。`ig5_decompile style=dossier task_id=...` 将系统快照与独立报告 hash/引用绑定任务；重开或修订变化会标记旧证据 stale。hypothesis/conclusion 与 status 是调用者陈述，保存不代表验证；任务不写 IDB、不授予样本执行权限。参数与恢复步骤见 [调查工作流](docs/INVESTIGATION_WORKFLOW.md)。
+
 本轮已用本机实际安装的 **DSH `0.2.1-alpha.1`** SDK 验证工具 registry、两个 agent 的 Core/Full 隔离、七技能、命令、投影、审批拒绝及卸载。插件声明 `@deepseek-ai/dsh: >=0.2.0-rc.1 <0.3.0-0`，宿主按 `includePrerelease: true` 判断版本；这个范围接受 0.2 的相应预发布版，排除 0.3（含预发布版），不等于每个版本均已完成运行验收。用户所说的“0.2.1 re1”应以安装包实际 runtime 版本对账，详见 [兼容记录](docs/DSH_COMPATIBILITY.md)。
 
 工具返回严格 JSON：可选对象字段的 `undefined` 被省略，`null` 保留；数字必须有限，零必须为正零，64 位地址使用十六进制字符串。常量样本的扫描熵返回 `0.0`，未读取到字节的熵仍为 `null`。无效数组项、BigInt、循环对象或非 JSON 值会明确拒绝，避免宿主在展示结果前校验失败。
@@ -166,7 +172,7 @@ SHA-256 不符时保留报错中的相对路径、Expected/Actual SHA-256 和文
 
 ## 三引擎工程与跨引擎修改计划
 
-v1.0.0 保留同一工具面，通过 `engine=reverse|ghidra` 选择静态来源；`backend=x64dbg` 选择独立动态后端。`ig5_ir` 提取 Ghidra raw/high p-code；`ig5_microcode` 提取 Reverse 微码，两种 IR 不当成相同成熟度。先用 `ig5_profile toolset=full` 启用高级工具；支持 scoped API 时只作用当前 agent，旧宿主明确报告插件实例作用域。两种切换都不持久化、不授权样本执行、不豁免写审批。
+v1.0.0 保留同一工具面，通过 `engine=reverse|ghidra` 选择静态来源；`backend=x64dbg` 选择独立动态后端。内置 Reverse 与显式 Ghidra 的实际 `provider=ghidra` 均可按能力读取 raw/high p-code；`ig5_microcode` 返回实际 stage 与兼容 maturity 映射，不与商业扩展的专属微码成熟度等同。先用 `ig5_profile toolset=full` 启用高级工具；支持 scoped API 时只作用当前 agent，旧宿主明确报告插件实例作用域。两种切换都不持久化、不授权样本执行、不豁免写审批。
 
 每个会话返回 engine、projectId、artifactId、attachmentId 与 dbRevision。SHA-256 识别样本内容，路径移动可关联原 artifact；新内容形成新 artifact。两引擎数据库独立，活跃数据库不暗中跨 session 共享。工作台按 session key + 路径 + 引擎选择并显示来源；原生地址跳转还绑定样本身份。64 位 VA/RVA/file/runtime 地址保持十六进制字符串，只有明确基址与已加载映射才转换，BSS 不伪造文件偏移。运行地址还需 runId、moduleLoadEpoch、stopSeq，不能复用旧暂停上下文。
 

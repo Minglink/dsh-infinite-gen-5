@@ -9,6 +9,8 @@ description: "使用 IG5 对离线捕获或未知报文进行有界重组、自�
 
 沿字符串、导入、调用和反编译定位收发、解压、解密与解析函数，再用字节、CFG、结构体与实际端序读取核验字段。`ig5_slice` 只是标识符焦点行，不是完备污点证明。需要动态缓冲区时，只有目标执行已获授权后才通过审批调用 `ig5_dbg` 或 `ig5_emulate`，记录真实暂停/返回身份；不可用只读工作台请求启动调试或绕开审批。内置 Reverse 与显式 Ghidra 默认调试后端为随包 x64dbg；native win32 仅用于显式商业扩展且实际能力支持的情况，失败不静默换后端。仿真架构与 ABI 按当前 provider、capabilities 和目标核验，不能仅凭 engine 名称推断 ARM64 等架构支持。若报文是加密/压缩数据，先按 `ig5-crypto` 的显式参数与验证流程处理；协议模块不会自动破解加密。
 
+仅当已有静态目标时，用 `ig5_profile target=... workspace={action:create,goal:...}` 建立调查任务，或用 `workspace={action:get,id:...}` 恢复。候选解析函数优先用 `ig5_decompile style=dossier task_id=...` 聚合反编译、CFG、调用者/被调函数和栈帧；检查章节 ok/truncated/unsupported/error、provenance、partial 与 stale，正文响应预算不等于全部后端计算预算。以本次 `taskRevision` 作为 `expected_task_revision` 更新假设/下一步/结论，冲突后重读。任务只存分析元数据，不写 IDB、不授权执行，status 是调用者进度声明；复开或数据库修订变化后重新取证。任务文本保留捕获和结果引用，不复制密钥原值；纯离线协议分析无需为建任务打开数据库，继续使用独立 `result_id`/ref。
+
 未知边界/字段时用 `action=infer`，`inference.format=auto|stream|messages|capture`。默认 stream boundary=unknown，只有证据支持时才给 message-start；samples 必须是已知完整应用消息，不能直接把 TCP packets 当成消息。用不同报文作 holdout_samples，检查候选在独立数据是否成立。capture 模式按 flow/方向分组，不能将缺口、冲突或未确定起点强行参与训练。保留等价候选、分数、覆盖、尾部与截断，单报文不足以确认协议。
 
 候选的 framing/schema 直接交给 `action=decode`；支持 fixed、length-prefix 和 delimiter。长度规则保留位置/大小/端序/headerLength/长度是否含头；换行 delimiter 保留准确字节与是否包含分隔符。验证最短/零/极端/缺尾报文和 holdout；字段保持中性，u64/i64 不转换成失真 Number。可读结果不证明完整语义，未知状态机保持未确定。

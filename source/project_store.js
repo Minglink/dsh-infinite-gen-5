@@ -84,7 +84,8 @@ export class ProjectStore {
     try { data = JSON.parse(fs.readFileSync(this.file, 'utf8')); }
     catch (error) { fail('STORE_CORRUPT', `Cannot read project metadata: ${error.message}`); }
     if (data.schemaVersion !== SCHEMA_VERSION || !Number.isSafeInteger(data.revision) || data.revision < 0 ||
-      ['projects', 'artifacts', 'targets', 'databases', 'attachments', 'runtimes'].some(key => !data[key] || typeof data[key] !== 'object' || Array.isArray(data[key]))) {
+      ['projects', 'artifacts', 'targets', 'databases', 'attachments', 'runtimes'].some(key => !data[key] || typeof data[key] !== 'object' || Array.isArray(data[key])) ||
+      (data.investigations !== undefined && (!data.investigations || typeof data.investigations !== 'object' || Array.isArray(data.investigations)))) {
       fail('STORE_SCHEMA_MISMATCH', 'Unsupported or invalid project metadata schema');
     }
     return data;
@@ -204,6 +205,17 @@ export class ProjectStore {
   }
 
   register(target, options) { return this.open(target, options); }
+  /** Separate InvestigationStore instances use these transactions in their own root. */
+  readInvestigationRecords() { return clone(this._read().investigations ?? {}); }
+  updateInvestigationRecords(update) {
+    if (typeof update !== 'function') fail('INVALID_ARGUMENT', 'Investigation update requires a synchronous function');
+    return this._write(data => {
+      const records = data.investigations ??= {};
+      const result = update(records);
+      if (result && typeof result.then === 'function') fail('INVALID_ARGUMENT', 'Investigation transactions must be synchronous');
+      return result;
+    });
+  }
   listProjects() { return clone(Object.values(this._read().projects)); }
   getProject(id) { return clone(found(this._read().projects, id, 'Project')); }
   getArtifact(id) { return clone(found(this._read().artifacts, id, 'Artifact')); }

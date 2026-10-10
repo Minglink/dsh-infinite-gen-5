@@ -9,6 +9,8 @@ description: "使用 IG5 定位加密数据、自动恢复 XOR 或检索 AES 候
 
 从函数参数、调用上下文、只读字节或已授权的暂停事件恢复 key、IV、计数器初值、tag、AAD 与 padding。记下来源地址和实际观察，不猜默认参数。需要执行函数时，仅在用户已授权该目标执行后，通过审批调用 `ig5_emulate` 或 `ig5_dbg`。仿真架构与 ABI 按当前 provider、capabilities 和目标核验，不能仅凭 engine 名称推断 x86/x64/ARM64 支持；ARM64 使用 AAPCS64。受限 CPU 仿真没有 OS/import/TLS，异常、指令上限和超时不能当成明文。内置 Reverse 与显式 Ghidra 默认调试后端为随包 x64dbg；native win32 仅用于显式商业扩展且实际能力支持的情况，失败不静默换后端。调试捕获保留 runId、stopSeq、模块映射与缓冲区范围，不能重用旧暂停上下文。
 
+仅当已有静态目标时，用 `ig5_profile target=... workspace={action:create,goal:...}` 建立调查任务，或用 `workspace={action:get,id:...}` 恢复。候选处理函数优先用 `ig5_decompile style=dossier task_id=...` 汇总反编译、CFG、调用者/被调函数和栈帧；检查章节 ok/truncated/unsupported/error、provenance、partial 与 stale，正文响应预算不等于全部后端计算预算。以本次 `taskRevision` 作为 `expected_task_revision` 更新假设/下一步/结论，冲突后重读。任务只存分析元数据，不写 IDB、不授权执行，status 是调用者进度声明；复开或修订变化后重新取证。任务文本只记录敏感材料引用及来源，不复制密钥原值；纯离线数据分析无需为建任务打开数据库，继续保留独立 `result_id`/ref。
+
 密钥未知时先调用 `ig5_crypto action=recover`。`recovery.method=auto|xor-single|xor-repeat|aes-candidates`；用已知明文约束、有限候选或 `key_source` 的文件/ref/静态范围提高成功率。XOR 统计分数只是候选；partial key 的 unknown mask 不得当作完整字节执行。AES 需给准确 IV/tag/AAD/padding，用候选材料检索并验证，不尝试随机 AES 全空间。独立完整 expected 或足够强的 GCM tag 可支持 verified；训练 crib、padding、可读性不能替代独立验证。记录所有 budgets/truncated/歧义。
 
 选完整恢复候选的 `keyMaterial.dataRef.ref`，配对 recovery `result_id`，作为 transform 的 `recipe.key_ref:{ref,result_id}`；宿主核验完整性、来源与修订，密钥无须在模型上下文展开。也可显式提供 `recipe.key`。`recipe.kind` 可选 `xor`、`aes-cbc`、`aes-ctr`、`aes-gcm`、`gzip` 或 `zlib`；IV/tag/AAD 来自准确证据。XOR 循环起点用 `recipe.key_offset`，AES 明确 padding，CTR/GCM 使用 none。GCM 认证失败不返回明文。输入/输出最多 1 MiB，预览最多 4096 字节；敏感 key blob 是用户数据，不分发，不自动预览。

@@ -21,13 +21,13 @@ function Expect-Failure { param([scriptblock]$Action, [string]$Expected)
     try { & $Action | Out-Null } catch { $failed = $true; Check ($_.Exception.Message.Contains($Expected)) "Expected '$Expected': $($_.Exception.Message)" }
     Check $failed "Expected failure: $Expected"
 }
-function New-Zip { param([string]$Path, [object[]]$Rows)
+function New-Zip { param([string]$Path, [object[]]$Rows, [switch]$Stored)
     Add-Type -AssemblyName System.IO.Compression
     $stream = [IO.File]::Create((ConvertTo-IG5IOPath $Path))
     $zip = [IO.Compression.ZipArchive]::new($stream, [IO.Compression.ZipArchiveMode]::Create)
     try {
         foreach ($row in $Rows) {
-            $entry = $zip.CreateEntry([string]$row.path)
+            $entry = if ($Stored) { $zip.CreateEntry([string]$row.path, [IO.Compression.CompressionLevel]::NoCompression) } else { $zip.CreateEntry([string]$row.path) }
             if ($null -ne $row.attrs) { $entry.ExternalAttributes = [int]$row.attrs }
             $outputStream = $entry.Open()
             try {
@@ -93,6 +93,7 @@ try {
     Put (Join-Path $fixture 'client.js') 'export default {};'
     foreach ($file in @('engine_runtime.js','advanced_tools.js','analysis_tools.js','integration_tools.js','workflow.js','semantic_diff.js','semantic_diff_async.js','semantic_diff_worker.js',
         'source/analysis_artifacts.js','source/analysis_jobs.js','source/analysis_worker.js','source/crypto_analysis.js','source/crypto_recovery.js','source/protocol_analysis.js','source/protocol_inference.js','worker/scan_analysis.py','source/kernel_jobs.js',
+        'source/function_dossier.js','source/investigation_store.js','source/investigation_workflow.js',
         'worker/ig5_kernel.py','worker/kernel_image.py','worker/kernel_analysis.py','worker/kernel_rtti.py','worker/kernel_decompile.py',
         'source/project_store.js','source/attachment_lease.js','source/audit_history.js','source/patch_export.js','source/history_index.js','source/json_output.js','source/reverse_runtime.js','source/address_ref.js','source/host_platform.js','source/worker_transport.js','worker/ig5_worker.py','worker/advanced_analysis.py','worker/execution_analysis.py','worker/memory_image.py','worker/cpu_emulator.py','worker/vendor/NOTICE.txt',
         'adapters/ghidra/worker.py','adapters/ghidra/pcode_view.py','adapters/ghidra/switch_analysis.py','adapters/ghidra/microcode_analysis.py','adapters/ghidra/script_api.py','adapters/ghidra/jpype-patch/JPypeContext.java','adapters/ghidra/jpype-patch/upstream/org.jpype.jar',
@@ -517,6 +518,29 @@ function New-IG5SourceDistribution {
     }
     Pass 'ZIP traversal, drive/ambiguous paths, case duplicates, file/directory collisions, reserved names and links are rejected before extraction'
 
+    $zipCrcSupported = $null -ne [IO.Compression.ZipArchiveEntry].GetProperty('Crc32')
+    $validCrcZip = Join-Path $testRoot 'valid-crc.zip'
+    $validCrcExtract = Join-Path $testRoot 'valid-crc-extract'
+    New-Zip $validCrcZip @(@{path='payload.txt';text='123456789'},@{path='empty.txt';text=''}) -Stored
+    Expand-IG5VerifiedZip $validCrcZip $validCrcExtract
+    Check ((Read-IG5Text (Join-Path $validCrcExtract 'payload.txt')) -ceq '123456789') 'valid ZIP payload differs after extraction'
+    Check ((New-Object IO.FileInfo (Join-Path $validCrcExtract 'empty.txt')).Length -eq 0) 'valid empty ZIP entry was changed'
+    Pass 'valid ZIP CRC payload and empty entry pass unchanged extraction'
+    if ($zipCrcSupported) {
+        $corruptCrcZip = Join-Path $testRoot 'same-length-corrupt-crc.zip'
+        $corruptCrcExtract = Join-Path $testRoot 'same-length-corrupt-crc-extract'
+        $crcBytes = [IO.File]::ReadAllBytes($validCrcZip)
+        Check ([BitConverter]::ToUInt32($crcBytes,0) -eq 0x04034b50) 'stored CRC fixture local header missing'
+        Check ([BitConverter]::ToUInt16($crcBytes,8) -eq 0) 'CRC fixture must use stored bytes'
+        $dataAt = 30 + [BitConverter]::ToUInt16($crcBytes,26) + [BitConverter]::ToUInt16($crcBytes,28)
+        $crcBytes[$dataAt] = $crcBytes[$dataAt] -bxor 1
+        [IO.File]::WriteAllBytes($corruptCrcZip,$crcBytes)
+        Expect-Failure { Expand-IG5VerifiedZip $corruptCrcZip $corruptCrcExtract } 'ZIP entry integrity mismatch'
+        Pass 'public entry CRC rejects same-length data corruption independently of the byte budget'
+    } else {
+        Write-Output 'INFO ZIP entry CRC is unavailable on this .NET runtime; same-length corruption coverage is not claimed. Fixed ZIP SHA-256 and per-file inventories remain required.'
+    }
+
     $forgedZip = Join-Path $testRoot 'forged-length.zip'
     New-Zip $forgedZip @(@{path='forged.txt';text=('A'*65536)})
     $zipBytes = [IO.File]::ReadAllBytes($forgedZip)
@@ -526,9 +550,10 @@ function New-IG5SourceDistribution {
     [BitConverter]::GetBytes([uint32]1).CopyTo($zipBytes,$central+24)
     [IO.File]::WriteAllBytes($forgedZip,$zipBytes)
     $forgedExtract = Join-Path $testRoot 'forged-extract'
-    Expect-Failure { Expand-IG5VerifiedZip $forgedZip $forgedExtract } 'ZIP expanded byte/time budget exceeded'
+    $forgedExpected = if ($zipCrcSupported) { 'ZIP entry integrity mismatch' } else { 'ZIP expanded byte/time budget exceeded' }
+    Expect-Failure { Expand-IG5VerifiedZip $forgedZip $forgedExtract } $forgedExpected
     Check ((New-Object IO.FileInfo (Join-Path $forgedExtract 'forged.txt')).Length -le 1) 'forged ZIP length allowed excess bytes onto disk'
-    Pass 'forged ZIP central-directory length is enforced before writing expanded bytes'
+    Pass 'forged ZIP central-directory length is rejected by actual-byte budget or public CRC, with no excess bytes written'
 
     # Exercise the network bootstrap control flow with deterministic local data; no network calls.
     $downloadDefinition = (Get-Item Function:Invoke-IG5DistributionDownload).Definition

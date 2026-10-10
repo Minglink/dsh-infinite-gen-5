@@ -46,6 +46,8 @@
     "test:debug-runtime": "node scripts/test_debug_runtime.mjs",
     "test:advanced": "node scripts/test_advanced_runtime.mjs",
     "test:workflow": "node scripts/test_workflow.mjs",
+    "test:investigation": "node --test scripts/test_function_dossier.mjs scripts/test_investigation_store.mjs scripts/test_investigation_workflow.mjs",
+    "test:investigation-runtime": "node scripts/test_investigation_runtime.mjs",
     "test:client": "node scripts/test_client.mjs",
     "test:crypto": "node scripts/test_crypto_analysis.mjs",
     "test:protocol": "node scripts/test_protocol_analysis.mjs",

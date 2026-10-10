@@ -7,7 +7,9 @@ description: "使用 IG5 bindiff 多特征启发式比较版本函数和变更�
 
 分别确认旧、新目标的路径与分析状态，必要时各自 `ig5_open`。单目标调用显式传入 `target`，`ig5_bindiff` 明确传入 `left`、`right`，防止混用两个版本。保存比较依据；地址漂移、不同编译选项或分析缺失不能直接当作业务逻辑改变。需要高级工具时先调用 `ig5_profile toolset=full`，用户也可用 `/ig5 toolset full`；按返回的 `toolsetScope` 判断作用域：支持作用域的宿主仅切换当前 agent，旧宿主明确返回 `plugin-instance` 时才影响插件实例。两种切换均不持久化，不授权执行或免除审批。
 
-用 `ig5_bindiff left=<旧目标> right=<新目标>` 取得基于规范化指令、CFG 邻域、常量与调用特征的函数匹配和变更块；保留歧义、候选评分、未匹配及截断信息。用 `ig5_funcs`、字符串、导入与调用者交叉核对，比较时优先用户代码。对重要候选分别读取 `ig5_decompile` 与 `ig5_cfg`，必要时用 `ig5_xrefs`、`ig5_calls` 解释上下文，并按问题比较 `ig5_stack`、`ig5_switches`、`ig5_vtables` 或同一成熟度的 `ig5_microcode`。仅凭名称、大小或评分不能确认同一函数、语义等价或漏洞；证据不足时列出候选与置信依据。
+旧、新目标各自用 `ig5_profile target=... workspace={action:create,goal:...}` 建立调查任务，或用 `workspace={action:get,id:...}` 恢复各自任务；不要复用另一目标的绑定。更新以本次返回的 `taskRevision` 作为 `expected_task_revision`，冲突后重新读取。hypothesis/conclusion 与 status 是调用者陈述，不是匹配验证；任务不写 IDB、不授权执行。重开或数据库修订变化后检查旧系统快照的 stale，不把旧版本证据当新版本证据。
+
+用 `ig5_bindiff left=<旧目标> right=<新目标>` 取得基于规范化指令、CFG 邻域、常量与调用特征的函数匹配和变更块；保留歧义、候选评分、未匹配及截断信息。用 `ig5_funcs`、字符串、导入与调用者交叉核对，比较时优先用户代码。对重要候选各自优先读取 `ig5_decompile style=dossier task_id=...`，聚合反编译、CFG、调用者/被调函数和栈帧；检查章节 ok/truncated/unsupported/error、provenance 与分析 partial，再补查缺项。正文响应预算不等于全部后端计算预算，不为全部候选无差别生成 dossier。必要时用 `ig5_xrefs`、`ig5_calls` 解释上下文，并按问题比较 `ig5_stack`、`ig5_switches`、`ig5_vtables` 或同一实际阶段的 `ig5_microcode`。仅凭名称、大小或评分不能确认同一函数、语义等价或漏洞；证据不足时列出候选与置信依据。
 
 输出旧函数 EA、新函数 EA、匹配理由、行为差异与仍待核验的问题。`ig5_export_diff` 导出当前数据库中的字节补丁状态并尊重 Undo，不是两个版本的匹配器；版本候选使用 `ig5_bindiff`。补丁迁移重新读取新版本原字节并传 `expected`，走宿主审批，不复用旧版本绝对地址直接写入。未经目标执行授权不启动仿真或调试；商业引擎称 Reverse，开源结果保留 Ghidra/x64dbg 来源。
 

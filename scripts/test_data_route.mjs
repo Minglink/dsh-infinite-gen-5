@@ -11,6 +11,8 @@ import vm from 'node:vm';
 import { defineAdvancedTools } from '../advanced_tools.js';
 import { defineIntegrationTools } from '../integration_tools.js';
 import { defineAnalysisTools } from '../analysis_tools.js';
+import { collectFunctionDossier } from '../source/function_dossier.js';
+import { workspaceSchema, runWorkspace, captureDossier } from '../source/investigation_workflow.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { engineId } from '../engine_runtime.js';
 import { spawnWorker, attachWorker, doctorWorker } from '../source/worker_transport.js';
@@ -225,6 +227,7 @@ assert.ok(toolsStart >= 0 && toolsEnd > toolsStart, 'tool definitions must be pr
 const defineIg5Tools = vm.runInNewContext(
   source.slice(toolsStart, toolsEnd) + '\ndefineIg5Tools;',
   { path, fs, publicEngineError, defineAdvancedTools, defineIntegrationTools, defineAnalysisTools, doctorWorker,
+    collectFunctionDossier, workspaceSchema, runWorkspace, captureDossier,
     IG5_WRITE_TOOLS: vm.runInNewContext(source.slice(source.indexOf('const IG5_WRITE_TOOLS'), source.indexOf('function installApprovalGate')) + '\nIG5_WRITE_TOOLS;'),
     PLUGIN_ID: 'dsh-infinite-gen-5', PLUGIN_VERSION: '1.0.0', setTimeout, clearTimeout },
 );

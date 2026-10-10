@@ -15,6 +15,8 @@ import { exportPatchDiff } from './source/patch_export.js';
 import { readAuditPage, targetIdentity } from './source/audit_history.js';
 import { jsonToolOutput } from './source/json_output.js';
 import { resolveReverseRuntime } from './source/reverse_runtime.js';
+import { collectFunctionDossier } from './source/function_dossier.js';
+import { workspaceSchema, runWorkspace, captureDossier } from './source/investigation_workflow.js';
 
 // ── 无限五代（IG5）v1.0.0 ──────────────────────────────────────────────────
 // DeepSeek Harness 逆向插件：隔离多引擎 Worker 池 + ig5_* 工具面 + ig5dash 投影。
@@ -1023,8 +1025,11 @@ function formatProgress(payload) {
 function dimsOf(info) {
   return {
     engine: info.engine,
+    provider: info.provider,
     projectId: info.projectId,
     artifactId: info.artifactId,
+    sha256: info.sha256,
+    attachmentId: info.attachmentId,
     dbRevision: info.dbRevision,
     partial: info.partial === true,
     ...(info.analysis ? { analysis: info.analysis } : {}),
@@ -1067,10 +1072,11 @@ function defineIg5Tools(ctx, mgr, cfg) {
     {
       name: 'ig5_profile',
       description:
-        'Return IG5 engines, projects, active tools and skills. Optionally switch core (8 frequent tools) or full (38 tools) for the calling agent on hosts supporting agent scopes; older hosts explicitly report plugin-instance scope. History stats/archive/restore manage saved analysis reports without changing engine databases; archive retains result IDs and data refs.',
-      parameters: { type: 'object', properties: { toolset: { type: 'string', enum: ['core', 'full'] }, history: { type: 'object', properties: { action: { type: 'string', enum: ['stats', 'archive', 'restore'] }, ids: { type: 'array', minItems: 1, maxItems: 1000, items: { type: 'string' } } }, required: ['action'], additionalProperties: false } }, additionalProperties: false },
+        'Return IG5 engines, projects, active tools and skills. Optionally switch core (8 frequent tools) or full (38 tools) for the calling agent on hosts supporting agent scopes; older hosts explicitly report plugin-instance scope. workspace manages persistent analysis tasks for an explicitly opened target: caller hypotheses/progress are separate from system dossier observations; updates require expected_task_revision. This changes notes only, not engine databases or execution permissions. History stats/archive/restore retain report IDs and data refs.',
+      parameters: { type: 'object', properties: { target: { type: 'string', description: 'Explicit opened static target, required for workspace' }, workspace: workspaceSchema, toolset: { type: 'string', enum: ['core', 'full'] }, history: { type: 'object', properties: { action: { type: 'string', enum: ['stats', 'archive', 'restore'] }, ids: { type: 'array', minItems: 1, maxItems: 1000, items: { type: 'string' } } }, required: ['action'], additionalProperties: false } }, additionalProperties: false },
       output: { schema: { type: 'object', additionalProperties: true }, render: textRender },
       async execute(args = {}, execution) {
+        if (args.workspace !== undefined) return runWorkspace(mgr, cfg, args, execution);
         if (args.toolset !== undefined) {
           if (!mgr.workflow) throw new Error('IG5 workflow is not ready');
           mgr.workflow.setToolset(args.toolset, execution);
@@ -1293,21 +1299,30 @@ function defineIg5Tools(ctx, mgr, cfg) {
     {
       name: 'ig5_decompile',
       description:
-        'Decompile one function in the selected static engine to C-like pseudocode. Address by EA or exact name. style=llm adds supporting references when available. Returns engine and database revision. Results over ~12KB spill to an artifact file with a preview.',
+        'Decompile one function by EA or exact name. style=dossier aggregates pseudocode, CFG, callers, callees and stack under one database revision, with explicit section status, response limits and provenance. Optional task_id records a system observation in an existing investigation task. style=llm returns provider-specific supporting metadata when available. Plain results over ~12KB spill to an artifact file with a preview. Read-only; does not execute the sample or verify hypotheses.',
       parameters: {
         type: 'object',
         properties: {
           target: { type: 'string', description: 'Target path previously opened with ig5_open' },
           ea: { type: 'string', description: 'Function address, hex string like 0x140001070' },
           name: { type: 'string', description: 'Exact function name (used when ea is absent)' },
-          style: { type: 'string', description: '"llm" adds meta.callees + meta.strings for model consumption' },
+          style: { type: 'string', enum: ['', 'llm', 'dossier'], description: 'Omit for plain pseudocode; llm metadata depends on the provider; dossier aggregates real function context' },
+          dossier_max_bytes: { type: 'number', description: 'Dossier body UTF-8 response budget, 4000..64000 bytes, default 16000; not a total backend computation budget' },
+          dossier_max_rows: { type: 'number', description: 'Dossier per-array row cap, 1..128, default 32' },
+          task_id: { type: 'string', description: 'Existing workspace task UUID; requires style=dossier and records only system-produced observations' },
         },
         required: ['target'],
       },
       output: { schema: { type: 'object', additionalProperties: true }, render: textRender },
-      async execute(args) {
+      async execute(args, execution) {
         const target = requireString(args, 'target');
         const session = mgr.get(target);
+        if (args.style !== undefined && !['', 'llm', 'dossier'].includes(args.style)) throw new Error('style must be empty, llm or dossier');
+        if (args.style === 'dossier') {
+          const dossier = await collectFunctionDossier(mgr, session, args);
+          return args.task_id === undefined ? dossier : { ...dossier, investigation: captureDossier(mgr, cfg, dossier, args.task_id, execution) };
+        }
+        if (['task_id', 'dossier_max_bytes', 'dossier_max_rows'].some(key => args[key] !== undefined)) throw new Error('Dossier parameters require style=dossier');
         const style = args?.style === 'llm' ? 'llm' : '';
         const key = `${session.dbRevision}|${args?.ea ?? ''}|${args?.name ?? ''}|${style}`;
         let result = session.cache.get(key);
@@ -1943,7 +1958,8 @@ export function apply(ctx, config = {}) {
         return jsonToolOutput(result && typeof result === 'object' && !Array.isArray(result) && session && !isGlobal
           ? { ...result, _ig5: result._ig5 || mgr.evidence(session) } : result);
         };
-        if (!session || !(IG5_WRITE_TOOLS.has(definition.name) || definition.name === 'ig5_export_diff') || ['ig5_sync', 'ig5_dbg'].includes(definition.name)) return perform();
+        const queuedRead = definition.name === 'ig5_decompile' || definition.name === 'ig5_profile' && args.workspace !== undefined;
+        if (!session || !(IG5_WRITE_TOOLS.has(definition.name) || definition.name === 'ig5_export_diff' || queuedRead) || ['ig5_sync', 'ig5_dbg'].includes(definition.name)) return perform();
         return mgr.withSessions([session], perform);
       });
       return definition;

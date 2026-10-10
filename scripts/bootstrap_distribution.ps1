@@ -120,11 +120,44 @@ function Get-IG5Asset {
     return $asset
 }
 
+function Initialize-IG5ZipCrc32 {
+    # Use our own repeatable type name and only the public ZipArchiveEntry CRC
+    # contract. Older .NET runtimes retain length checks and pinned SHA-256.
+    if ('IG5.DistributionIntegrity.V1.Crc32Accumulator' -as [type]) { return }
+    Add-Type -TypeDefinition @'
+namespace IG5.DistributionIntegrity.V1 {
+    public sealed class Crc32Accumulator {
+        private static readonly uint[] Table = MakeTable();
+        private uint state = 0xffffffffU;
+        private static uint[] MakeTable() {
+            uint[] table = new uint[256];
+            for (int index = 0; index < table.Length; index++) {
+                uint value = (uint)index;
+                for (int bit = 0; bit < 8; bit++)
+                    value = (value & 1U) != 0 ? (value >> 1) ^ 0xedb88320U : value >> 1;
+                table[index] = value;
+            }
+            return table;
+        }
+        public void Append(byte[] buffer, int count) {
+            if (buffer == null) throw new System.ArgumentNullException("buffer");
+            if (count < 0 || count > buffer.Length) throw new System.ArgumentOutOfRangeException("count");
+            for (int index = 0; index < count; index++)
+                state = Table[(int)((state ^ buffer[index]) & 0xffU)] ^ (state >> 8);
+        }
+        public uint Value { get { return state ^ 0xffffffffU; } }
+    }
+}
+'@
+}
+
 function Expand-IG5VerifiedZip {
     param([string]$ZipPath, [string]$Destination)
     Assert-IG5NoReparsePath $Destination
     if (Test-IG5Path $Destination) { throw 'ZIP destination must not already exist' }
     Add-Type -AssemblyName System.IO.Compression
+    $zipHasCrc32 = $null -ne [IO.Compression.ZipArchiveEntry].GetProperty('Crc32')
+    if ($zipHasCrc32) { Initialize-IG5ZipCrc32 }
     $stream = [IO.File]::OpenRead((ConvertTo-IG5IOPath $ZipPath))
     $zip = $null
     try {
@@ -174,14 +207,21 @@ function Expand-IG5VerifiedZip {
             $outputStream = [IO.File]::Open((ConvertTo-IG5IOPath $full), [IO.FileMode]::CreateNew, [IO.FileAccess]::Write)
             try {
                 $written = [long]0
+                $crc = if ($zipHasCrc32) { [IG5.DistributionIntegrity.V1.Crc32Accumulator]::new() } else { $null }
                 while (($read = $inputStream.Read($buffer, 0, $buffer.Length)) -gt 0) {
                     # Enforce central-directory sizes before each write, including forged small lengths.
                     if ($written + $read -gt $entry.Length -or $written + $read -gt 512MB -or $actualTotal + $read -gt 6GB -or $extractWatch.Elapsed.TotalSeconds -gt 1200) { throw "ZIP expanded byte/time budget exceeded: $($entry.FullName)" }
+                    if ($crc) { $crc.Append($buffer, $read) }
                     $outputStream.Write($buffer, 0, $read)
                     $written += $read
                     $actualTotal += $read
                 }
                 if ($written -ne $entry.Length) { throw "Truncated ZIP entry: $($entry.FullName)" }
+                # New .NET may stop at a forged central-directory length rather
+                # than yielding excess bytes. Verify exactly the bytes returned
+                # by Read against the entry's public CRC without weakening the
+                # per-read size/time budgets or fixed archive/file SHA-256 pins.
+                if ($crc -and $crc.Value -ne [uint32]$entry.Crc32) { throw "ZIP entry integrity mismatch: $($entry.FullName)" }
             }
             finally { $outputStream.Dispose(); $inputStream.Dispose() }
             $extractCount++

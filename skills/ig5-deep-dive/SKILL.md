@@ -5,7 +5,9 @@ description: "使用 IG5 深入解释函数或输入处理路径，结合调用�
 
 默认静态后端为 `engine=reverse`、`reverseProvider=bundled`，随包服务的实际 `provider=ghidra`，无需本机商业安装；显式 `engine=ghidra` 使用独立车道，商业扩展仅在显式配置 `reverseProvider=commercial` 时使用。先从 `ig5_status` 核对路径、engine、provider、capabilities、projectId/artifactId 与 dbRevision；结果保留来源，不能把两引擎数据库当成一致内存。路径相同不保证内容相同，地址用十六进制字符串并区分静态 VA、RVA、文件偏移和运行时 VA。Ghidra 分析预算到期的 partial 结果只能作为部分证据，不称完整分析。
 
-确认目标与函数地址，使用 `ig5_decompile style=llm` 建立输入、输出、全局状态和关键分支的初步解释。沿 `ig5_calls`、`ig5_xrefs` 追踪影响结论的调用者或被调函数；用 `ig5_cfg` 核验分支与循环结构，用 `ig5_bytes` 核验影响结论的常量或指令。若所需高级工具未启用，先调用 `ig5_profile toolset=full`，也保留用户 `/ig5 toolset full` 入口。按返回的 `toolsetScope` 判断作用域：支持作用域的宿主仅切换当前 agent；旧宿主明确返回 `plugin-instance` 时才影响插件实例。两种切换均不持久化，不构成执行授权或审批豁免。
+确认目标与函数地址，用 `ig5_profile target=... workspace={action:create,goal:...}` 建立调查任务，或用 `workspace={action:get,id:...}` 恢复。以本次返回的 `taskRevision` 作为 `expected_task_revision` 更新 hypothesis/next_step/conclusion，冲突后重新读取。任务只持久分析元数据，不写 IDB、不授权执行；status 是调用者进度声明，假设与结论不因保存自动成为事实。重开或数据库修订变化后旧系统快照标 stale，须重新取证。
+
+优先使用 `ig5_decompile style=dossier task_id=...` 聚合单函数反编译、CFG、调用者/被调函数和栈帧，建立输入、输出、全局状态和关键分支的初步解释。检查各章节的 ok/truncated/unsupported/error、provenance 与分析 partial；只对影响判断的缺项补查，不把章节成功当作全程序分析完整。dossier 正文响应预算不等于全部后端计算预算，按问题选择少量函数。沿 `ig5_calls`、`ig5_xrefs` 追踪影响结论的调用者或被调函数；用 `ig5_cfg` 核验分支与循环结构，用 `ig5_bytes` 核验影响结论的常量或指令。若所需高级工具未启用，先调用 `ig5_profile toolset=full`，也保留用户 `/ig5 toolset full` 入口。按返回的 `toolsetScope` 判断作用域：支持作用域的宿主仅切换当前 agent；旧宿主明确返回 `plugin-instance` 时才影响插件实例。两种切换均不持久化，不构成执行授权或审批豁免。
 
 `ig5_slice` 返回局部变量信息及按变量匹配的代码行，不能把文本命中当成完备的定义使用链或微代码污点证明。用局部赋值、别名、参数传递和调用上下文交叉核验。结构体偏移解释先用 `ig5_struct action=list|get` 检查已有类型；类型假设与已验证布局分别陈述。
 
