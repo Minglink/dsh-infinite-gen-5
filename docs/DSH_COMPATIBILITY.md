@@ -1,6 +1,6 @@
 # DSH 宿主兼容与验收范围
 
-记录日期：2026-10-10。IG5 版本保持 1.0.0。本轮源码副本的实际宿主 SDK、62 项回归及全部 38 个公开工具验收已通过。发行附件的下载、安装与功能复验以对应 Release 的 `*.verification.json` 报告为准；不能把源码结果替代下载副本结果。
+记录日期：2026-10-10。IG5 版本保持 1.0.0。本轮默认 Reverse 使用随包内核，源码副本的实际宿主 SDK 与全部 38 个公开工具验收已通过，无需本机商业引擎。发行附件的下载、安装与功能复验以对应 Release 的验收报告为准；不能把源码结果替代下载副本结果。
 
 ## 实际版本与声明范围
 
@@ -60,11 +60,11 @@ DSH 会在渲染前校验工具结果。IG5 的 `source/json_output.js` 在公�
 | `scripts/test_approval_gate.mjs` | 实际产品审批 hook | 可控公共服务与完整 exec 的允许/拒绝/取消及零下游调用断言；不代替真实 SDK dispatch |
 | `scripts/test_client.mjs` | 实际 client 源码 | VM 中的 renderer/HTTP fixture；不是真实浏览器或原生引擎 |
 | `scripts/preview_client.mjs` 加浏览器操作记录 | 安装包的真实 React/ReactDOM 与浏览器 | 本轮 8 页、16 项交互检查通过，含 CFG 缩放/拖动/跳转、高亮、草稿保留、审计分页、解密/协议及 390×844 窄屏无横向溢出；HTTP 分析数据为 fixture，不证明实时引擎、调试器或手机原生运行 |
-| `scripts/test_public_tool_catalog.mjs` | 插件公开 execute、真实 Reverse/Ghidra worker、随包 Unicorn、x64dbg | 源码副本的 38 工具全部通过，含 69 项结果断言及 12 个审批门；另记录 6 项明确 unsupported，未计为执行成功。使用生成 PE，宿主审批服务可控，实际 SDK 另验，不外推任意样本 |
+| `scripts/test_public_tool_catalog.mjs` | 插件公开 execute、内置 Reverse/Ghidra 独立数据库车道、随包 Unicorn、x64dbg | 38 工具全部通过，包括真实微码阶段、脚本兼容 API、两车道同步、动态断点/寄存器/单步和 12 个审批门。内置静态数据库服务来源为 Ghidra；使用生成 PE，宿主审批服务可控，实际 SDK 另验，不外推任意样本或专有 API 的完整兼容 |
 | 引擎、调试和数据回归 | 对应真实 worker/生成样本或样本副本 | 根据每项断言核验具体能力；fake/mock、单纯 load 和存在工具均不能算运行闭环 |
 | 下载归档/安装校验 | 实际 GitHub 附件及隔离安装副本 | 文件大小/hash、完整资产和安装流程；不能单凭归档完整性推断所有功能正常 |
 
-本轮维护机的证据根为 `~/.dsh/ig5/artifacts/github-consumer-validation-20261010/`。`source-sdk-final/host-sdk.json` 记录实际 SDK 成功；`source-public-catalog/public-tool-catalog-4f1d59ea-c1dc-4bd0-b233-c37b60e6a943.json` 记录源码 38 工具结果；`workbench-browser.json` 与两张工作台截图记录实际浏览器 fixture 检查，浏览器控制台无错误或警告。`download-original-sdk/host-sdk.json` 保留原附件 SDK 问题，不覆盖失败记录。下载副本和源码分别记录版本及文件身份，本地通过不代表旧远端附件已更新。Windows PowerShell 5.1 安装回归另覆盖 26 个本地及模拟网络场景，包括源码保留、离线入口、损坏资产、解压预算、目录链接和 profile 并发修改；模拟网络不能替代实际 GitHub 下载。
+本轮内核重构证据根为 `~/.dsh/ig5/artifacts/kernel-reconstruction-20261010/`，逐工具报告与各次受测源码身份分别保留。早期 `github-consumer-validation-20261010/` 中的 69 项断言、6 项 unsupported 和安装 26 场景是重构前的历史记录；不能用它们说明当前内置能力。历史 `workbench-browser.json` 与截图仍仅证明浏览器 fixture 交互，`download-original-sdk/host-sdk.json` 保留原附件 SDK 问题。最新安装回归覆盖 35 个本地及模拟网络场景；实际公开下载、完整离线安装及安装后的原生复验另记录。下载副本和源码分别记录文件身份，旧远端附件与失败记录不覆盖；模拟网络不能替代实际 GitHub 下载。
 
 ## 重验入口
 
@@ -76,6 +76,6 @@ node .\scripts\test_approval_gate.mjs
 node .\scripts\test_json_output.mjs
 ```
 
-纯 gate 和 public catalog 可通过 `IG5_PLUGIN_UNDER_TEST` 指向下载后安装副本。完整 catalog 默认需要本机授权 Reverse、随包 Ghidra 和启用的 x64dbg，使用生成的临时 PE、独立 IG5_HOME/项目/状态/产物并在 finally 清理；原生运行按维护安排串行执行。指定少数引擎或禁用调试只能产生部分覆盖报告，不能作为 38 项全部通过。
+纯 gate 和 public catalog 可通过 `IG5_PLUGIN_UNDER_TEST` 指向下载后安装副本。完整 catalog 默认使用 `reverseProvider=bundled` 的内置 Reverse、显式 Ghidra 车道及随包 x64dbg，无需本机商业引擎；使用生成的临时 PE、独立 IG5_HOME/项目/状态/产物并在 finally 清理。原生运行按维护安排串行执行。指定少数引擎或禁用调试只能产生部分覆盖报告，不能作为 38 项全部通过。
 
-已知能力边界继续以 [HARNESS_PLUGIN](../HARNESS_PLUGIN.md#已验证范围)、[ARCHITECTURE](ARCHITECTURE.md) 和各引擎 capabilities 为准。Bochs load 不等于运行闭环；Ghidra 不支持的 Reverse 专属工具明确拒绝；生成夹具不保证任意二进制；Android/iOS 尚无本轮真机原生执行证据。
+已知能力边界继续以 [HARNESS_PLUGIN](../HARNESS_PLUGIN.md#已验证范围)、[SELF_CONTAINED_KERNEL](SELF_CONTAINED_KERNEL.md)、[SCRIPT_API](SCRIPT_API.md) 和各引擎 capabilities 为准。内置微码提供真实 p-code/SSA 与有界优化，脚本提供明确兼容子集，不能冒称完整商业专有 API。可选商业扩展的 Bochs load 不等于运行闭环；生成夹具不保证任意二进制；Android/iOS 尚无本轮真机原生执行证据。

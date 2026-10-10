@@ -40,8 +40,10 @@ Install from PowerShell:
   & .\plugin\install.ps1
 Then restart DeepSeek Harness and call ig5_doctor.
 
-Reverse is optional and separately configured on the destination computer.
-DeepSeek Harness and the commercial runtime are not bundled.
+Reverse is the default bundled analysis lane (reverseProvider=bundled, provider=ghidra).
+All 38 public tools have bundled execution paths; no commercial engine installation is required.
+The optional commercial compatibility provider requires a separately licensed local installation.
+DeepSeek Harness and commercial programs/licenses are not bundled.
 Upstream licenses, notices, source audit assets and SHA-256 manifests are preserved.
 User projects, sessions, downloads and build caches are excluded.
 '@
@@ -51,7 +53,8 @@ User projects, sessions, downloads and build caches are excluded.
            sha256 = Get-IG5Hash $_.FullName }
     })
     $manifest = @{ schemaVersion = 1; pluginVersion = $package.version; version = $package.version; platform = 'win32-x64'; createdAt = [DateTime]::UtcNow.ToString('o');
-        engines = @('ghidra', 'x64dbg'); includesProjects = $false; files = $records }
+        engines = @('reverse', 'ghidra', 'x64dbg'); defaultEngine = 'reverse'; reverseProvider = 'bundled'; builtInProvider = 'ghidra'; publicToolCount = 38;
+        includesProjects = $false; files = $records }
     [IO.File]::WriteAllText((Join-Path $stage 'manifest.json'), ($manifest | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
     Move-Item -LiteralPath $stage -Destination $destination
 } catch {
