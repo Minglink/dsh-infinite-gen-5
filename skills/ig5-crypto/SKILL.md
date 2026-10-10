@@ -3,11 +3,11 @@ name: ig5-crypto
 description: "使用 IG5 定位加密数据、自动恢复 XOR 或检索 AES 候选密钥，再通过认证/独立明文验证与来源引用完成配置提取。"
 ---
 
-先明确待分析的密文、配置或编码缓冲区。需要高级工具时调用 `ig5_profile toolset=full`；这只切换插件实例的工具面，不授权样本执行。记录样本 artifactId、静态 engine 与 dbRevision，以及字节的文件偏移或 VA；不能把运行时地址当作静态 VA。使用 `ig5_scan` 的标准结果、字符串、导入、xref、调用关系和反编译定位处理路径。常量、API、熵或块对齐只支持候选假设，不能据此确认算法或成功解密。
+先明确待分析的密文、配置或编码缓冲区。需要静态定位时，默认 `engine=reverse`、`reverseProvider=bundled` 使用随包服务，实际 `provider=ghidra`，无需本机商业安装；显式 Ghidra 使用独立车道，商业扩展仅在显式配置 `reverseProvider=commercial` 时使用。工具按当前 provider 与 capabilities 选择。需要高级工具时调用 `ig5_profile toolset=full`；按返回的 `toolsetScope` 判断作用域：支持作用域的宿主仅切换当前 agent，旧宿主明确返回 `plugin-instance` 时才影响插件实例。两种切换均不持久化，不授权样本执行。记录样本 artifactId、静态 engine/provider 与 dbRevision，以及字节的文件偏移或 VA；不能把运行时地址当作静态 VA。使用 `ig5_scan` 的标准结果、字符串、导入、xref、调用关系和反编译定位处理路径。常量、API、熵或块对齐只支持候选假设，不能据此确认算法或成功解密。
 
 `ig5_crypto` 是离线数据工具，不需要打开静态数据库。`input` 必须选择一种来源：`{encoding:"hex"|"base64",data:"..."}`、`{path:"完整本地文件路径"}`、`{ref:"sha256:...",result_id:"产生该 ref 的报告 UUID"}`，或 `{source:{target,engine,ea,size,expected_revision}}`。引用输入使用明确 producer ID 保留来源；省略 `input.result_id` 会标记 unbound，不能从相同字节 hash 推断样本或引擎归属。文件和静态读取受字节预算约束；静态来源优先携带本次修订。先用 `action=inspect` 获取范围、SHA-256、编码/压缩头、熵及有限预览，不自动执行疑似处理函数，也不把头部匹配当作完整压缩载荷有效。
 
-从函数参数、调用上下文、只读字节或已授权的暂停事件恢复 key、IV、计数器初值、tag、AAD 与 padding。记下来源地址和实际观察，不猜默认参数。需要执行函数时，仅在用户已授权该目标执行后，通过审批调用 `ig5_emulate` 或 `ig5_dbg`。受限 CPU 仿真支持实际 provider 提供的 x86/x64 或 Ghidra ARM64/AAPCS64，没有 OS/import/TLS；异常、指令上限和超时不能当成明文。调试捕获保留 runId、stopSeq、模块映射与缓冲区范围，不能重用旧暂停上下文。
+从函数参数、调用上下文、只读字节或已授权的暂停事件恢复 key、IV、计数器初值、tag、AAD 与 padding。记下来源地址和实际观察，不猜默认参数。需要执行函数时，仅在用户已授权该目标执行后，通过审批调用 `ig5_emulate` 或 `ig5_dbg`。仿真架构与 ABI 按当前 provider、capabilities 和目标核验，不能仅凭 engine 名称推断 x86/x64/ARM64 支持；ARM64 使用 AAPCS64。受限 CPU 仿真没有 OS/import/TLS，异常、指令上限和超时不能当成明文。内置 Reverse 与显式 Ghidra 默认调试后端为随包 x64dbg；native win32 仅用于显式商业扩展且实际能力支持的情况，失败不静默换后端。调试捕获保留 runId、stopSeq、模块映射与缓冲区范围，不能重用旧暂停上下文。
 
 密钥未知时先调用 `ig5_crypto action=recover`。`recovery.method=auto|xor-single|xor-repeat|aes-candidates`；用已知明文约束、有限候选或 `key_source` 的文件/ref/静态范围提高成功率。XOR 统计分数只是候选；partial key 的 unknown mask 不得当作完整字节执行。AES 需给准确 IV/tag/AAD/padding，用候选材料检索并验证，不尝试随机 AES 全空间。独立完整 expected 或足够强的 GCM tag 可支持 verified；训练 crib、padding、可读性不能替代独立验证。记录所有 budgets/truncated/歧义。
 

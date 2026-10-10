@@ -34,7 +34,7 @@ export function defineAdvancedTools(mgr, cfg, render) {
       { ea, abi: { type: 'string', enum: ['auto', 'msvc', 'itanium'] }, offset: { type: 'number' },
         max_slots: { type: 'number' }, limit: { type: 'number' }, max_scan_bytes: { type: 'number' }, max_bases: { type: 'number' } }),
     rpcTool('ig5_microcode', 'microcode', 'Inspect real intermediate operations and CFG, or apply restricted xor-self/sub-self rules to a temporary IR. The bundled core uses Ghidra p-code with explicit actualStage/maturity mapping; those stages are not proprietary microcode equivalents. Returns before/after evidence and actual rule hits. Does not persist IR edits or automatically remove control-flow flattening.',
-      { ea, name, action: { type: 'string', enum: ['inspect', 'optimize'] }, maturity: { type: 'string', enum: ['generated', 'preoptimized', 'locopt', 'calls', 'glbopt1', 'glbopt2', 'glbopt3', 'lvars'] },
+      { ea, name, action: { type: 'string', enum: ['inspect', 'optimize'] }, maturity: { type: 'string', enum: ['generated', 'preoptimized', 'locopt', 'calls', 'glbopt1', 'glbopt2', 'glbopt3', 'lvars'], description: 'Legacy compatibility label. The bundled Ghidra provider maps labels to firstpass, normalize or decompile; inspect actualStage and maturityMapping. These are not equivalent proprietary maturity stages.' },
         max_blocks: { type: 'number' }, max_instructions: { type: 'number' }, rules: { type: 'array', items: { type: 'string', enum: ['xor-self', 'sub-self'] } } }),
     {
       name: 'ig5_bindiff',
@@ -55,7 +55,7 @@ export function defineAdvancedTools(mgr, cfg, render) {
         return { left: args.left, right: args.right, ...await compareSemanticsAsync(left, right, args, mgr.scope?.getStore()?.signal) };
       },
     },
-    rpcTool('ig5_emulate', 'emulate', 'Isolated x86/x64 or ARM64 function CPU emulation from an engine-provided MemoryImage. Supported target architectures depend on the active engine. Provide integer arguments, registers and memory buffers; capture return values and memory. No native process or OS/import emulation. Approval-gated; bounded time/instruction/memory budgets.',
+    rpcTool('ig5_emulate', 'emulate', 'Isolated x86/x64 or ARM64 function CPU emulation from a provider-supplied MemoryImage. Supported target architectures depend on the active provider and host runtime. Provide integer arguments, registers and memory buffers; capture return values and memory. No native process or OS/import emulation. Approval-gated; bounded time/instruction/memory budgets.',
       { ea, name, abi: { type: 'string', enum: ['win64', 'sysv64', 'cdecl', 'stdcall', 'aapcs64'] },
         args: { type: 'array', items: { type: 'string' }, description: 'Integer arguments encoded as decimal or hex strings' },
         registers: { type: 'object', additionalProperties: { type: 'string' } },

@@ -1107,7 +1107,7 @@ function defineIg5Tools(ctx, mgr, cfg) {
     {
       name: 'ig5_doctor',
       description:
-        'Self-check the selected IG5 engine. Ghidra and x64dbg use the complete runtimes included in the plugin; Reverse uses the configured licensed installation. Verify startup, runtime dependencies and capabilities before analysis.',
+        'Self-check the selected IG5 engine/provider. Default Reverse and Ghidra use the bundled Ghidra runtime; x64dbg uses the bundled debugger. Only an explicitly selected commercial Reverse provider requires a licensed local installation. Reports actual startup status and capabilities; file presence alone is not startup verification.',
       parameters: { type: 'object', properties: {}, additionalProperties: false },
       output: { schema: { type: 'object', additionalProperties: true }, render: textRender },
       async execute(args = {}) {
@@ -1249,7 +1249,7 @@ function defineIg5Tools(ctx, mgr, cfg) {
           offset: { type: 'number', description: 'Skip first N functions (cursor paging)' },
           limit: { type: 'number', description: 'Max rows (default 30, max 200)' },
           filter: { type: 'string', description: 'Case-insensitive name substring filter' },
-          user_only: { type: 'boolean', description: 'Filter out library / FLIRT detected functions to focus strictly on user logic' },
+          user_only: { type: 'boolean', description: 'Exclude functions classified as library-related by the active provider. The bundled core excludes external/thunk functions only; remaining functions are not proof of user-authored logic.' },
         },
         required: ['target'],
       },
@@ -1680,7 +1680,7 @@ function defineIg5Tools(ctx, mgr, cfg) {
     {
       name: 'ig5_dbg',
       description:
-        'Debug lane over x64dbg or Reverse debuggers. Choose backend explicitly for load. Reports bounded debug events, process state and exception context. Approval-gated; start executes the debuggee. Runtime addresses must not be confused with static database addresses.',
+        'Debug lane using the configured debugger, with bundled x64dbg as the default. Optional win32/Bochs debuggers require the explicitly selected commercial Reverse provider. Choose backend explicitly for load. Reports bounded debug events, process state and exception context. Approval-gated; start executes the debuggee. Runtime addresses must not be confused with static database addresses.',
       parameters: {
         type: 'object',
         properties: {
@@ -1691,7 +1691,7 @@ function defineIg5Tools(ctx, mgr, cfg) {
           },
           kind: { type: 'string', enum: ['software', 'hardware'], default: 'software', description: 'Breakpoint kind for bpt/unbpt' },
           access: { type: 'string', enum: ['execute', 'write', 'readwrite'], default: 'execute', description: 'Hardware breakpoint access' },
-          backend: { type: 'string', enum: ['auto', 'x64dbg', 'bochs', 'win32'], description: 'Explicit debugger selection; auto resumes the selected debugger, otherwise prefers the configured default' },
+          backend: { type: 'string', enum: ['auto', 'x64dbg', 'bochs', 'win32'], description: 'Explicit debugger selection; auto resumes the selected debugger, otherwise uses the configured default (bundled x64dbg). bochs/win32 require the commercial Reverse provider.' },
           control: { type: 'string', enum: ['claim', 'takeover', 'release'], description: 'Explicit approval-gated debugger ownership change' },
           expected_stop_seq: { type: 'number', description: 'Reject a plan made for a previous debugger pause' },
           expected_run_id: { type: 'string' },
@@ -1807,13 +1807,13 @@ function defineIg5Tools(ctx, mgr, cfg) {
     {
       name: 'ig5_slice',
       description:
-        'Microcode & Variable Semantic Slicing. Inspects all function arguments and local variables (with types, registers, and widths), and extracts focused code slices matching a specific variable without dumping redundant boilerplate code. Read-only.',
+        'Inspect decompiler variable metadata and optionally return pseudocode lines matching a variable name. Available metadata and lexical matching depend on the provider. This does not compute microcode slicing, complete def-use dependencies or taint analysis. Read-only.',
       parameters: {
         type: 'object',
         properties: {
           target: { type: 'string', description: 'Target binary path (omit for active session)' },
           ea: { type: 'string', description: 'Function EA (e.g. 0x140001000)' },
-          var: { type: 'string', description: 'Variable name to focus and slice (optional, returns focused code lines if provided)' },
+          var: { type: 'string', description: 'Optional variable name for provider-specific lexical pseudocode-line filtering; omit to inspect variable metadata.' },
         },
         required: ['ea'],
         additionalProperties: false,
@@ -1828,7 +1828,7 @@ function defineIg5Tools(ctx, mgr, cfg) {
     {
       name: 'ig5_fingerprint',
       description:
-        'Compiler fingerprint and FLIRT standard library function identification. Distinguishes user code from static library boilerplate (e.g. CRT, OpenSSL, zlib), helping avoid wasting context on standard functions. Read-only.',
+        'Report compiler/ABI information and existing provider function classifications. The bundled core counts external/thunk functions only; this does not identify all static libraries or prove standard-library equivalence. Read-only.',
       parameters: {
         type: 'object',
         properties: {
