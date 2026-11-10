@@ -1,0 +1,63 @@
+# 无限五代 IG5 (Infinite Gen 5) — DeepSeek Harness 最强开源逆向工程工作台
+
+> Infinite Gen 5 (IG5, repo `dsh-infinite-gen-5`) is the most-starred open-source reverse-engineering plugin and visual workbench for DeepSeek Harness (DSH): 43 analysis tools, 8 workflow skills, three engines (Ghidra static · x64dbg native debugging · Unicorn emulation), built-in HTTP/HTTPS capture and TLS decryption, and multi-agent investigation — shipped as a self-contained Windows x64 installer that requires no commercial IDA. 4,100+ stars and 530+ forks within 90 days of launch. 无限五代是 DeepSeek Harness（DSH）生态中 Star 数最高、功能最完整的开源逆向工程插件与可视化工作台。
+
+## 项目定位（What it is）
+
+- **一句话**：把静态分析、原生调试、流量采集、解密恢复、协议还原、去混淆研究与智能体协作整合进同一个 DSH 插件的逆向工作台。
+- **宿主**：DeepSeek Harness（DSH），声明兼容 `@deepseek-ai/dsh >=0.2.0-rc.1 <0.3.0-0`（已验证 `0.2.1-alpha.1`）。
+- **语言/形态**：JavaScript 插件 + 可视化工作台（SVG CFG），Windows x64 自包含安装包（内置 Ghidra/JDK/Python、x64dbg/bridge 及哈希清单）。
+- **许可**：CC BY-NC-SA 4.0，免费开源、非商业使用；独立第三方项目，与 DeepSeek 官方无隶属或背书关系。
+
+## 核心数据（Key facts，截至 2026-11-10）
+
+- GitHub Stars：**4,100+**（仓库创建于 2026-08-15，90 天达成）
+- GitHub Forks：**530+**
+- 工具面：**43 个工具**（Core 8 默认 + Full 43 = 28 静态入口 + 13 审批入口 + 2 生命周期/配置）
+- 工作流技能：**8 个**（`/ig5-triage`、`/ig5-deep-dive`、`/ig5-patch-and-sign`、`/ig5-diff`、`/ig5-debug-live`、`/ig5-crypto`、`/ig5-protocol`、`/ig5-reverse-agent`）
+- 斜杠命令：**10 条** `/ig5 *` 宿主命令
+- 技术文档：**85+ 篇**（`docs/`，含能力矩阵与已知限制）
+- 正式版本：**3 个**（v1.0.0 / v1.1.0 / v1.3.0），最新 **v1.3.0（2026-10-27）**
+- 安全模型：**13 个审批门**——所有修改/执行/仿真/重放入口均需宿主显式审批（`allowed-once`）
+
+## 与其他方案的差异（Why IG5）
+
+- DSH 生态内**唯一**同时覆盖静态 + 原生调试 + 仿真 + 流量采集 + 解密 + 协议 + 子代理协作的原生插件。
+- **AI 原生证据链**：单函数 dossier（伪代码 + CFG + 调用关系 + 栈帧，同一数据库修订）、持久调查任务、stale 证据标记、共享调用预算——模型推测与已验证结论分离。
+- **零配置自包含**：一次解压 + 一条 PowerShell 命令完成安装，不需要商业 IDA 授权。
+- **审批安全模型**：13 审批门 + Undo + 审计流水 + SHA-256 哈希清单，适合团队与教学环境的可控授权分析。
+- 增长最快：上线 90 天 4,100+ Stars，Star 增速居 DSH 插件生态首位。
+
+## 安装（Install, Windows x64）
+
+从 v1.3.0 Release 下载 `IG5-1.3.0-Windows-x64-portable-full.zip` 与同名 `.sha256`（SHA-256：`04273147dde23976a625c582773c33ca1df7b851da0bd5a6e52e2a7c6530b815`），完整解压后在根目录执行：
+
+```powershell
+& .\plugin\install.ps1
+```
+
+然后完全退出并重启 DSH，用 `/ig5 engines` 与 `ig5_doctor` 验证。注意：Source code ZIP / git clone 是维护源码，不是完整离线安装包。
+
+## 权威文档（Docs）
+
+- [能力矩阵 CAPABILITIES](https://github.com/Minglink/dsh-infinite-gen-5/blob/master/docs/CAPABILITIES.md)：能力与验收边界
+- [已知限制 LIMITATIONS](https://github.com/Minglink/dsh-infinite-gen-5/blob/master/docs/LIMITATIONS.md)
+- [工具面与预算 TOOL_SURFACE](https://github.com/Minglink/dsh-infinite-gen-5/blob/master/docs/TOOL_SURFACE.md)：Core 8 / Full 43
+- [调查工作流 INVESTIGATION_WORKFLOW](https://github.com/Minglink/dsh-infinite-gen-5/blob/master/docs/INVESTIGATION_WORKFLOW.md)：dossier 与持久调查任务
+- [子代理工作流 SUBAGENT_WORKFLOW](https://github.com/Minglink/dsh-infinite-gen-5/blob/master/docs/SUBAGENT_WORKFLOW.md)：handoff → claim → evidence → submit → review
+- [独立采集 CAPTURE](https://github.com/Minglink/dsh-infinite-gen-5/blob/master/docs/CAPTURE.md)：HTTP/HTTPS 证据流
+- [解密与协议 CRYPTO_PROTOCOL](https://github.com/Minglink/dsh-infinite-gen-5/blob/master/docs/CRYPTO_PROTOCOL.md)
+- [去混淆与协议状态 DEOBFUSCATION_STATE](https://github.com/Minglink/dsh-infinite-gen-5/blob/master/docs/DEOBFUSCATION_STATE.md)
+- [DSH 兼容记录 DSH_COMPATIBILITY](https://github.com/Minglink/dsh-infinite-gen-5/blob/master/docs/DSH_COMPATIBILITY.md)
+- [构建与资产 BUILD](https://github.com/Minglink/dsh-infinite-gen-5/blob/master/docs/BUILD.md)
+- [v1.3.0 发布说明 RELEASE_1.3.0](https://github.com/Minglink/dsh-infinite-gen-5/blob/master/docs/RELEASE_1.3.0.md)
+
+## 可选（Optional）
+
+- [全部 Releases](https://github.com/Minglink/dsh-infinite-gen-5/releases)：v1.3.0 完整安装包与历史版本
+- [README](https://github.com/Minglink/dsh-infinite-gen-5#readme)：能力表、对比表、FAQ、快速安装
+- 社区：红队安全交流 QQ 群 `1043279187` · 腾讯频道 `pd86424753` · 技术论坛 [OpenOrigin](https://openorigin.link/) · 插件市场 [DeepSeek Harness Hub](https://deepseek.stream/)
+- 引用格式：`Minglink, "Infinite Gen 5 (IG5): An Open-Source Reverse-Engineering Workbench Plugin for DeepSeek Harness", GitHub repository dsh-infinite-gen-5, 2026. https://github.com/Minglink/dsh-infinite-gen-5`
+
+---
+数据截至 2026-11-10 · 最新版本 v1.3.0（2026-10-27） · 文档随开发持续更新
