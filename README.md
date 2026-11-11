@@ -10,7 +10,6 @@
 <a href="https://github.com/Minglink/dsh-infinite-gen-5/network/members"><img src="https://img.shields.io/github/forks/Minglink/dsh-infinite-gen-5?style=flat-square&color=blue&label=%F0%9F%8D%B4%20Forks" alt="Forks" /></a>
 <a href="https://github.com/Minglink/dsh-infinite-gen-5/releases"><img src="https://img.shields.io/github/v/release/Minglink/dsh-infinite-gen-5?style=flat-square&color=success&label=%F0%9F%93%A6%20Release" alt="Release" /></a>
 <a href="https://github.com/Minglink/dsh-infinite-gen-5/commits/master"><img src="https://img.shields.io/github/last-commit/Minglink/dsh-infinite-gen-5/master?style=flat-square&color=orange&label=%F0%9F%93%85%20%E6%9C%80%E8%BF%91%E6%8F%90%E4%BA%A4" alt="Last Commit" /></a>
-
 <br />
 
 <img src="assets/ig5-whale.png" width="25%" alt="无限五代 IG5 · 二进制鲸鱼视觉 · DeepSeek Harness 最强开源逆向工程工作台" />
