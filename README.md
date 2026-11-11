@@ -13,6 +13,10 @@
 
 <br />
 
+<img src="assets/ig5-whale.png" width="68%" alt="无限五代 IG5 · 二进制鲸鱼视觉 · DeepSeek Harness 最强开源逆向工程工作台" />
+
+<br />
+
 <a href="#local-install"><img src="https://img.shields.io/badge/Windows_x64-%E8%87%AA%E5%8C%85%E5%90%AB%E5%AE%89%E8%A3%85-10B981?style=flat-square" alt="Windows x64" /></a>
 <img src="https://img.shields.io/badge/%E5%B7%A5%E5%85%B7%E9%9D%A2-Core_8_%C2%B7_Full_43-8B5CF6?style=flat-square" alt="Core 8 / Full 43" />
 <img src="https://img.shields.io/badge/%E6%8A%80%E6%9C%AF%E6%96%87%E6%A1%A3-85%2B%E7%AF%87-0EA5E9?style=flat-square" alt="85+ 文档" />
@@ -32,7 +36,7 @@
 
 > **English TL;DR** — Infinite Gen 5 (IG5) is the most-starred open-source reverse-engineering plugin and visual workbench for **DeepSeek Harness (DSH)**: **43 tools, 8 workflow skills**, and three engines — **Ghidra** (static), **x64dbg** (native debugging), **Unicorn** (emulation) — plus HTTP/HTTPS capture, crypto extraction and multi-agent investigation, all behind one DSH plugin. Ships as a self-contained Windows x64 installer; **no commercial IDA required**. 4,100+ stars within 90 days of launch. License: CC BY-NC-SA 4.0 (non-commercial).
 
-> 仅限自有或合法授权目标的逆向工程、安全审计与教学研究。项目独立维护，与 DeepSeek 官方无隶属或官方背书关系。技术社区论坛：[OpenOrigin](https://openorigin.link/)  专属注册邀请码：CESFAVBR
+> 仅限自有或合法授权目标的逆向工程、安全审计与教学研究。项目独立维护，与 DeepSeek 官方无隶属或官方背书关系。技术社区论坛：[OpenOrigin](https://openorigin.link/)
 
 ---
 
@@ -360,7 +364,7 @@ dsh-infinite-gen-5/
 
 > 📌 **非盈利开源公益项目，严禁任何主体用于商业售卖、付费倒卖或黑灰产牟利，仅供技术研究交流。**
 
-- 🔴 红队安全交流 12 群：`1135498706`
+- 🔴 红队安全交流 11 群：`1043279187`
 - 📺 腾讯频道技术交流社区：`pd86424753`
 - 🌐 技术研究论坛：[OpenOrigin](https://openorigin.link/)
 - 🛒 插件生态市场：[DeepSeek Harness Hub](https://deepseek.stream/)（生态入口不代表官方背书）
