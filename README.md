@@ -10,7 +10,13 @@
 <a href="https://github.com/Minglink/dsh-infinite-gen-5/network/members"><img src="https://img.shields.io/github/forks/Minglink/dsh-infinite-gen-5?style=flat-square&color=blue&label=%F0%9F%8D%B4%20Forks" alt="Forks" /></a>
 <a href="https://github.com/Minglink/dsh-infinite-gen-5/releases"><img src="https://img.shields.io/github/v/release/Minglink/dsh-infinite-gen-5?style=flat-square&color=success&label=%F0%9F%93%A6%20Release" alt="Release" /></a>
 <a href="https://github.com/Minglink/dsh-infinite-gen-5/commits/master"><img src="https://img.shields.io/github/last-commit/Minglink/dsh-infinite-gen-5/master?style=flat-square&color=orange&label=%F0%9F%93%85%20%E6%9C%80%E8%BF%91%E6%8F%90%E4%BA%A4" alt="Last Commit" /></a>
+
+<br />
+
 <img src="assets/ig5-whale.png" width="20%" alt="无限五代 IG5 · 二进制鲸鱼视觉 · DeepSeek Harness 最强开源逆向工程工作台" />
+
+<br />
+
 <a href="#local-install"><img src="https://img.shields.io/badge/Windows_x64-%E8%87%AA%E5%8C%85%E5%90%AB%E5%AE%89%E8%A3%85-10B981?style=flat-square" alt="Windows x64" /></a>
 <img src="https://img.shields.io/badge/%E5%B7%A5%E5%85%B7%E9%9D%A2-Core_8_%C2%B7_Full_43-8B5CF6?style=flat-square" alt="Core 8 / Full 43" />
 <img src="https://img.shields.io/badge/%E6%8A%80%E6%9C%AF%E6%96%87%E6%A1%A3-85%2B%E7%AF%87-0EA5E9?style=flat-square" alt="85+ 文档" />
