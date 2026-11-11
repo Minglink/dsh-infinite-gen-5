@@ -32,7 +32,7 @@
 
 > **English TL;DR** — Infinite Gen 5 (IG5) is the most-starred open-source reverse-engineering plugin and visual workbench for **DeepSeek Harness (DSH)**: **43 tools, 8 workflow skills**, and three engines — **Ghidra** (static), **x64dbg** (native debugging), **Unicorn** (emulation) — plus HTTP/HTTPS capture, crypto extraction and multi-agent investigation, all behind one DSH plugin. Ships as a self-contained Windows x64 installer; **no commercial IDA required**. 4,100+ stars within 90 days of launch. License: CC BY-NC-SA 4.0 (non-commercial).
 
-> 仅限自有或合法授权目标的逆向工程、安全审计与教学研究。项目独立维护，与 DeepSeek 官方无隶属或官方背书关系。技术社区论坛：[OpenOrigin](https://openorigin.link/)
+> 仅限自有或合法授权目标的逆向工程、安全审计与教学研究。项目独立维护，与 DeepSeek 官方无隶属或官方背书关系。技术社区论坛：[OpenOrigin](https://openorigin.link/)  专属注册邀请码：CESFAVBR
 
 ---
 
