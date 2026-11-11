@@ -13,7 +13,7 @@
 
 <br />
 
-<img src="assets/ig5-whale.png" width="68%" alt="无限五代 IG5 · 二进制鲸鱼视觉 · DeepSeek Harness 最强开源逆向工程工作台" />
+<img src="assets/ig5-whale.png" width="25%" alt="无限五代 IG5 · 二进制鲸鱼视觉 · DeepSeek Harness 最强开源逆向工程工作台" />
 
 <br />
 
