@@ -12,5 +12,5 @@
   - `scripts/package_portable.ps1` 默认输出隔离至 `~/.dsh/ig5/releases`，并在 `>= 1.4.0` 便携打包时自动排除 `archive/`、`docs/review/`、`scripts/test_*`、`scripts/accept_*` 及 `tools/ci/sample-specific.json` 所列开发期单样本脚本（源码仓内完整保留以运行 `npm run ci`）；同时在解压根目录生成纯 ASCII + `CRLF` 的一键安装脚本 `install.bat` / `uninstall.bat`，自动处理宿主进程关闭、PowerShell 执行策略绕过与重启动。
 - **Ghidra ↔ x64dbg 精准断点与门禁实测**：
   - `adapters/ghidra/worker.py` 在 `ig5_decompile` 返回函数入口 `rva`、`callSites[].returnRva` 与 `returnSites[].rva`，`source/worker_manager.js` 增加 `MID_INSTRUCTION_BREAKPOINT` 预检拦截；`source/investigation_verifier.js` 与 `source/investigation_assessment.js` 补全 `cli-arg` 十六进制字符与 ASCII 等价求值兼容。
-  - `npm run ci` 全量门禁 **131/131** 通过；`package.json` 同步声明 `engines.dsh: ">=0.2.0-rc.1 <0.3.0-0"` 并已在桌面端 `DeepSeek Harness 0.2.2`（`dsh-v0.2.2-rc.x`）实测通过 `install.bat` 一键安装与原生 PE 静态 + `x64dbg` 动态闭环。
+  - `npm run ci` 全量门禁 **131/131** 通过；`package.json` 同步声明 `engines.dsh: ">=0.2.0-rc.1 <0.3.0-0"` 并已在桌面端官方最新版本 `DeepSeek Harness v0.2.2-rc.5` 实测通过 `install.bat` 一键安装（完整安装约 5–10 分钟，请耐心等待安装完成）与原生 PE 静态 + `x64dbg` 动态闭环。
   - Windows x64 便携发行包 `IG5-1.4.0-Windows-x64-portable.zip`（`433,291,421` 字节 / ~413 MB，SHA-256：`ebfebc785d7044e60f6b7910cf721775c284e11bbeb1cfe`）。

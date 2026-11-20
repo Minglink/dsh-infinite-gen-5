@@ -96,6 +96,8 @@ User projects, sessions, downloads and build caches are excluded.
         'echo.',
         'echo ========================================================',
         'echo   Infinite Gen 5 (IG5) - DeepSeek Harness Plugin Setup',
+        'echo   Supported DSH: >=0.2.0-rc.1 ^<0.3.0-0 (verified: v0.2.2-rc.5)',
+        'echo   Full install takes ~5-10 minutes. Please wait until complete.',
         'echo ========================================================',
         'echo.',
         'if not exist "%USERPROFILE%\.dsh\profiles" (',

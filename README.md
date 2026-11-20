@@ -56,7 +56,7 @@
 | 跨层与托管分析 | 内置零依赖 **Electron/ASAR** 静态解构、**.NET BSJB/CIL** 自动解码、多进程血缘追踪、Android 7 阶段探测 |
 | 网络能力 | 内置 HTTP/HTTPS 采集、显式 TLS 解密、PCAP/PCAPNG 解析、请求重放 |
 | 安装方式 | Windows x64 **自包含安装包（~413 MB）**，内置双引擎与完整运行时，**解压后双击 `install.bat` 一键安装** |
-| 宿主兼容 | `@deepseek-ai/dsh >=0.2.0-rc.1 <0.3.0-0`（已实测最新 `0.2.2` 与 `0.2.1-alpha.1`） |
+| 宿主兼容 | `@deepseek-ai/dsh >=0.2.0-rc.1 <0.3.0-0`（已实测适配官方最新 **`v0.2.2-rc.5`** 及 `0.2.1-alpha.1`） |
 | 许可 | CC BY-NC-SA 4.0（免费开源，非商业使用） |
 
 </details>
@@ -108,13 +108,16 @@
 
 ## 🚀 快速安装
 
-### Windows x64（推荐，双击一键安装 · 约 2 分钟）
+### Windows x64（推荐，双击一键安装 · 完整安装约 5–10 分钟）
 
-需要已安装的 DeepSeek Harness（推荐官方最新 `v0.2.2` 系列，兼容 `>=0.2.0-rc.1 <0.3.0-0`）。完整包约 **413 MB**，内置 Ghidra/JDK/Python、x64dbg/Python/bridge 与上游许可清单；**不需要商业 IDA 安装**，DSH 本体需提前安装并至少启动过一次（以初始化 `%USERPROFILE%\.dsh\profiles`）。
+需要已安装的 DeepSeek Harness（**已实测适配官方最新版本 `v0.2.2-rc.5`**，声明兼容 `>=0.2.0-rc.1 <0.3.0-0`）。完整包约 **413 MB**，内置 Ghidra/JDK/Python、x64dbg/Python/bridge 与上游许可清单；**不需要商业 IDA 安装**，DSH 本体需提前安装并至少启动过一次（以初始化 `%USERPROFILE%\.dsh\profiles`）。
+
+> [!IMPORTANT]
+> **完整安装大约需要 5–10 分钟**（包含 4,718 个文件全量 SHA-256 校验、双引擎运行时部署与 Profile 注册），期间请耐心等待，**切勿中途关闭黑色命令行窗口**，直至看到 `[OK] Setup complete!` 提示并自动拉起 DeepSeek Harness。
 
 1. 从 [v1.4.0 Release](https://github.com/Minglink/dsh-infinite-gen-5/releases/tag/v1.4.0) 下载 `IG5-1.4.0-Windows-x64-portable.zip` 和同名 `.sha256`，核对 SHA-256：`ebfebc785d7044e60f6b7910cf721775c284e11bbeb1cfe`
 2. 完整解压到一个独立目录（保留根目录 `install.bat`、`plugin/`、`manifest.json`）
-3. **方式 A（推荐，一键安装）**：直接**双击 `install.bat`**（自动关闭运行中的 `DeepSeek Harness.exe`、绕过 PowerShell 执行策略完成全量 SHA-256 校验与 Profile 注册，并自动重新拉起 DSH）
+3. **方式 A（推荐，一键安装）**：直接**双击 `install.bat`**（自动关闭运行中的 `DeepSeek Harness.exe`、绕过 PowerShell 执行策略完成全量 SHA-256 校验与 Profile 注册，并自动重新拉起 DSH；**请耐心等待约 5–10 分钟直至安装完整**）
 4. **方式 B（PowerShell 命令行）**：在解压根目录打开 PowerShell，执行：
 
 ```powershell
@@ -167,7 +170,7 @@
 
 - **macOS Apple Silicon** — 实验性 `darwin-arm64` Ghidra 静态车道，需要独立准备运行包；Windows ZIP 和 `install.ps1` 不适用。不支持 x64dbg/Windows 原生调试，也不包含可用的 macOS Unicorn 运行时。见 [macOS 指南](docs/MACOS_RUNTIME.md)
 - **Android / iOS** — 未完成真机验收或原生运行包。支持 ARM64 目标分析，不等于支持手机宿主
-- **DSH** — 声明范围为 `@deepseek-ai/dsh >=0.2.0-rc.1 <0.3.0-0`（同时写入 `engines.dsh` 与 `peerDependencies`），宿主按 `includePrerelease: true` 判断。已实测验证 **DeepSeek Harness `0.2.2`（`dsh-v0.2.2-rc.x`）** 与 `0.2.1-alpha.1`。见 [兼容记录](docs/DSH_COMPATIBILITY.md)
+- **DSH** — 声明范围为 `@deepseek-ai/dsh >=0.2.0-rc.1 <0.3.0-0`（同时写入 `engines.dsh` 与 `peerDependencies`），宿主按 `includePrerelease: true` 判断。已实测适配官方最新版本 **DeepSeek Harness `v0.2.2-rc.5`** 及 `0.2.1-alpha.1`。见 [兼容记录](docs/DSH_COMPATIBILITY.md)
 
 ## 🧭 新手 5 步快速上手（教程）
 
