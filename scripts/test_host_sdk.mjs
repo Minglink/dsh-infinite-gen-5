@@ -20,6 +20,7 @@ function option(name, fallback) {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const pluginRoot = path.resolve(option('--plugin-root', process.env.IG5_PLUGIN_UNDER_TEST || path.join(here, '..')));
 const asar = path.resolve(option('--asar', process.env.IG5_TEST_ASAR || path.join(process.env.LOCALAPPDATA || '', 'Programs', 'DeepSeek Harness', 'resources', 'app.asar')));
+const explicitEvidence = process.argv.includes('--evidence') || Boolean(process.env.IG5_SDK_EVIDENCE);
 const reportRoot = path.resolve(option('--evidence', process.env.IG5_SDK_EVIDENCE || path.join(os.tmpdir(), `ig5-host-sdk-${randomUUID()}`)));
 assert(fs.statSync(asar).isFile(), 'A real DSH app.asar is required; this check must not silently skip');
 assert(fs.statSync(path.join(pluginRoot, 'index.js')).isFile(), 'IG5 plugin entry is required');
@@ -87,10 +88,31 @@ function copyPackage(name) {
   walk(root);
   for (const dependency of dependencies) copyPackage(dependency);
 }
-const requiredPackages = ['@deepseek-ai/cordis', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-system-prompt', '@deepseek-ai/dsh-scope', '@deepseek-ai/dsh-skill', '@deepseek-ai/dsh-commands', '@deepseek-ai/dsh-session-projection', 'semver', '@deepseek-ai/dsh-client-ui-slots'];
+const requiredPackages = ['@deepseek-ai/cordis', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-system-prompt', '@deepseek-ai/dsh-scope', '@deepseek-ai/dsh-skill', '@deepseek-ai/dsh-commands', '@deepseek-ai/dsh-session-projection', 'semver'];
+const standaloneSlotsPkgPresent = Boolean(entry('dsh/node_modules/@deepseek-ai/dsh-client-ui-slots')?.files);
+if (standaloneSlotsPkgPresent) requiredPackages.push('@deepseek-ai/dsh-client-ui-slots');
+const nativeExecutorPkgPresent = Boolean(entry('dsh/node_modules/@deepseek-ai/dsh-tool-executor-native')?.files);
+if (nativeExecutorPkgPresent) requiredPackages.push('@deepseek-ai/dsh-tool-executor-native');
 const frontendContracts = [];
+let bundledFrontendAsset = null;
 try {
   for (const name of requiredPackages) copyPackage(name);
+  if (!standaloneSlotsPkgPresent) {
+    const webAssetsDir = entry('dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/assets');
+    assert(webAssetsDir?.files, 'Neither standalone @deepseek-ai/dsh-client-ui-slots nor @deepseek-ai/dsh-web-frontend/dist/assets is present in app.asar');
+    const indexJsName = Object.keys(webAssetsDir.files).find(n => /^index-.*\.js$/.test(n));
+    assert(indexJsName, 'Bundled host frontend index-*.js absent in @deepseek-ai/dsh-web-frontend/dist/assets');
+    const webSource = `dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/assets/${indexJsName}`;
+    const webBytes = read(webSource);
+    const webSymbols = ['@deepseek-ai/dsh-client-ui-slots', 'SlotCore', 'entriesOfSlot', 'registerFactory'];
+    for (const symbol of webSymbols) assert(webBytes.includes(Buffer.from(symbol)), `Bundled frontend slot contract absent: ${webSource} ${symbol}`);
+    const webDest = path.join(sdkRoot, 'frontend-contracts', `dsh-web-frontend-${indexJsName}`);
+    fs.mkdirSync(path.dirname(webDest), { recursive: true }); fs.writeFileSync(webDest, webBytes);
+    const webFrontendPkg = JSON.parse(read('dsh/node_modules/@deepseek-ai/dsh-web-frontend/package.json'));
+    sdkVersions['@deepseek-ai/dsh-web-frontend'] = webFrontendPkg.version;
+    bundledFrontendAsset = { source: webSource, destination: webDest, bytes: webBytes };
+    frontendContracts.push({ source: webSource, bytes: webBytes.length, sha256: createHash('sha256').update(webBytes).digest('hex'), symbols: webSymbols, destination: webDest, verification: 'Verbatim SlotCore extracted from @deepseek-ai/dsh-web-frontend host bundle exposing "@deepseek-ai/dsh-client-ui-slots" in window.__ModuleLoader__' });
+  }
   for (const [name, filename, symbols] of [
     ['dsh-client-ui-conversation', 'client.js', ['conversation.view', 'conversation.input.dock', 'openView', 'inputActions', 'captureInsertion', 'insertText']],
     ['dsh-client-ui-sidebar', 'client.js', ['sidebar.panellist']],
@@ -108,7 +130,32 @@ const load = name => {
   const directory = path.join(sdkRoot, 'node_modules', name), metadata = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8'));
   return import(pathToFileURL(path.join(directory, metadata.main || 'index.js')).href);
 };
-const [{ Context, Service }, { default: Tools }, { default: SystemPrompt }, { createScope }, { default: Skills }, { default: Commands }, { default: Projections }, semverModule, { SlotCore }] = await Promise.all(requiredPackages.map(load));
+function extractBundledSlotsModule(frontendBytes) {
+  const text = frontendBytes.toString('utf8');
+  const mapMatch = /"@deepseek-ai\/dsh-client-ui-slots":([A-Za-z_$][A-Za-z0-9_$]*)/.exec(text);
+  assert(mapMatch, 'Host frontend bundle does not expose "@deepseek-ai/dsh-client-ui-slots" in its module map');
+  const modIdent = mapMatch[1];
+  const escaped = modIdent.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const declRe = new RegExp(`(?:const|let|var)\\s+${escaped}=(Object\\.freeze\\(Object\\.defineProperty\\(\\{[^}]*\\bSlotCore:[A-Za-z_$][A-Za-z0-9_$]*[^}]*\\},Symbol\\.toStringTag,\\{value:"Module"\\}\\)\\))`);
+  const declMatch = declRe.exec(text);
+  assert(declMatch, `Bundled SlotCore module definition for ${modIdent} not found in @deepseek-ai/dsh-web-frontend`);
+  const boundaryToken = 'Symbol.toStringTag,{value:"Module"}));';
+  const prevIdx = text.lastIndexOf(boundaryToken, declMatch.index);
+  assert(prevIdx >= 0 && declMatch.index - prevIdx < 32768, 'Preceding module boundary for bundled SlotCore not found');
+  const sliceSource = `${text.slice(prevIdx + boundaryToken.length, declMatch.index)}const ${modIdent}=${declMatch[1]};\n${modIdent}`;
+  const evaluated = vm.runInNewContext(sliceSource, { Error, Map, Set, WeakSet, Object, Symbol, queueMicrotask }, { timeout: 5000 });
+  assert.equal(typeof evaluated?.SlotCore, 'function', 'Extracted SlotCore constructor must be a function');
+  assert.equal(typeof evaluated?.resolveSlotLabel, 'function', 'Extracted resolveSlotLabel helper must be a function');
+  return evaluated;
+}
+const loadedPackages = await Promise.all(requiredPackages.map(load));
+const [{ Context, Service }, { default: Tools }, { default: SystemPrompt }, { createScope }, { default: Skills }, { default: Commands }, { default: Projections }, semverModule] = loadedPackages;
+const { SlotCore } = standaloneSlotsPkgPresent
+  ? loadedPackages[requiredPackages.indexOf('@deepseek-ai/dsh-client-ui-slots')]
+  : extractBundledSlotsModule(bundledFrontendAsset.bytes);
+const NativeToolExecutor = nativeExecutorPkgPresent
+  ? loadedPackages[requiredPackages.indexOf('@deepseek-ai/dsh-tool-executor-native')]
+  : null;
 const semver = semverModule.default || semverModule;
 const metadata = JSON.parse(fs.readFileSync(path.join(pluginRoot, 'package.json'), 'utf8'));
 const declaredPeers = Object.entries(metadata.peerDependencies || {}).filter(([name]) => name === '@deepseek-ai/dsh' || name.startsWith('@deepseek-ai/dsh-'));
@@ -123,11 +170,15 @@ function extractedFunction(name) {
 const evaluatorSource = extractedFunction('evaluatePluginCompatibility');
 const objectHelper = /const fields = (objectOf(?:\$\d+)?)\(/.exec(evaluatorSource)?.[1];
 assert(objectHelper, 'Actual evaluator object validator must be identified');
-const compatibilityFunctions = [extractedFunction(objectHelper), extractedFunction('runtimeVersionOf'), extractedFunction('identityField'), evaluatorSource];
+const extraCompatHelpers = evaluatorSource.includes('unmetRequirements(')
+  ? ['satisfies', 'unmetRequirements']
+  : [];
+const helperNames = [objectHelper, 'runtimeVersionOf', 'identityField', ...extraCompatHelpers, 'evaluatePluginCompatibility'];
+const compatibilityFunctions = helperNames.map(extractedFunction);
 // Execute verbatim installed evaluator functions in an isolated VM. Inject
 // the real SDK semver and supply the version explicitly; boot dependencies and
 // application startup are not imported by this check.
-const evaluateCompatibility = vm.runInNewContext(`${compatibilityFunctions.join('\n')}\nevaluatePluginCompatibility`, { semver, getDshRuntimeVersion: () => runtimeVersion });
+const evaluateCompatibility = vm.runInNewContext(`${compatibilityFunctions.join('\n')}\nevaluatePluginCompatibility`, { semver, Object, JSON, Error, getDshRuntimeVersion: () => runtimeVersion });
 assert.equal(evaluateCompatibility(metadata, {}, runtimeVersion), undefined);
 const compatibilityMatrix = [];
 if (declaredPeers.length) {
@@ -141,8 +192,8 @@ if (declaredPeers.length) {
     assert.equal(accepted, expected, `Actual installed app-boot evaluator boundary ${version}`);
   }
 }
-const compatibility = { verification: 'Verbatim functions extracted from actual installed app-boot, called with actual SDK semver; not a full boot-module import', source: bootSourcePath, evidencePath: bootEvidencePath, sha256: createHash('sha256').update(bootBytes).digest('hex'), helperNames: [objectHelper, 'runtimeVersionOf', 'identityField', 'evaluatePluginCompatibility'], runtimeVersionOrigin: `${appBoot.name}/package.json`, peerConstraintPresent: !!declaredPeers.length, matrix: compatibilityMatrix };
-const writeNames = ['ig5_rename', 'ig5_patch_bytes', 'ig5_comment', 'ig5_analyze', 'ig5_set_type', 'ig5_undo', 'ig5_run_idapython', 'ig5_dbg', 'ig5_struct', 'ig5_switch_repair', 'ig5_emulate', 'ig5_sync', 'ig5_capture_control'];
+const compatibility = { verification: 'Verbatim functions extracted from actual installed app-boot, called with actual SDK semver; not a full boot-module import', source: bootSourcePath, evidencePath: bootEvidencePath, sha256: createHash('sha256').update(bootBytes).digest('hex'), helperNames, runtimeVersionOrigin: `${appBoot.name}/package.json`, peerConstraintPresent: !!declaredPeers.length, matrix: compatibilityMatrix };
+const writeNames = ['ig5_rename', 'ig5_patch_bytes', 'ig5_comment', 'ig5_analyze', 'ig5_set_type', 'ig5_undo', 'ig5_run_idapython', 'ig5_dbg', 'ig5_struct', 'ig5_switch_repair', 'ig5_emulate', 'ig5_sync', 'ig5_capture_control', 'ig5_app_observe'];
 const blockedProcesses = [], processIdentityQueries = [], originals = new Map();
 for (const name of ['spawn', 'exec', 'execFile', 'fork', 'spawnSync', 'execSync', 'execFileSync']) {
   originals.set(name, childProcess[name]);
@@ -160,7 +211,7 @@ for (const name of ['spawn', 'exec', 'execFile', 'fork', 'spawnSync', 'execSync'
 }
 syncBuiltinESMExports();
 const assertions = [], approvals = [], commandEvents = [], outputFailures = [], preCalls = [];
-let context, owner, approvalOwner, approvalOutcome = 'rejected';
+let context, owner, approvalOwner, approvalOutcome = 'rejected', sdkCheckPassed = false;
 function pass(description) { assertions.push(description); console.log(`PASS ${description}`); }
 function minimal(schema) {
   if (schema.const !== undefined) return schema.const;
@@ -206,6 +257,7 @@ try {
   context = new Context();
   context.on('tools/pre-execute', (execution, next) => { preCalls.push(execution.name); return next(); }, { global: true });
   await context.plugin(SystemPrompt, {}); await context.plugin(Tools);
+  if (NativeToolExecutor) await context.plugin(NativeToolExecutor);
   await context.plugin(Skills, {}); await context.plugin(Commands); await context.plugin(Projections);
   approvalOwner = context.plugin(class TestApproval extends Service {
     constructor(ctx) { super(ctx, 'approval'); }
@@ -233,10 +285,10 @@ try {
   const switchResult = await context.commands.execute(a, '/ig5 toolset full', [], new AbortController().signal);
   assert.equal(switchResult.result.kind, 'success');
   const schemas = context.tools.schemas(a);
-  assert.equal(schemas.length, 43); assert.equal(context.tools.schemas(b).length, 8); assert.equal(context.tools.schemas().length, 8);
+  assert.equal(schemas.length, 44); assert.equal(context.tools.schemas(b).length, 8); assert.equal(context.tools.schemas().length, 8);
   assert(schemas.every(schema => schema.name.startsWith('ig5_') && schema.parameters.type === 'object'));
   assert.equal(context.tools.get('ig5_crypto', b), undefined); assert(context.tools.get('ig5_crypto', a));
-  pass('Actual IG5 Core8/Full43 schemas through installed DSH registry; two agent scopes remain isolated');
+  pass('Actual IG5 Core8/Full44 schemas through installed DSH registry; two agent scopes remain isolated');
   const knowledgeSchema = schemas.find(s => s.name === 'ig5_profile').parameters.properties.knowledge;
   assert.deepEqual(knowledgeSchema.required, ['action']);
   const skills = (await context.skills.list({ scope: a })).filter(item => item.name.startsWith('ig5-'));
@@ -259,7 +311,27 @@ try {
   assert.equal(repaired.snapshot.values.ig5dash.calls,2);assert.equal(repaired.snapshot.values.ig5dash.errors,1);
   assert.equal(repaired.checkpoint.ig5dash.ver,2);
   pass('Actual projection service refolds old version1 cache and settles toolCallId/error/concurrent/replayed results once');
-  const execute = (name, args = {}, agent = a) => context.tools.execute({ name, arguments: args, agent, signal: new AbortController().signal, callId: `sdk-${name}` });
+  let sdkCallSeq = 0;
+  const executeSingleCall = async ({ name, args = {}, agent, signal = new AbortController().signal, callId = `sdk-${name}-${++sdkCallSeq}` }) => {
+    if (!nativeExecutorPkgPresent) {
+      return context.tools.execute({ name, arguments: args, ...(agent === undefined ? {} : { agent }), signal, callId });
+    }
+    const batch = await context.tools.execute({
+      calls: [{ id: callId, name, arguments: JSON.stringify(args ?? {}) }],
+      ...(agent === undefined ? {} : { agent }),
+      signal,
+    });
+    const settled = batch.results[0].result;
+    if (!settled.isError && settled.value === undefined && settled.content?.[0]?.type === 'text') {
+      try {
+        return { ...settled, value: JSON.parse(settled.content[0].text) };
+      } catch {
+        return settled;
+      }
+    }
+    return settled;
+  };
+  const execute = (name, args = {}, agent = a) => executeSingleCall({ name, args, agent });
   const researchLookup = await execute('ig5_profile', { knowledge: { action: 'search', query: '混合布尔算术' } });
   assert.equal(researchLookup.isError, false);
   const researchRef = researchLookup.value.knowledge.items[0].ref;
@@ -302,7 +374,7 @@ try {
   const promptGlobal = await context.systemPrompt.assemble({});
   assert(promptA.contexts.some(p => p.name === 'ig5-lcm-history' && p.text.includes('search/read/expand')));
   assert(!promptGlobal.contexts.some(p => p.name === 'ig5-lcm-history'));
-  assert.equal(context.tools.schemas(a).length, 43);
+  assert.equal(context.tools.schemas(a).length, 44);
   pass('Actual installed DSH registry executes LCM capture/search/read/restore/expand, rejects cross-session refs and assembles scoped recovery context without global injection');
   const catalog = await execute('ig5_profile', { capabilities: true });
   assert.equal(catalog.isError, false);
@@ -310,7 +382,7 @@ try {
   assert(catalog.value.capabilities.entries.some(e => e.operation === 'function-context' && e.provider === 'ghidra'));
   const mixedCatalog = await execute('ig5_profile', { capabilities: true, toolset: 'core' });
   assert.equal(mixedCatalog.isError, true);
-  assert.equal(context.tools.schemas(a).length, 43);
+  assert.equal(context.tools.schemas(a).length, 44);
   pass('Actual DSH registry validates read-only capability schema/output and rejects mixed toolset mutation');
   for (const name of ['ig5_status', 'ig5_profile']) {
     const result = await execute(name);
@@ -572,8 +644,8 @@ try {
     assert.match(JSON.stringify(result), /approval (?:was )?rejected|user rejected tool/, `${name} must reach the real approval seam; received ${JSON.stringify(result)}; pre calls ${JSON.stringify(preCalls)}; approvals ${JSON.stringify(approvals)}`);
     assert.equal(approvals.at(-1)?.toolName, name);
   }
-  assert.equal(approvals.length, 13); assert.deepEqual(blockedProcesses, []);
-  pass('All thirteen real write/execution schemas reach DSH approval and are denied without starting a worker');
+  assert.equal(approvals.length, 14); assert.deepEqual(blockedProcesses, []);
+  pass('All fourteen real write/execution schemas reach DSH approval and are denied without starting a worker');
   approvalOutcome = 'cancelled';
   const cancelled = await execute('ig5_rename', minimal(schemas.find(item => item.name === 'ig5_rename').parameters));
   assert.equal(cancelled.isError, true); assert.match(JSON.stringify(cancelled), /ABORTED_BEFORE_DISPATCH|cancelled|取消/);
@@ -597,7 +669,7 @@ try {
   const globalWrite = context.plugin(Object.assign(inner => inner.tools.register(context.tools.get('ig5_rename', a)), { inject: ['tools'] }));
   await globalWrite;
   try {
-    const agentless = await context.tools.execute({ name: 'ig5_rename', arguments: minimal(schemas.find(item => item.name === 'ig5_rename').parameters), signal: new AbortController().signal, callId: 'sdk-agentless-rename' });
+    const agentless = await executeSingleCall({ name: 'ig5_rename', args: minimal(schemas.find(item => item.name === 'ig5_rename').parameters), callId: 'sdk-agentless-rename' });
     assert.equal(agentless.isError, true); assert.match(JSON.stringify(agentless), /active agent|approval|审批/);
     assert.doesNotMatch(JSON.stringify(agentless), /worker 不在运行/); assert.equal(approvals.length, requestsBeforeAgentless);
   } finally { await globalWrite.dispose(); }
@@ -610,7 +682,7 @@ try {
   pass('Cancelled, unavailable, unknown, throwing, missing-agent and missing-service approvals fail closed; confirmed approval reaches the inert body');
   assert.equal((await context.commands.execute(b, '/ig5 toolset full', [], new AbortController().signal)).result.kind, 'success');
   assert.equal((await context.commands.execute(a, '/ig5 toolset core', [], new AbortController().signal)).result.kind, 'success');
-  assert.equal(context.tools.schemas(a).length, 8); assert.equal(context.tools.schemas(b).length, 43);
+  assert.equal(context.tools.schemas(a).length, 8); assert.equal(context.tools.schemas(b).length, 44);
   pass('Core/Full command changes remain independent after real policy denials');
   // Actual installed tool schema/dispatcher, with controlled session lineage.
   // Native subagent lifecycle is tested separately in the live DSH GUI.
@@ -643,7 +715,7 @@ try {
   const { memoryResumeFixture } = await import(pathToFileURL(path.join(pluginRoot, 'scripts/evals/memory_resume_fixture.mjs')).href);
   {
     const fusionGuard=context.plugin(await import(pathToFileURL(path.join(pluginRoot,'scripts/evals/fusion/model_guard.mjs')).href),{taskId:'owned-bv-add-zero',group:'A',log:path.join(runRoot,'fusion-eval-tools.jsonl'),runRoot:path.join(runRoot,'fusion-eval')});await fusionGuard;
-    try{const assembled=await context.systemPrompt.assemble({scope:a});assert.deepEqual(assembled.tools.map(t=>t.name),['ig5_fusion_eval']);assert.equal(assembled.sections.length,1);assert.equal(assembled.sections[0].name,'ig5-fusion-fixed-study');const task=await execute('ig5_fusion_eval',{action:'task'});assert.equal(task.isError,false);assert.equal(task.value.payload.id,'owned-bv-add-zero');assert(/^[a-f0-9]{64}$/.test(task.value.sourceSha256));assert.equal((await execute('ig5_fusion_eval',{action:'task',path:'private-judge'})).isError,true);assert.equal((await execute('ig5_fusion_eval',{action:'verify'})).isError,true);assert.equal((await execute('ig5_status')).isError,true);}finally{await fusionGuard.dispose();}
+    try{context.emit('agent/created',{agent:a});const assembled=await context.systemPrompt.assemble({scope:a});assert.deepEqual(assembled.tools.map(t=>t.name),['ig5_fusion_eval']);assert.equal(assembled.sections.length,1);assert.equal(assembled.sections[0].name,'ig5-fusion-fixed-study');const task=await execute('ig5_fusion_eval',{action:'task'});assert.equal(task.isError,false);assert.equal(task.value.payload.id,'owned-bv-add-zero');assert(/^[a-f0-9]{64}$/.test(task.value.sourceSha256));assert.equal((await execute('ig5_fusion_eval',{action:'task',path:'private-judge'})).isError,true);assert.equal((await execute('ig5_fusion_eval',{action:'verify'})).isError,true);assert.equal((await execute('ig5_status')).isError,true);}finally{await fusionGuard.dispose();}
     pass('Actual Harness A-E evaluation boundary renders source hashes, withholds higher-group actions and denies file/tool/extra-field access');
   }
   const resumeDataset = path.join(runRoot, 'resume-dataset.json'); fs.writeFileSync(resumeDataset, JSON.stringify(memoryResumeFixture()));
@@ -669,6 +741,7 @@ try {
   fs.writeFileSync(path.join(reportRoot, 'host-sdk.json'), JSON.stringify(report, null, 2));
   assert.deepEqual(outputFailures, [], 'Real DSH canonical output validation must pass');
   console.log(`PASS installed DSH ${runtimeVersion} SDK; report ${path.join(reportRoot, 'host-sdk.json')}`);
+  sdkCheckPassed = true;
 } catch (error) {
   fs.writeFileSync(path.join(reportRoot, 'host-sdk.json'), JSON.stringify({ ok: false, timestamp: new Date().toISOString(), pluginRoot, pluginVersion: metadata.version, host: { asar, name: application.name, version: runtimeVersion, desktopVersion: application.version, runtimePackage: appBoot.name, sdkVersions }, frontendContracts, compatibility, peerDependencies: Object.fromEntries(declaredPeers), extraction: { sdkRoot, packages: copied.size, files: copiedFiles, bytes: copiedBytes }, runRoot, assertions, outputFailures, approvals, preCalls, blockedProcesses, nativeWorkersStarted: 0, childProcessesStarted: processIdentityQueries.length, processIdentityQueries, error: { name: error.name, message: error.message }, limits: 'Isolated actual installed service API check; no desktop GUI or engine process started.' }, null, 2));
   throw error;
@@ -676,4 +749,7 @@ try {
   await owner?.dispose(); await approvalOwner?.dispose(); await context?.fiber?.dispose();
   for (const [name, original] of originals) childProcess[name] = original;
   syncBuiltinESMExports();
+  if (!explicitEvidence && sdkCheckPassed) {
+    try { fs.rmSync(reportRoot, { recursive: true, force: true }); } catch { /* ignore */ }
+  }
 }

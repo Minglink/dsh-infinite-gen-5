@@ -24,7 +24,7 @@ const file = path.join(scratch, 'sample.apk'); fs.writeFileSync(file, bytes);
 const rejects = (run, code) => assert.rejects(run, error => error.code === code, `expected ${code}`);
 
 test('the tool is registered as a data tool with a path-only input', () => {
-  assert.ok(apk); assert.deepEqual(apk.parameters.properties.action.enum, ['apk', 'firmware', 'unpack', 'result']); assert.deepEqual(apk.parameters.properties.input.required, ['path']);
+  assert.ok(apk); assert.deepEqual(apk.parameters.properties.action.enum, ['apk', 'firmware', 'unpack', 'js_app', 'trace_diff', 'result']); assert.deepEqual(apk.parameters.properties.input.required, ['path']);
   assert.equal(apk.parameters.properties.input.additionalProperties, false); assert.ok(apk.description.length < 2100, 'the description is part of every Full-toolset prompt');
 });
 

@@ -545,8 +545,37 @@ class Worker:
             addresses = self.m_address_convert({'value': addrstr(function.getEntryPoint()), 'space': 'ghidra_va', 'to_space': 'elf_vaddr'})
         except Exception:
             addresses = {'status': 'unknown', 'ghidra_va': addrstr(function.getEntryPoint()), 'elf_vaddr': None}
-        return {'ea': addrstr(function.getEntryPoint()), 'name': str(function.getName()),
+        img_base = int(self.program.getImageBase().getOffset()) if self.program is not None else 0
+        entry_ea = int(function.getEntryPoint().getOffset())
+        entry_rva = hex(entry_ea - img_base) if entry_ea >= img_base else None
+        call_sites, return_sites = [], []
+        try:
+            listing = self.program.getListing()
+            symtab = self.program.getSymbolTable()
+            for idx, ins in enumerate(each(listing.getInstructions(function.getBody(), True))):
+                if idx >= 512:
+                    break
+                iea = int(ins.getAddress().getOffset())
+                irva = hex(iea - img_base) if iea >= img_base else None
+                ft = ins.getFlowType()
+                mnem = str(ins.getMnemonicString()).upper()
+                if ft.isCall() and len(call_sites) < 32:
+                    after_ea = iea + int(ins.getLength())
+                    flows = ins.getFlows()
+                    callee = None
+                    if flows and len(flows) > 0:
+                        sym = symtab.getPrimarySymbol(flows[0])
+                        callee = str(sym.getName()) if sym is not None else addrstr(flows[0])
+                    call_sites.append({'callEa': hex(iea), 'callRva': irva, 'returnEa': hex(after_ea),
+                                       'returnRva': hex(after_ea - img_base) if after_ea >= img_base else None,
+                                       'callee': callee, 'instruction': str(ins)})
+                elif (ft.isTerminal() or mnem.startswith('RET')) and len(return_sites) < 16:
+                    return_sites.append({'ea': hex(iea), 'rva': irva, 'instruction': str(ins)})
+        except Exception:
+            pass
+        return {'ea': addrstr(function.getEntryPoint()), 'rva': entry_rva, 'name': str(function.getName()),
                 'size': int(function.getBody().getNumAddresses()), 'lines': len(code.splitlines()), 'code': code,
+                'callSites': call_sites, 'returnSites': return_sites,
                 'engine': 'Ghidra', 'revision': self.revision, 'complete': True, 'addresses': addresses}
 
     def m_address_convert(self, params):
@@ -618,14 +647,30 @@ class Worker:
     def m_disasm(self, params):
         address = self.address(params)
         limit, size = bounded(params, default=30), bounded(params, 'size', 256, 65536)
+        listing = self.program.getListing()
+        img_base = int(self.program.getImageBase().getOffset()) if self.program is not None else 0
+        containing = listing.getInstructionContaining(address)
+        is_boundary = bool(containing is not None and containing.getAddress().equals(address))
+        start_addr = containing.getAddress() if (containing is not None and not is_boundary) else address
         rows = []
-        for instruction in each(self.program.getListing().getInstructions(address, True)):
-            if instruction.getAddress().subtract(address) >= size or len(rows) >= limit:
+        for instruction in each(listing.getInstructions(start_addr, True)):
+            if instruction.getAddress().subtract(start_addr) >= size or len(rows) >= limit:
                 break
-            rows.append({'ea': addrstr(instruction.getAddress()), 'size': int(instruction.getLength()),
+            iea = int(instruction.getAddress().getOffset())
+            rows.append({'ea': addrstr(instruction.getAddress()),
+                         'rva': hex(iea - img_base) if iea >= img_base else None,
+                         'size': int(instruction.getLength()),
                          'bytes': bytes(instruction.getBytes()).hex(), 'text': str(instruction),
                          'mnemonic': str(instruction.getMnemonicString())})
-        return {'ea': addrstr(address), 'rows': rows, 'count': len(rows)}
+        containing_info = None
+        if containing is not None:
+            cea = int(containing.getAddress().getOffset())
+            containing_info = {'ea': addrstr(containing.getAddress()),
+                               'rva': hex(cea - img_base) if cea >= img_base else None,
+                               'size': int(containing.getLength()),
+                               'text': str(containing)}
+        return {'ea': addrstr(address), 'isInstructionBoundary': is_boundary,
+                'containingInstruction': containing_info, 'rows': rows, 'count': len(rows)}
 
     def m_xrefs(self, params):
         manager = self.program.getReferenceManager() if self.program is not None else None
@@ -897,8 +942,8 @@ class Worker:
             return self.decode_strings(params)
         if params.get('mode') not in (None, 'function'):
             raise ValueError('mode must be function or decode_strings')
-        from cpu_emulator import emulate_image
         image, execution, _, _ = self.emulation_setup(params)
+        from cpu_emulator import emulate_image
         return {**emulate_image(image, execution), 'idb_modified': False, 'revision': self.revision}
 
     def decode_strings(self, params):

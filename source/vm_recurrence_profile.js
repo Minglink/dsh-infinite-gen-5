@@ -4,9 +4,9 @@ import { loadObservationWindows } from './vm_observation_profile.js';
 import {flowPairSelection} from './flow_pair_sampling.js';
 export const recurrenceProfileSchema={type:'object',properties:{
   flow_ref:{type:'object',properties:{id:{type:'string'},sha256:{type:'string',pattern:'^[a-f0-9]{64}$'}},required:['id','sha256'],additionalProperties:false},
-  max_instructions:{type:'integer',minimum:1,maximum:100000,description:'Default 50000 over all original recording windows'},
-  sample_strategy:{type:'string',enum:['first4-last4','distinct-source-targets'],description:'Default first4-last4; optional first occurrence per observed source/target pair, eight pairs per page'},
-  pair_offset:{type:'integer',minimum:0,maximum:255,description:'Only with distinct-source-targets; first-appearance pair ordinal, default 0'},
+  max_instructions:{type:'integer',minimum:1,maximum:100000},
+  sample_strategy:{type:'string',enum:['first4-last4','distinct-source-targets']},
+  pair_offset:{type:'integer',minimum:0,maximum:255},
 },required:['flow_ref'],additionalProperties:false};
 const fail=m=>{throw new Error('Recorded recurrence: '+m);};
 function fields(v,allowed,required){

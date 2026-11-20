@@ -1,6 +1,6 @@
 {
   "name": "dsh-infinite-gen-5",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "无限五代（IG5）：DeepSeek Harness 统一 Reverse / Ghidra 静态分析与 x64dbg 无头调试工作台。独立 HTTP/HTTPS 流量采集与分析。",
   "type": "module",
   "main": "./index.js",
@@ -196,7 +196,7 @@
   "dsh": {
     "id": "dsh-infinite-gen-5",
     "name": "无限五代",
-    "version": "1.3.0",
+    "version": "1.4.0",
     "repo": "Minglink/dsh-infinite-gen-5",
     "permissions": "子进程(python worker)、文件写(artifacts)、会话投影、客户端侧栏 tab、显式范围的本地代理与网络请求（审批）",
     "bundle": {
@@ -206,6 +206,9 @@
       "platform": "web",
       "immediately": true
     }
+  },
+  "engines": {
+    "dsh": ">=0.2.0-rc.1 <0.3.0-0"
   },
   "peerDependencies": {
     "@deepseek-ai/dsh": ">=0.2.0-rc.1 <0.3.0-0"

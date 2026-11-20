@@ -35,7 +35,7 @@ try {
   }
   apply(ctx, { toolset: 'full', reverseProvider: 'bundled', defaultEngine: 'reverse', reverse: false,
     artifactDir: path.join(output, 'analysis'), projectRoot: path.join(output, 'projects'), requestTimeoutMs: 120000, openTimeoutMs: 180000 });
-  assert.equal(definitions.size, 43);
+  assert.equal(definitions.size, 44);
   for (const item of corpus.samples) {
     const target = path.join(sampleRoot, item.file);
     const row = { id: item.id, source: item.url, sha256: item.sha256, protection: item.protection, results: [], functionRecovered: false };

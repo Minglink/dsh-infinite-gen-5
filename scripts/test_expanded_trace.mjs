@@ -1,12 +1,13 @@
 // Pinned author recordings, real public tool wrapper, no external target execution.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { apply } from '../index.js';
 
 const root = path.resolve(import.meta.dirname, '..');
-const output = process.env.IG5_CORPUS_EVIDENCE || 'C:/Users/IG5User/.dsh/ig5/artifacts/corpus-expansion-20261014';
+const output = process.env.IG5_CORPUS_EVIDENCE || path.join(os.homedir(), '.dsh/ig5/artifacts/corpus-expansion-20261014');
 const corpus = process.env.IG5_PROTECTION_CORPUS || path.join(output, 'corpus');
 const pins = JSON.parse(fs.readFileSync(path.join(root, 'scripts/fixtures/protection_corpus.json'), 'utf8')).files;
 function pinned(relative) {
@@ -31,7 +32,7 @@ const ctx = { tools: { register(d) { definitions.set(d.name, d); return () => de
   effect(callback) { const remove = callback(); if (typeof remove === 'function') effects.push(remove); },
 };
 apply(ctx, { toolset: 'full', reverse: false, artifactDir: output, projectRoot: path.join(output, 'projects') });
-assert.equal(definitions.size, 43);
+assert.equal(definitions.size, 44);
 function evaluate(e, x, y) {
   const trim = value => BigInt.asUintN(e.bits, value);
   if (e.op === 'input') return trim(e.name === 'x' ? x : y);

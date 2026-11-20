@@ -10,9 +10,9 @@ import { runFlowSemantics } from './flow_semantics_jobs.js';
 const GPRS='rax rbx rcx rdx rdi rsi rbp rsp r8 r9 r10 r11 r12 r13 r14 r15'.split(' ');
 export const flowProfileSchema={type:'object',properties:{
   roles_ref:{type:'object',properties:{id:{type:'string'},sha256:{type:'string',pattern:'^[a-f0-9]{64}$'}},required:['id','sha256'],additionalProperties:false},
-  target:{type:'string',description:'Explicit existing same-SHA raw AMD64 PE; static snapshot only, never restore missing/quarantined files'},
-  max_instructions:{type:'integer',minimum:1,maximum:100000,description:'Default 50000 over every original recording window'},
-  semantic_check:{type:'boolean',description:'Optional paired ordinary-IR states with pinned bounded SMT and independent finite witness replay; not CPU/VM/business recovery'},
+  target:{type:'string'},
+  max_instructions:{type:'integer',minimum:1,maximum:100000},
+  semantic_check:{type:'boolean'},
 },required:['roles_ref','target'],additionalProperties:false};
 function fields(value,allowed,required){
   if(!value||typeof value!=='object'||![Object.prototype,null].includes(Object.getPrototypeOf(value))

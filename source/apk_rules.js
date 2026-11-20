@@ -14,6 +14,8 @@ export const CATEGORIES = Object.freeze({
   'anti-debug': 'Detects a debugger', 'emulator-detection': 'Inspects device model to detect emulators', 'root-detection': 'Looks for root tools', 'hook-detection': 'Looks for instrumentation frameworks',
   'device-identity': 'Collects device identifiers', 'system-settings': 'Changes system settings', storage: 'Broad file storage access', 'c2-channel': 'Messaging or paste services often used as control channels',
   'screen-lock': 'Disables or controls the lock screen', biometric: 'Uses biometrics',
+  'packer-wrapper': 'Commercial APK wrapper or DEX protector stub',
+  'cross-platform': 'Cross-platform runtime payload (Flutter, React Native/Hermes, ArkTS)',
 });
 
 const P = 'android.permission.';
@@ -73,6 +75,8 @@ export const API_RULES = [
   api('reflect.lookup', 'reflection', 1, 'Ljava/lang/Class;', ['forName', 'getMethod', 'getDeclaredMethod', 'getDeclaredField', 'getDeclaredConstructor']),
   api('crypto.cipher', 'crypto', 1, 'Ljavax/crypto/Cipher;', ['getInstance', 'doFinal', 'init']), api('crypto.key', 'crypto', 1, 'Ljavax/crypto/spec/SecretKeySpec;', ['<init>']),
   api('crypto.iv', 'crypto', 1, 'Ljavax/crypto/spec/IvParameterSpec;', ['<init>']), api('crypto.digest', 'crypto', 1, 'Ljava/security/MessageDigest;', ['getInstance', 'digest']),
+  api('crypto.keyinfo', 'crypto', 2, 'Landroid/security/keystore/KeyInfo;', ['isInsideSecurityHardware', 'getSecurityLevel', 'isUserAuthenticationRequired']),
+  api('crypto.keystore', 'crypto', 1, 'Ljava/security/KeyStore;', ['getInstance', 'load', 'getEntry']),
   api('net.url', 'network', 1, 'Ljava/net/URL;', ['openConnection', 'openStream']), api('net.http', 'network', 1, 'Ljava/net/HttpURLConnection;', ['connect', 'getInputStream', 'getOutputStream', 'getResponseCode']),
   api('net.https', 'network', 1, HUC, ['connect', 'getInputStream', 'getOutputStream']), api('net.socket', 'network', 2, 'Ljava/net/Socket;', ['<init>', 'connect']),
   api('net.datagram', 'network', 2, 'Ljava/net/DatagramSocket;', ['send', 'connect']), api('net.okhttp', 'network', 1, 'Lokhttp3/OkHttpClient;', ['newCall']),
@@ -113,6 +117,11 @@ export const STRING_RULES = [
   string('str.telegram-bot', 'c2-channel', 2, /api\.telegram\.org\/bot[0-9]+:|api\.telegram\.org\/bot%s/i), string('str.discord-webhook', 'c2-channel', 2, /discord(app)?\.com\/api\/webhooks\//i),
   string('str.paste', 'c2-channel', 1, /\b(pastebin\.com\/raw|paste\.ee\/r|raw\.githubusercontent\.com|gist\.githubusercontent\.com)\b/i),
   string('str.shell', 'exec', 2, /^(\/system\/(x?bin)\/)?(sh|su)( -c)?$|^(chmod|chown|mount|pm install|pm uninstall|am start|am broadcast|settings put|input (tap|swipe|text))\b/),
+  string('str.packer-wrapper', 'packer-wrapper', 3, /\b(?:libSecShell(?:_[a-z0-9]+)?|libDexHelper(?:_[a-z0-9]+)?|libjiagu(?:_[a-z0-9]+)?|libshell[ax]?(?:_[a-z0-9]+)?|TxAppEntry|libexecmain|libexec(?:_[a-z0-9]+)?\.so|libnesec(?:_[a-z0-9]+)?|StubApp)\b/, 'Commercial APK wrapper library or stub entry'),
+  string('str.cross-platform-flutter', 'cross-platform', 2, /\b(libapp\.so|libflutter\.so|_kDartVmSnapshotInstructions|_kDartIsolateSnapshotInstructions|flutter_assets)\b/, 'Flutter AOT runtime markers'),
+  string('str.cross-platform-rn', 'cross-platform', 2, /\b(index\.android\.bundle|libhermes\.so|libreactnativejni\.so)\b/, 'React Native / Hermes bundle markers'),
+  string('str.cross-platform-arkts', 'cross-platform', 2, /\b(modules\.abc|libark_jsruntime\.so)\b/, 'ArkTS / HarmonyOS bytecode markers'),
+  string('str.jni-registernatives', 'native-code', 2, /\bRegisterNatives\b/, 'JNI dynamic registration symbol'),
 ];
 
 const base = (id, category, strength, superclass) => ({ id, category, strength, superclass });

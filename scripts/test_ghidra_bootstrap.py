@@ -5,9 +5,11 @@ import importlib.util
 import os
 from pathlib import Path
 import struct
+import sys
 import tempfile
 import types
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -211,6 +213,126 @@ class BootstrapTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'escapes'):
             self.run_bootstrap(loader)
         self.assertEqual(loader.events, [])
+
+
+class EmulationColdStartTests(unittest.TestCase):
+    """Use production setup/import resolution, but never call native emulation."""
+
+    def setUp(self):
+        shared = ROOT / 'worker'
+        original_path = list(sys.path)
+        original_modules = {name: sys.modules.pop(name, None) for name in ('cpu_emulator', 'memory_image')}
+        sys.path[:] = [entry for entry in sys.path if Path(entry or '.').resolve() != shared.resolve()]
+        def restore_import_state():
+            sys.path[:] = original_path
+            for name, module in original_modules.items():
+                sys.modules.pop(name, None)
+                if module is not None:
+                    sys.modules[name] = module
+        self.addCleanup(restore_import_state)
+
+        self.events = []
+        self.calls = []
+        native_import = builtins.__import__
+        def capture_emulation(image, params):
+            self.events.append('emulate_image')
+            self.calls.append((image, params))
+            return {'ok': True, 'result': 'offline fixture'}
+        def guarded_import(name, *args, **kwargs):
+            if name.split('.')[0] in ('jpype', '_jpype', 'pyghidra', 'unicorn'):
+                raise AssertionError('offline regression attempted a native import: ' + name)
+            module = native_import(name, *args, **kwargs)
+            if name == 'cpu_emulator':
+                self.assertEqual(Path(module.__file__).resolve(), (shared / 'cpu_emulator.py').resolve())
+                self.events.append('cpu_emulator import')
+                module.emulate_image = capture_emulation
+            return module
+        guard = patch('builtins.__import__', guarded_import)
+        guard.start()
+        self.addCleanup(guard.stop)
+
+        tree = ast.parse((ROOT / 'adapters/ghidra/worker.py').read_text(encoding='utf-8'))
+        worker_class = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'Worker')
+        methods = [node for node in worker_class.body if isinstance(node, ast.FunctionDef)
+                   and node.name in ('m_emulate', 'emulation_setup')]
+        self.assertEqual(len(methods), 2)
+        isolated_class = ast.ClassDef(name='Worker', bases=[], keywords=[], body=methods, decorator_list=[])
+        isolated = ast.fix_missing_locations(ast.Module(body=[isolated_class], type_ignores=[]))
+        self.platform = types.SimpleNamespace(name='nt')
+        namespace = {'os': self.platform, 'sys': sys, 'ADAPTER_ROOT': ROOT / 'adapters/ghidra',
+                     'UnsupportedError': RuntimeError}
+        exec(compile(isolated, str(ROOT / 'adapters/ghidra/worker.py'), 'exec'), namespace)
+        self.worker = namespace['Worker']()
+        self.worker.revision = 17
+        self.worker.require = lambda: self.events.append('require')
+
+        ns = types.SimpleNamespace
+        space = object()
+        def address(offset):
+            return ns(getOffset=lambda: offset, getAddressSpace=lambda: space,
+                      add=lambda delta: address(offset + delta))
+        block = ns(getStart=lambda: address(0x1000), getSize=lambda: 16, getName=lambda: '.text',
+                   isInitialized=lambda: True, isRead=lambda: True, isWrite=lambda: False,
+                   isExecute=lambda: True)
+        self.worker.program = ns(
+            getLanguage=lambda: ns(getDefaultSpace=lambda: ns(getSize=lambda: 64), getProcessor=lambda: 'x86'),
+            getCompilerSpec=lambda: ns(getCompilerSpecID=lambda: 'windows'),
+            getMemory=lambda: ns(getBlocks=lambda: [block]),
+            getAddressFactory=lambda: ns(getDefaultAddressSpace=lambda: space))
+        self.worker.function = lambda params: ns(getEntryPoint=lambda: address(0x1000))
+        self.worker.read_bytes = lambda start, size: b'\x90' * size
+
+    def test_cold_function_import_uses_shared_worker_after_setup(self):
+        params = {'mode': 'function', 'ea': '0x1000', 'args': ['0x123'], 'max_instructions': 31}
+        result = self.worker.m_emulate(params)
+        self.assertEqual(result, {'ok': True, 'result': 'offline fixture', 'idb_modified': False, 'revision': 17})
+        self.assertEqual(self.events, ['require', 'cpu_emulator import', 'emulate_image'])
+        self.assertEqual(len(self.calls), 1)
+        image, execution = self.calls[0]
+        self.assertIsInstance(image, sys.modules['memory_image'].MemoryImage)
+        self.assertEqual((image.arch, image.bits, image.entry, image.source), ('x86', 64, 0x1000, 'ghidra'))
+        self.assertEqual(image.regions[0].permissions, 5)
+        self.assertEqual(list(image.chunks()), [(0x1000, b'\x90' * 16, 0)])
+        self.assertEqual(execution, {'ea': '0x1000', 'args': ['0x123'], 'max_instructions': 31, 'abi': 'win64'})
+        self.assertEqual(params['mode'], 'function', 'setup must not mutate caller parameters')
+        self.assertNotIn('abi', params)
+
+    def test_unsupported_host_rejects_before_cpu_import(self):
+        self.platform.name = 'posix'
+        with self.assertRaisesRegex(RuntimeError, 'validated native Unicorn runtime'):
+            self.worker.m_emulate({})
+        self.assertEqual(self.events, ['require'])
+        self.assertNotIn('cpu_emulator', sys.modules)
+        self.assertEqual(self.calls, [])
+
+    def test_unloaded_program_rejects_before_cpu_import(self):
+        def unloaded():
+            raise RuntimeError('program is not loaded')
+        self.worker.require = unloaded
+        with self.assertRaisesRegex(RuntimeError, 'program is not loaded'):
+            self.worker.m_emulate({})
+        self.assertEqual(self.events, [])
+        self.assertNotIn('cpu_emulator', sys.modules)
+        self.assertEqual(self.calls, [])
+
+    def test_invalid_mode_rejects_without_setup_or_cpu_import(self):
+        with self.assertRaisesRegex(ValueError, 'mode must be function or decode_strings'):
+            self.worker.m_emulate({'mode': 'invalid'})
+        self.assertEqual(self.events, [])
+        self.assertNotIn('cpu_emulator', sys.modules)
+        self.assertEqual(self.calls, [])
+
+    def test_decode_strings_dispatches_without_function_setup(self):
+        params = {'mode': 'decode_strings', 'ea': '0x1000'}
+        decoded = {'ok': True, 'strings': ['offline fixture']}
+        def decode(received):
+            self.assertIs(received, params)
+            return decoded
+        self.worker.decode_strings = decode
+        self.assertIs(self.worker.m_emulate(params), decoded)
+        self.assertEqual(self.events, [])
+        self.assertNotIn('cpu_emulator', sys.modules)
+        self.assertEqual(self.calls, [])
 
 
 if __name__ == '__main__':

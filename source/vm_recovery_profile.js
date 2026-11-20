@@ -12,8 +12,8 @@ import {instanceSchemas,runVmInstances} from './vm_instance_workflow.js';
 
 export const recoveryProfileSchema = {
   type: 'object', properties: { case_ref: { type: 'object', properties: {
-    path: { type: 'string', description: 'Explicit absolute local recovery-case JSON path, at most 256 KiB' },
-    sha256: { type: 'string', pattern: '^[a-f0-9]{64}$', description: 'SHA-256 of the exact case bytes; verified before reading its references' },
+    path: { type: 'string' },
+    sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
   }, required: ['path', 'sha256'], additionalProperties: false }, observations: observationProfileSchema, roles: roleProfileSchema, flow: flowProfileSchema,recurrences:recurrenceProfileSchema,handlers:handlerProfileSchema,context:contextProfileSchema },
   oneOf: [{ required: ['case_ref'] }, { required: ['observations'] }, { required: ['roles'] }, { required: ['flow'] },{required:['recurrences']},{required:['handlers']},{required:['context']}, ...Object.keys(progressionSchemas).map(k => ({ required: [k] }))], additionalProperties: false,
 };

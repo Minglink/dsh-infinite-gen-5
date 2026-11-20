@@ -154,3 +154,360 @@ export function planExperiments({ context, task, research = null, evidence = [],
     mode: 'suggestions-only', executionAuthorized: false, taskModified: false, databaseModified: false,
     assurance: 'Deterministic planning over supplied state; caller hypotheses and predictions remain unverified.' };
 }
+
+/**
+ * Backward-chained short-route planner for root investigations (v0.2).
+ * Separates route feasibility from immediate executability so missing scenario parameters
+ * lead to scenario preparation rather than unbounded static pseudocode export.
+ */
+export function planRootInvestigation({ rootTask, assessment, capabilities = { entries: [] }, maxCandidates = 4 }) {
+  if (!rootTask || rootTask.kind !== 'root-investigation' || !assessment) {
+    fail('Root investigation and derived assessment are required');
+  }
+  const candidates = [];
+  const deferred = [];
+  const debugCap = (capabilities.entries || []).find(e => e.operation === 'debug-scenario' || e.operation === 'record-execution');
+  const debugRouteFeasible = !debugCap
+    ? true
+    : (debugCap.declared === 'declared' && debugCap.policy !== 'blocked' && debugCap.files !== 'missing');
+
+  const push = (priority, item) => candidates.push({
+    priority,
+    executionAuthorized: false,
+    ...item,
+  });
+
+  if (assessment.pendingReceiptsCount > 0) {
+    push(0, {
+      kind: 'recover-pending-receipts',
+      routeFeasible: true,
+      operationExecutableNow: true,
+      rationale: 'System artifacts committed with unlinked root investigation receipts; link them without re-executing tools.',
+      request: { tool: 'ig5_workspace', workspace: { action: 'recover-receipts', id: rootTask.rootId } },
+    });
+  }
+
+  const normPathKey = p => (typeof p === 'string' && p.trim() ? p.trim().replaceAll('/', '\\').toLowerCase() : null);
+  for (const item of assessment.pendingCleanup || []) {
+    if (item.status === 'active') {
+      const rawKey = String(item.resourceKey || '');
+      const isDbg = rawKey.startsWith('dbg:') || rawKey.startsWith('live-dbg:');
+      const isApp = rawKey.startsWith('app:');
+      const isAndroid = rawKey.startsWith('android:');
+      const fallbackTarget = rawKey.startsWith('dbg:') ? rawKey.slice(4)
+        : rawKey.startsWith('live-dbg:') ? rawKey.slice(9)
+        : isApp ? rawKey.slice(4) : '';
+      const matchedComponent = fallbackTarget
+        ? rootTask.components.find(c => normPathKey(c.path) === normPathKey(fallbackTarget))
+        : null;
+      const targetPath = item.targetPath || matchedComponent?.path || fallbackTarget;
+      let cleanupReq = null;
+      if (isDbg && targetPath) {
+        cleanupReq = { tool: 'ig5_dbg', op: 'stop', target: targetPath };
+      } else if (isApp && targetPath) {
+        cleanupReq = { tool: 'ig5_app_observe', action: 'stop', target: targetPath };
+      } else if (isAndroid) {
+        const parts = rawKey.slice('android:'.length);
+        const colonIdx = parts.indexOf(':');
+        const serial = item.deviceSerial || (colonIdx > 0 ? parts.slice(0, colonIdx) : '');
+        const pkg = item.packageName || (colonIdx > 0 ? parts.slice(colonIdx + 1) : '');
+        if (serial && pkg) {
+          cleanupReq = { tool: 'ig5_app_observe', action: 'android_session_stop', device_serial: serial, package_name: pkg };
+        }
+      } else if (!isDbg && !isApp && !isAndroid) {
+        cleanupReq = { tool: 'ig5_capture_control', action: 'stop' };
+      }
+      if (cleanupReq) {
+        push(1, {
+          kind: 'cleanup-owned-resource',
+          routeFeasible: true,
+          operationExecutableNow: true,
+          rationale: `Active managed resource "${item.resourceKey}" requires owner stop before completion or stop.`,
+          request: cleanupReq,
+        });
+      }
+    }
+  }
+
+  if (assessment.unknownEffectsCount > 0) {
+    push(2, {
+      kind: 'inspect-unknown-execution-effect',
+      routeFeasible: true,
+      operationExecutableNow: true,
+      rationale: 'An interrupted operation has status=effect-unknown; inspect session/runtime state rather than replaying automatically.',
+      request: { tool: 'ig5_doctor', operation: 'session' },
+    });
+  }
+
+  if (assessment.stopReason === 'user-cancelled' || assessment.stopReason === 'host-goal-paused') {
+    candidates.sort((a, b) => a.priority - b.priority);
+    return {
+      schema: 'ig5-root-plan-v1',
+      rootId: rootTask.rootId,
+      planRevision: rootTask.planRevision,
+      workState: assessment.workState,
+      stopReason: assessment.stopReason,
+      debugRouteFeasible,
+      candidates: candidates.slice(0, maxCandidates).map(({ priority: _p, ...rest }) => rest),
+      deferred: [{ reason: `business-dispatch-halted:${assessment.stopReason}` }],
+      mode: 'backward-chained-short-route',
+      executionAuthorized: false,
+    };
+  }
+
+  if (assessment.unresolvedCounterexamples?.length > 0) {
+    const cx = assessment.unresolvedCounterexamples[0];
+    push(5, {
+      kind: 'revise-after-counterexample',
+      routeFeasible: true,
+      operationExecutableNow: false,
+      missingParameters: ['workspace.root.route | workspace.root.scenario | workspace.root.candidate'],
+      rationale: `Counterexample ${cx.counterexampleId} refuted prior hypothesis; update route/scenario or formulate a revised experiment.`,
+      request: null,
+      requestTemplate: { tool: 'ig5_workspace', workspace: { action: 'root-update', id: rootTask.rootId, root: {} } },
+    });
+  }
+
+  const activeExp = rootTask.experiments.find(e => e.mode === 'explicit' && ['selected', 'running'].includes(e.status));
+  if (activeExp && activeExp.receiptIds.length > 0) {
+    push(10, {
+      kind: 'evaluate-active-experiment',
+      routeFeasible: true,
+      operationExecutableNow: false,
+      missingParameters: ['workspace.root.observationClass', 'workspace.root.verdict', 'workspace.root.whyNextChanged', 'workspace.root.nextAction'],
+      rationale: `Experiment ${activeExp.expId} has ${activeExp.receiptIds.length} recorded receipt(s); classify observations and update route premises.`,
+      request: null,
+      requestTemplate: {
+        tool: 'ig5_workspace',
+        workspace: { action: 'evaluate', id: rootTask.rootId, root: { expId: activeExp.expId } },
+      },
+    });
+  }
+
+  if (rootTask.components.length === 0) {
+    push(12, {
+      kind: 'register-target-component',
+      routeFeasible: true,
+      operationExecutableNow: false,
+      missingParameters: ['workspace.root.component.path'],
+      rationale: 'Register primary target binary/component bytes and SHA-256 before planning experiments.',
+      request: null,
+      requestTemplate: {
+        tool: 'ig5_workspace',
+        workspace: { action: 'root-update', id: rootTask.rootId, root: { component: { componentId: 'comp-1' } } },
+      },
+    });
+  } else {
+    const mainComp = rootTask.components[0];
+    const hasStaticReceipt = rootTask.receipts.some(r => ['ig5_open', 'ig5_funcs', 'ig5_decompile', 'ig5_bytes', 'ig5_package'].includes(r.tool) && r.outcome === 'success');
+    if (!hasStaticReceipt) {
+      const staticReq = mainComp.role === 'electron-app'
+        ? {
+            tool: 'ig5_package',
+            action: 'js_app',
+            target: mainComp.path,
+            input: { path: mainComp.path },
+            research: { id: rootTask.rootId, key: `js-app-${mainComp.componentId}`, note: 'Static JS/Electron structure & helper candidate reconstruction' },
+          }
+        : mainComp.role === 'apk'
+        ? {
+            tool: 'ig5_package',
+            action: 'apk',
+            target: mainComp.path,
+            input: { path: mainComp.path },
+            research: { id: rootTask.rootId, key: `apk-static-${mainComp.componentId}`, note: 'Static APK manifest/DEX/JNI library inspection' },
+          }
+        : {
+            tool: 'ig5_open',
+            path: mainComp.path,
+            research: { id: rootTask.rootId, key: `open-${mainComp.componentId}`, note: 'Open component for targeted entry location' },
+          };
+      push(15, {
+        kind: 'inline-static-locate',
+        routeFeasible: true,
+        operationExecutableNow: true,
+        rationale: 'Locate target structure/entry statically with inline research receipt instead of bulk pseudocode export.',
+        request: staticReq,
+      });
+    }
+
+    // Budget-headroom guard (P3): if candidate is pre-committed and dynamic holdout receipts already exist
+    // while testVectors are still unattached, prioritize attaching testVectors immediately!
+    const primaryDeliv = rootTask.deliverables[0];
+    const hasHoldoutReceipt = rootTask.experiments.some(e => e.kind === 'holdout-verify' && e.receiptIds.length > 0);
+    if (primaryDeliv?.candidateExplanation?.ruleSha256
+      && hasHoldoutReceipt
+      && (!primaryDeliv.candidateExplanation.testVectors || primaryDeliv.candidateExplanation.testVectors.length === 0)) {
+      push(4, {
+        kind: 'attach-verified-test-vectors',
+        routeFeasible: true,
+        operationExecutableNow: false,
+        missingParameters: ['workspace.root.testVectors'],
+        rationale: 'Pre-committed candidate and holdout execution receipt already exist; attach discovery + holdout testVectors before spending remaining budget on extra calls.',
+        request: null,
+        requestTemplate: {
+          tool: 'ig5_workspace',
+          workspace: { action: 'root-update', id: rootTask.rootId, root: { testVectors: [] } },
+        },
+      });
+    }
+
+    if (debugRouteFeasible && rootTask.scenarios.length === 0) {
+      push(18, {
+        kind: 'prepare-runtime-scenario',
+        routeFeasible: true,
+        operationExecutableNow: false,
+        missingPrerequisites: ['runtime-scenario(args,cwd,trigger,observationWindow)'],
+        missingParameters: ['workspace.root.scenario.args', 'workspace.root.scenario.cwd', 'workspace.root.scenario.inputSpec.sampleHex', 'workspace.root.scenario.trigger'],
+        rationale: 'Dynamic debugging is feasible on this host, but no reproducible runtime scenario is defined yet; prepare scenario parameters instead of defaulting to static bulk export.',
+        request: null,
+        requestTemplate: {
+          tool: 'ig5_workspace',
+          workspace: { action: 'root-update', id: rootTask.rootId, root: { scenario: { componentId: mainComp.componentId } } },
+        },
+      });
+    } else if (!debugRouteFeasible) {
+      deferred.push({ reason: `dynamic-debug-not-feasible:${debugCap?.policy === 'blocked' ? 'policy-blocked' : 'runtime-unavailable'}` });
+    }
+
+    const activeRoute = rootTask.routes.find(r => r.status === 'active');
+    if (!activeRoute) {
+      push(19, {
+        kind: 'define-short-route',
+        routeFeasible: debugRouteFeasible,
+        operationExecutableNow: false,
+        missingParameters: ['workspace.root.route.question', 'workspace.root.route.targetObservation', 'workspace.root.route.discriminatingExperiment'],
+        rationale: 'Define backward-chained short route from deliverable -> target observation -> preparation -> discriminating experiment.',
+        request: null,
+        requestTemplate: {
+          tool: 'ig5_workspace',
+          workspace: { action: 'root-update', id: rootTask.rootId, root: { route: { deliverableId: rootTask.deliverables[0]?.id || 'deliv-primary' } } },
+        },
+      });
+    } else {
+      const prepLedger = rootTask.preparationLedger?.[activeRoute.objectiveKey];
+      const prepExhausted = Boolean(prepLedger && prepLedger.usedCalls >= prepLedger.limit);
+      if (prepExhausted && !activeRoute.operationExecutableNow) {
+        deferred.push({ reason: `preparation-budget-exhausted:${activeRoute.routeId}` });
+      }
+      if (debugRouteFeasible && rootTask.scenarios.length > 0 && !activeExp) {
+        const evaluatedScenarioIds = new Set(
+          rootTask.experiments.filter(e => e.status === 'evaluated' && e.routeId === activeRoute.routeId).map(e => e.scenarioId),
+        );
+        const nextScenario = rootTask.scenarios.find(s => !evaluatedScenarioIds.has(s.scenarioId)) || null;
+        if (nextScenario) {
+          const isHoldoutScenario = Boolean(nextScenario.inputSpec?.isHoldout);
+          const routeDeliv = rootTask.deliverables.find(d => d.id === activeRoute.deliverableId) || rootTask.deliverables[0] || null;
+          const hasPrecommittedCandidate = Boolean(routeDeliv?.candidateExplanation?.ruleSha256 && !routeDeliv?.candidateExplanation?.needsReassessment);
+          if (isHoldoutScenario && !hasPrecommittedCandidate) {
+            push(20, {
+              kind: 'precommit-candidate-before-holdout',
+              routeFeasible: true,
+              operationExecutableNow: false,
+              missingParameters: ['workspace.root.candidate.summary', 'workspace.root.candidate.outputSpec', 'workspace.root.candidate.executableRule'],
+              rationale: `Holdout scenario "${nextScenario.scenarioId}" cannot be selected until candidate outputSpec and executableRule (ig5-bounded-byte-rule-v1) are pre-committed.`,
+              request: null,
+              requestTemplate: {
+                tool: 'ig5_workspace',
+                workspace: {
+                  action: 'root-update',
+                  id: rootTask.rootId,
+                  root: {
+                    candidate: {
+                      deliverableId: routeDeliv?.id || 'deliv-1',
+                      executableRule: { schema: 'ig5-bounded-byte-rule-v1' },
+                    },
+                  },
+                },
+              },
+            });
+          } else {
+            const expKind = isHoldoutScenario ? 'holdout-verify' : 'dynamic-breakpoint-read';
+            const scenarioCompId = nextScenario.componentId || mainComp.componentId;
+            push(20, {
+              kind: 'select-discriminating-experiment',
+              routeFeasible: true,
+              operationExecutableNow: true,
+              rationale: `Scenario "${nextScenario.scenarioId}" is ready; select explicit dynamic experiment for "${activeRoute.targetObservation}".`,
+              request: {
+                tool: 'ig5_workspace',
+                workspace: {
+                  action: 'select',
+                  id: rootTask.rootId,
+                  root: {
+                    kind: expKind,
+                    routeId: activeRoute.routeId,
+                    scenarioId: nextScenario.scenarioId,
+                    componentId: scenarioCompId,
+                    observer: activeRoute.targetObservation,
+                    hypothesis: `Scenario "${nextScenario.scenarioId}" produces observable ${activeRoute.targetObservation} via ${activeRoute.discriminatingExperiment}`,
+                  },
+                },
+              },
+            });
+          }
+        } else {
+          push(20, {
+            kind: 'formulate-new-scenario-or-hypothesis',
+            routeFeasible: true,
+            operationExecutableNow: false,
+            missingParameters: ['workspace.root.hypothesis', 'workspace.root.scenarioId'],
+            rationale: 'All registered scenarios on this route were already evaluated; define a new scenario or revised hypothesis.',
+            request: null,
+            requestTemplate: {
+              tool: 'ig5_workspace',
+              workspace: { action: 'select', id: rootTask.rootId, root: { routeId: activeRoute.routeId, componentId: mainComp.componentId } },
+            },
+          });
+        }
+      }
+    }
+
+    const needsHoldout = assessment.deliverables.some(d => d.missing?.includes('missing-independent-holdout-verification'));
+    if (needsHoldout && debugRouteFeasible) {
+      const hasHoldoutScenario = rootTask.scenarios.some(s => s.inputSpec?.isHoldout);
+      if (!hasHoldoutScenario) {
+        push(25, {
+          kind: 'prepare-holdout-scenario',
+          routeFeasible: true,
+          operationExecutableNow: false,
+          missingParameters: ['workspace.root.scenario(isHoldout=true,inputSpec.sampleHex,args)'],
+          rationale: 'Deliverable requires an independent holdout input scenario disjoint from discovery inputs.',
+          request: null,
+          requestTemplate: {
+            tool: 'ig5_workspace',
+            workspace: {
+              action: 'root-update',
+              id: rootTask.rootId,
+              root: { scenario: { componentId: mainComp.componentId, inputSpec: { isHoldout: true } } },
+            },
+          },
+        });
+      }
+    }
+  }
+
+  if (!assessment.canCompleteHostGoal) {
+    push(35, {
+      kind: 'assess-deliverables',
+      routeFeasible: true,
+      operationExecutableNow: true,
+      rationale: 'Check independent artifact-backed deliverable verification and cleanup alignment.',
+      request: { tool: 'ig5_workspace', workspace: { action: 'assess', id: rootTask.rootId } },
+    });
+  }
+
+  candidates.sort((a, b) => a.priority - b.priority);
+  return {
+    schema: 'ig5-root-plan-v1',
+    rootId: rootTask.rootId,
+    planRevision: rootTask.planRevision,
+    workState: assessment.workState,
+    stopReason: assessment.stopReason,
+    debugRouteFeasible,
+    candidates: candidates.slice(0, maxCandidates).map(({ priority: _p, ...rest }) => rest),
+    deferred,
+    mode: 'backward-chained-short-route',
+    executionAuthorized: false,
+  };
+}

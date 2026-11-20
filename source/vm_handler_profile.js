@@ -10,8 +10,8 @@ import {runProjection,runRecordedProjection} from './projection_jobs.js';
 import {makeRecordedCoordinateInput,needsRecordedRuntimeCoordinates} from './recorded_projection_coordinates.js';
 export const handlerProfileSchema={type:'object',properties:{
   recurrences_ref:{type:'object',properties:{id:{type:'string'},sha256:{type:'string',pattern:'^[a-f0-9]{64}$'}},required:['id','sha256'],additionalProperties:false},
-  target:{type:'string',description:'Explicit existing same-SHA raw AMD64 PE for static body projection only'},
-  max_instructions:{type:'integer',minimum:1,maximum:100000,description:'Default 50000 over every original recording window'},
+  target:{type:'string'},
+  max_instructions:{type:'integer',minimum:1,maximum:100000},
 },required:['recurrences_ref','target'],additionalProperties:false};
 const GPRS='rax rbx rcx rdx rdi rsi rbp rsp r8 r9 r10 r11 r12 r13 r14 r15'.split(' ');
 const fail=m=>{throw Error('Recorded handlers: '+m);},same=(a,b)=>JSON.stringify(a)===JSON.stringify(b);

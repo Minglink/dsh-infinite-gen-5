@@ -41,7 +41,7 @@ test('compatibility fence preserves v1 bytes, rejects old readers/writers and ke
   const root=fixture(t);fs.mkdirSync(path.join(root,'knowledge-v1'));
   const card={...structuredClone(knowledgeSeeds[0]),id:'v1-local-keep',title:'Legacy local record',body:'Legacy body preserved'};
   const bytes=Buffer.from(JSON.stringify({schema:'ig5-knowledge-catalog-v1',cards:[card],documents:[]})+'\r\n');fs.writeFileSync(path.join(root,'knowledge-v1','catalog.json'),bytes);
-  const before=runKnowledge({projectRoot:root},{action:'methods',limit:10}).items.find(x=>x.ref.id===card.id).ref;
+  const before=runKnowledge({projectRoot:root},{action:'methods',offset:knowledgeSeeds.length,limit:10}).items.find(x=>x.ref.id===card.id).ref;
   const dry=publishPublicKnowledgeV2({projectRoot:root,expectedGeneration:'absent',upserts:[publicDocument()],validateOnly:true});assert.equal(dry.generationSaved,false);assert(!fs.existsSync(path.join(root,'knowledge-v2')));
   publish(root,[publicDocument()]);const fence=JSON.parse(fs.readFileSync(path.join(root,'knowledge-v1','catalog.json')));
   assert.throws(()=>validateKnowledgeCatalog(fence),{code:'INVALID_KNOWLEDGE_FILE'});

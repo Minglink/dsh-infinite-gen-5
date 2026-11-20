@@ -17,50 +17,362 @@ import { evidenceDependencies } from './evidence_dependencies.js';
 import { vmContextEvidence, exactReportRef } from './evidence_adapters/vm_context.js';
 import { fixedPropertyEvidence } from './evidence_adapters/fixed_properties.js';
 import { verifyResearch, verificationOverlay, loadVerification, readVerificationReport, verificationRequestSchema, validateVerificationRequest } from './verification_registry.js';
+import { RootInvestigationStore, renderDeterministicRootBrief } from './investigation_root.js';
+import { assessRootInvestigation } from './investigation_assessment.js';
+import { planRootInvestigation } from './experiment_planner.js';
+
+export const rootWorkspaceActions = [
+  'root-create', 'root-get', 'root-list', 'root-update', 'root-control',
+  'root-brief', 'root-plan', 'root-resume',
+  'select', 'evaluate', 'assess', 'recover-receipts',
+  'delegate-brief', 'accept-child-finding',
+];
 
 export const workspaceSchema = {
-  description: 'Static investigation notes and evidence. research-get returns current scopeDigest and independent researchRevision. research-update requires both task/research revisions; link-vm-context accepts only committed report_ref UUID/SHA. link-verifier-evidence accepts committed fixed function/recorded-source reports; research-verify runs the registered bounded property verifier; research-link-verification recovers its saved result after CAS conflict. A narrow pass never accepts the whole contract. Before DSH delegation, read the task then use handoff with current expected_task_revision, question, acceptance and constraints. Child reads exact task evidence; parent reviews returned snapshot IDs. No agent spawning, permission grants or automatic completion.',
   type: 'object', properties: {
-    action: { type: 'string', enum: ['create', 'get', 'brief', 'list', 'update', 'evidence', 'handoff', 'claim', 'submit', 'review', 'plan', 'resume', 'research-get', 'research-update', 'research-dependencies', 'research-verify', 'research-link-verification', 'research-verification', ...caseIndexActions, ...methodActions, 'experiment-shadow', ...candidateActions, ...cffActions] },
+    action: { type: 'string', enum: ['create', 'get', 'brief', 'list', 'update', 'evidence', 'handoff', 'claim', 'submit', 'review', 'plan', 'resume', 'research-get', 'research-update', 'research-dependencies', 'research-verify', 'research-link-verification', 'research-verification', ...caseIndexActions, ...methodActions, 'experiment-shadow', ...candidateActions, ...cffActions, ...rootWorkspaceActions] },
+    root: { type: 'object', additionalProperties: true },
+    include_task: { type: 'boolean', description: 'Return full task snapshot' },
     source_ref: { type:'object',properties:{id:{type:'string'},sha256:{type:'string',pattern:'^[a-f0-9]{64}$'}},required:['id','sha256'],additionalProperties:false },
     verification_ref: { type:'object',properties:{id:{type:'string'},sha256:{type:'string',pattern:'^[a-f0-9]{64}$'}},required:['id','sha256'],additionalProperties:false },
     candidate_ref: { type:'object',properties:{id:{type:'string'},sha256:{type:'string',pattern:'^[a-f0-9]{64}$'}},required:['id','sha256'],additionalProperties:false },
-    root_node: { type:'integer',minimum:0,maximum:2047,description:'candidate-prepare: selected pure root in the complete committed preferred-address projection' },
+    root_node: { type:'integer',minimum:0,maximum:2047 },
     candidate_ast: bitvectorASTSchema,
     premise: bitvectorASTSchema,
-    mode: { type: 'string', enum: ['off','shadow'], description: 'experiment-shadow only; off returns the original plan, shadow adds independent suggestions; assist unavailable' },
-    method_id: { type: 'string', maxLength: 64, description: 'method-applicability: exact fixed method ID from method-registry; read only, never executes a template' },
-    query: { type: 'string', minLength: 1, maxLength: 256, description: 'case-search only; explicit current-task private index query' },
+    mode: { type: 'string', enum: ['off','shadow'] },
+    method_id: { type: 'string', maxLength: 64 },
+    query: { type: 'string', minLength: 1, maxLength: 256 },
     ref: { type: 'object', properties: { id: { type: 'string', maxLength: 64 }, sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' } }, required: ['id','sha256'], additionalProperties: false },
-    generation: { type: 'string', description: 'case-search/read: optional exact private generation' },
-    expected_generation: { type: 'string', description: 'case-index: exact current generation, or absent' },
-    expected_research_revision: { type: 'integer', minimum: 0, description: 'case-index: current research revision' },
+    generation: { type: 'string' },
+    expected_generation: { type: 'string' },
+    expected_research_revision: { type: 'integer', minimum: 0 },
     research: researchMutationSchema,
     verification: verificationRequestSchema,
     report_ref: { type: 'object', properties: { id: { type: 'string' }, sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' } }, required: ['id', 'sha256'], additionalProperties: false },
-    verification_id: { type: 'string', description: 'Committed verification report UUID already linked to this task' },
-    evidence_id: { type: 'string', description: 'research-dependencies: linked evidence UUID in this task' },
-    max_bytes: { type: 'integer', minimum: 4096, maximum: 32768, description: 'brief/plan/resume only: UTF-8 JSON budget, default 12288' },
-    cursor: { type: 'string', description: 'brief or case-read continuation; bound to exact scope and revisions' },
-    handoff_id: { type: 'string', description: 'Child claim/submit, parent post-return review: tracked handoffId. Review without it is integrity precheck only, never delegation acceptance.' },
-    question: { type: 'string', maxLength: 2048, description: 'handoff: bounded delegated question; caller statement' },
-    acceptance: { type: 'string', maxLength: 2048, description: 'handoff: explicit acceptance criteria; text only, never executed' },
-    constraints: { type: 'string', maxLength: 2048, description: 'handoff: responsibility and limits; advisory, not an access-control policy' },
-    snapshot_ids: { type: 'array', minItems: 1, maxItems: 8, uniqueItems: true, items: { type: 'string' }, description: 'review: task-bound system snapshots to revalidate; not a semantic completion verdict' },
-    id: { type: 'string', description: 'Task UUID returned by create or list' },
-    snapshot_id: { type: 'string', description: 'System snapshot UUID from this task; evidence action or research-update link-evidence' },
-    expected_task_revision: { type: 'number', description: 'Required for update: use the returned taskRevision, independent of the database revision' },
+    verification_id: { type: 'string' },
+    evidence_id: { type: 'string' },
+    max_bytes: { type: 'integer', minimum: 4096, maximum: 32768 },
+    cursor: { type: 'string' },
+    handoff_id: { type: 'string' },
+    question: { type: 'string', maxLength: 2048 },
+    acceptance: { type: 'string', maxLength: 2048 },
+    constraints: { type: 'string', maxLength: 2048 },
+    snapshot_ids: { type: 'array', minItems: 1, maxItems: 8, uniqueItems: true, items: { type: 'string' } },
+    id: { type: 'string' },
+    snapshot_id: { type: 'string' },
+    expected_task_revision: { type: 'number' },
     goal: { type: 'string', maxLength: 4096 },
-    hypothesis: { type: 'string', maxLength: 4096, description: 'Caller statement, not verified evidence; do not include secrets' },
+    hypothesis: { type: 'string', maxLength: 4096 },
     next_step: { type: 'string', maxLength: 4096 },
-    conclusion: { type: 'string', maxLength: 4096, description: 'Caller interpretation, not automatic verification' },
-    status: { type: 'string', enum: ['active', 'paused', 'completed'], description: 'Caller-declared work progress' },
+    conclusion: { type: 'string', maxLength: 4096 },
+    status: { type: 'string', enum: ['active', 'paused', 'completed'] },
   }, required: ['action'], additionalProperties: false,
 };
 
 const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
 function store(mgr, cfg) { return mgr.investigations ||= new InvestigationStore({ root: cfg.projectRoot }); }
+export function rootStore(mgr, cfg) { return mgr.rootInvestigations ||= new RootInvestigationStore({ projectRoot: cfg.projectRoot }); }
 function research(mgr, cfg) { return mgr.researchState ||= new ResearchState({ root: cfg.projectRoot }); }
+
+function summarizeDeliverables(deliverables) {
+  if (!Array.isArray(deliverables)) return [];
+  return deliverables.map(d => ({
+    id: d.id,
+    kind: d.kind,
+    requiredObservations: d.requiredObservations,
+    minDistinctInputs: d.minDistinctInputs,
+    holdoutRequired: d.holdoutRequired,
+    nonCooperativeRequired: d.nonCooperativeRequired,
+    candidateRevision: d.candidateRevision ?? 0,
+    hasCandidate: Boolean(d.candidateExplanation),
+    ruleSha256: d.candidateExplanation?.ruleSha256 ?? null,
+  }));
+}
+
+function summarizeComponents(components) {
+  if (!Array.isArray(components)) return [];
+  return components.map(c => ({
+    componentId: c.componentId,
+    role: c.role,
+    path: c.path,
+    sha256: c.sha256,
+    bytes: c.bytes,
+    format: c.format,
+    parentComponentId: c.parentComponentId ?? null,
+    ipcChannel: c.ipcChannel ?? null,
+    requiresParentOrIpc: Boolean(c.requiresParentOrIpc),
+  }));
+}
+
+export function summarizeRootTask(task) {
+  if (!task || typeof task !== 'object') return null;
+  const deliverables = summarizeDeliverables(task.deliverables);
+  const rawReceipts = Array.isArray(task.receipts) ? task.receipts : Object.values(task.receipts || {});
+  return {
+    rootId: task.rootId,
+    revision: task.revision,
+    planRevision: task.planRevision ?? null,
+    status: task.status ?? (task.terminalFinding ? 'terminal' : 'active'),
+    origin: task.origin ?? null,
+    deliverables,
+    counts: {
+      deliverables: deliverables.length,
+      components: Array.isArray(task.components) ? task.components.length : 0,
+      scenarios: Array.isArray(task.scenarios) ? task.scenarios.length : 0,
+      questions: Array.isArray(task.questions) ? task.questions.length : 0,
+      routes: Array.isArray(task.routes) ? task.routes.length : 0,
+      experiments: Array.isArray(task.experiments) ? task.experiments.length : 0,
+      receipts: rawReceipts.length,
+    },
+    recentSuccessReceiptIds: rawReceipts.filter(r => r.outcome === 'success').slice(-6).map(r => r.reportId || r.receiptId),
+    hasCandidate: Boolean(task.candidate || deliverables.some(d => d.hasCandidate)),
+    hasTerminalFinding: Boolean(task.terminalFinding),
+  };
+}
+
+function resolveRootSessionSubject(mgr, execution) {
+  if (mgr.coordination) {
+    try {
+      return mgr.coordination.resolveRootSubject(execution?.agent, {
+        allowLocalFallback: execution?.agent?.session === undefined,
+      }).rootId;
+    } catch {
+      return null;
+    }
+  }
+  return execution?.agent?.id || null;
+}
+
+function runRootWorkspaceAction(mgr, cfg, input, execution) {
+  const { action, id } = input;
+  const rStore = rootStore(mgr, cfg);
+  const rootSessionId = resolveRootSessionSubject(mgr, execution);
+  const hostGoal = mgr.autonomyHost?.currentGoalForAgent?.(execution?.agent) || execution?.hostGoal || null;
+  const payload = input.root || {};
+
+  if (action === 'root-create') {
+    fields(input, ['action', 'goal', 'root', 'include_task']);
+    if (input.include_task !== undefined && typeof input.include_task !== 'boolean') {
+      fail('INVALID_ARGUMENT', 'include_task must be a boolean');
+    }
+    const goalText = input.goal || payload.goal || hostGoal?.goal || '';
+    const originKind = payload.origin?.kind || (hostGoal ? 'host-goal' : (execution?.agent?.session ? 'direct-human' : 'manual'));
+    const created = rStore.create({
+      rootSessionId,
+      workspaceCwd: payload.workspaceCwd || execution?.agent?.session?.header?.cwd || null,
+      goal: goalText,
+      deliverables: payload.deliverables || [],
+      origin: {
+        kind: originKind,
+        hostGoalId: payload.origin?.hostGoalId || hostGoal?.goalId || null,
+        hostGoalRevision: payload.origin?.hostGoalRevision ?? hostGoal?.revision ?? null,
+        hostGoalObjective: payload.origin?.hostGoalObjective || hostGoal?.goal || null,
+      },
+    });
+    // Allow optional atomic initial setup of components, scenarios, questions, and routes in root-create
+    // to reduce management call round-trips while enforcing identical registration & provenance checks!
+    const initComps = [...(payload.component ? [payload.component] : []), ...(Array.isArray(payload.components) ? payload.components : [])];
+    for (const c of initComps) rStore.registerComponent(created.rootId, c);
+    const artifacts = mgr.analysis?.artifacts || null;
+    if (Array.isArray(payload.prepareInputs) && payload.prepareInputs.length > 0) {
+      rStore.prepareScenarioInputs(created.rootId, payload.prepareInputs, artifacts);
+    }
+    const initScens = [...(payload.scenario ? [payload.scenario] : []), ...(Array.isArray(payload.scenarios) ? payload.scenarios : [])];
+    for (const s of initScens) rStore.upsertScenario(created.rootId, s, artifacts);
+    const initQs = [...(payload.question ? [payload.question] : []), ...(Array.isArray(payload.questions) ? payload.questions : [])];
+    for (const q of initQs) rStore.upsertQuestion(created.rootId, q);
+    const initRts = [...(payload.route ? [payload.route] : []), ...(Array.isArray(payload.routes) ? payload.routes : [])];
+    for (const r of initRts) rStore.upsertRoute(created.rootId, r);
+    const fullTask = rStore.get(created.rootId);
+    return {
+      workspace: input.include_task === true
+        ? fullTask
+        : { ...summarizeRootTask(fullTask), created: true },
+    };
+  }
+  if (action === 'root-get') {
+    fields(input, ['action', 'id', 'include_task']);
+    if (typeof id !== 'string' || !id.trim()) {
+      fail('INVALID_ARGUMENT', 'workspace.id (root investigation UUID) is required: {"workspace":{"action":"root-get","id":"<rootId>"}}');
+    }
+    return { workspace: rStore.get(id) };
+  }
+  if (action === 'root-list') {
+    fields(input, ['action', 'root']);
+    return {
+      workspace: {
+        investigations: rStore.list({
+          rootSessionId: payload.sessionOnly ? rootSessionId : null,
+        }),
+      },
+    };
+  }
+  if (action === 'root-update') {
+    fields(input, ['action', 'id', 'root', 'expected_task_revision', 'include_task']);
+    if (input.include_task !== undefined && typeof input.include_task !== 'boolean') {
+      fail('INVALID_ARGUMENT', 'include_task must be a boolean');
+    }
+    if (!input.root || typeof input.root !== 'object') fail('INVALID_ARGUMENT', 'root-update requires a root payload object');
+    if (input.expected_task_revision !== undefined) {
+      if (!Number.isSafeInteger(input.expected_task_revision) || input.expected_task_revision < 1) {
+        fail('INVALID_ARGUMENT', 'expected_task_revision must be a positive integer matching current root revision');
+      }
+      const current = rStore.get(id);
+      if (current.revision !== input.expected_task_revision) {
+        fail('TASK_REVISION_MISMATCH', `expected_task_revision (${input.expected_task_revision}) does not match current root investigation revision (${current.revision})`);
+      }
+    }
+    const updated = { deliverables: [], components: [], preparedInputs: [], scenarios: [], questions: [], routes: [], candidate: null, terminalFinding: null };
+    const delivs = [...(payload.deliverable ? [payload.deliverable] : []), ...(Array.isArray(payload.deliverables) ? payload.deliverables : [])];
+    for (const d of delivs) updated.deliverables.push(rStore.upsertDeliverable(id, d));
+    const comps = [...(payload.component ? [payload.component] : []), ...(Array.isArray(payload.components) ? payload.components : [])];
+    for (const c of comps) updated.components.push(rStore.registerComponent(id, c));
+    const artifacts = mgr.analysis?.artifacts || null;
+    if (Array.isArray(payload.prepareInputs) && payload.prepareInputs.length > 0) {
+      updated.preparedInputs = rStore.prepareScenarioInputs(id, payload.prepareInputs, artifacts);
+    }
+    const scens = [...(payload.scenario ? [payload.scenario] : []), ...(Array.isArray(payload.scenarios) ? payload.scenarios : [])];
+    for (const s of scens) updated.scenarios.push(rStore.upsertScenario(id, s, artifacts));
+    const qs = [...(payload.question ? [payload.question] : []), ...(Array.isArray(payload.questions) ? payload.questions : [])];
+    for (const q of qs) updated.questions.push(rStore.upsertQuestion(id, q));
+    const rts = [...(payload.route ? [payload.route] : []), ...(Array.isArray(payload.routes) ? payload.routes : [])];
+    for (const r of rts) updated.routes.push(rStore.upsertRoute(id, r));
+    const effectiveCandidate = payload.candidate
+      || (Array.isArray(payload.candidates) && payload.candidates.length === 1 ? payload.candidates[0] : null)
+      || (Array.isArray(payload.testVectors) ? { testVectors: payload.testVectors } : null);
+    if (effectiveCandidate) updated.candidate = rStore.submitCandidateExplanation(id, effectiveCandidate, artifacts);
+    if (payload.terminalFinding !== undefined) {
+      updated.terminalFinding = rStore.submitTerminalFinding(id, payload.terminalFinding, artifacts);
+    }
+    if (payload.hostGoalBinding) rStore.bindHostGoal(id, payload.hostGoalBinding, hostGoal);
+    if (!delivs.length && !comps.length && !updated.preparedInputs.length && !scens.length && !qs.length && !rts.length && !effectiveCandidate && payload.terminalFinding === undefined && !payload.hostGoalBinding) {
+      fail('INVALID_ARGUMENT', 'root-update requires at least one of deliverable(s), component(s), prepareInputs, scenario(s), question(s), route(s), candidate, terminalFinding, or hostGoalBinding');
+    }
+    const latest = rStore.get(id);
+    const summary = summarizeRootTask(latest);
+    return {
+      workspace: {
+        rootId: id,
+        revision: latest.revision,
+        planRevision: latest.planRevision ?? null,
+        updated,
+        summary,
+        task: input.include_task === true
+          ? latest
+          : {
+              rootId: latest.rootId,
+              revision: latest.revision,
+              planRevision: latest.planRevision ?? null,
+              summaryOnly: true,
+              deliverables: summary.deliverables,
+              components: summarizeComponents(latest.components),
+            },
+      },
+    };
+  }
+  if (action === 'delegate-brief') {
+    fields(input, ['action', 'id', 'root']);
+    const parentAgentId = execution?.agent?.id || execution?.agent?.sessionId || 'local-parent';
+    if (execution?.agent?.session?.header?.parentSession) {
+      fail('DELEGATION_PARENT_REQUIRED', 'Only a root parent session can issue root delegation briefs');
+    }
+    return {
+      workspace: rStore.issueDelegationBrief(id, {
+        parentAgentId,
+        childRole: payload.childRole,
+        componentId: payload.componentId,
+        scenarioId: payload.scenarioId || null,
+        objective: payload.objective || '',
+      }),
+    };
+  }
+  if (action === 'accept-child-finding') {
+    fields(input, ['action', 'id', 'root']);
+    if (execution?.agent?.session?.header?.parentSession) {
+      fail('DELEGATION_PARENT_REQUIRED', 'Only the root parent session can accept child findings into the root investigation');
+    }
+    return {
+      workspace: rStore.acceptChildFinding(id, {
+        briefId: payload.briefId,
+        childReport: payload.childReport,
+        artifacts: mgr.analysis?.artifacts || null,
+      }),
+    };
+  }
+  if (action === 'root-control') {
+    fields(input, ['action', 'id', 'root']);
+    if (!mgr.coordination) fail('DELEGATION_UNAVAILABLE', 'Root control requires DelegationControl');
+    const controlAction = payload.controlAction;
+    const coordOptions = { allowLocalFallback: execution?.agent?.session === undefined };
+    if (controlAction === 'cancel') {
+      return { workspace: mgr.coordination.acceptCancel(execution?.agent, payload.reason || 'explicit-workspace-cancel', coordOptions) };
+    }
+    if (controlAction === 'resume') {
+      if (mgr.autonomyHost) {
+        if (!mgr.autonomyHost.hasDirectHumanTurnAuthority(execution?.agent)) {
+          fail('RESUME_REQUIRES_DIRECT_HUMAN', 'Explicit cancellation resume requires an authenticated direct-human turn on a root agent');
+        }
+      } else if (execution?.agent?.session?.header?.parentSession) {
+        fail('RESUME_REQUIRES_DIRECT_HUMAN', 'Subagents cannot clear root session cancellation');
+      }
+      return { workspace: mgr.coordination.resumeControlGeneration(execution?.agent, 'explicit-human-resume', coordOptions) };
+    }
+    fail('INVALID_ARGUMENT', 'root-control requires root.controlAction = "cancel" | "resume"');
+  }
+  if (action === 'select') {
+    fields(input, ['action', 'id', 'root']);
+    const expSpec = payload.experiment || payload;
+    const selected = rStore.selectExperiment(id, expSpec, mgr.analysis?.artifacts || null);
+    return { workspace: { ...selected, executionAuthorized: false } };
+  }
+  if (action === 'evaluate') {
+    fields(input, ['action', 'id', 'root']);
+    const evalSpec = payload.evaluation || payload;
+    return { workspace: rStore.evaluateExperiment(id, evalSpec) };
+  }
+  if (action === 'recover-receipts') {
+    fields(input, ['action', 'id']);
+    return { workspace: rStore.recoverPendingReceipts({ rootId: id, mgr, execution }) };
+  }
+  if (['assess', 'root-brief', 'root-plan', 'root-resume'].includes(action)) {
+    fields(input, ['action', 'id', 'max_bytes']);
+    const rootTask = id
+      ? rStore.get(id)
+      : (hostGoal?.goalId ? rStore.findForHostGoal(rootSessionId, hostGoal.goalId).task : rStore.latestForSession(rootSessionId));
+    if (!rootTask) fail('ROOT_INVESTIGATION_NOT_FOUND', 'Provide root investigation id or create one bound to the current goal/session first');
+    const assessment = assessRootInvestigation({ rootTask, mgr, execution, hostGoal });
+    if (action === 'assess') return { workspace: assessment };
+    const brief = renderDeterministicRootBrief(rootTask, assessment);
+    if (action === 'root-brief') {
+      return {
+        workspace: {
+          rootId: rootTask.rootId,
+          revision: rootTask.revision,
+          planRevision: rootTask.planRevision,
+          brief,
+          assessment,
+          executionAuthorized: false,
+        },
+      };
+    }
+    const capabilities = capabilityCatalog(mgr, cfg, { ownQueue: true });
+    const plan = planRootInvestigation({ rootTask, assessment, capabilities });
+    if (action === 'root-plan') return { workspace: plan };
+    return {
+      workspace: {
+        schema: 'ig5-root-resume-v1',
+        rootId: rootTask.rootId,
+        revision: rootTask.revision,
+        planRevision: rootTask.planRevision,
+        brief,
+        assessment,
+        plan,
+        executionAuthorized: false,
+      },
+    };
+  }
+  fail('INVALID_ARGUMENT', `Unsupported root workspace action: ${action}`);
+}
 function context(mgr, args) {
   if (typeof args.target !== 'string' || !args.target.trim()) fail('INVALID_ARGUMENT', 'workspace requires an explicit opened target');
   const session = mgr.get(args.target);
@@ -81,7 +393,15 @@ function fields(input, allowed) {
 /** Called under the selected session queue. This changes analysis notes only. */
 export function runWorkspace(mgr, cfg, args, execution) {
   if (args.toolset !== undefined || args.history !== undefined) fail('INVALID_ARGUMENT', 'Use workspace separately from toolset/history changes');
-  const input = args.workspace;
+  for (const stray of ['action', 'id', 'root', 'evaluate', 'evaluation', 'experiment']) {
+    if (args[stray] !== undefined) {
+      fail('INVALID_ARGUMENT', `Top-level "${stray}" is ignored on ig5_workspace; nest all workspace fields inside args.workspace: {"workspace":{"action":...,"id":...,"root":{...}}}`);
+    }
+  }
+  let input = args.workspace;
+  if (typeof input === 'string' && input.length <= 65536) {
+    try { input = JSON.parse(input); } catch { input = null; }
+  }
   if (!input || typeof input !== 'object' || Array.isArray(input)) fail('INVALID_ARGUMENT', 'workspace must be an object');
   const { action, id } = input;
   if (caseIndexActions.includes(action)) validateCaseIndexInput(input);
@@ -92,6 +412,7 @@ export function runWorkspace(mgr, cfg, args, execution) {
   if (['plan', 'resume'].includes(action)) fields(input, ['action', 'id', 'max_bytes']);
   if (action === 'research-update') validateResearchMutation(input.research);
   if (['research-verify', 'research-link-verification'].includes(action)) validateVerificationRequest(input.verification);
+  if (rootWorkspaceActions.includes(action)) return runRootWorkspaceAction(mgr, cfg, input, execution);
   const scope = context(mgr, args), notes = store(mgr, cfg);
   if (candidateActions.includes(action)||cffActions.includes(action)) {
     if (!execution?.agent?.id) fail('AGENT_SCOPE_REQUIRED','Candidate access requires the actual executing agent');

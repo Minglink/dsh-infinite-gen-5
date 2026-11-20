@@ -530,8 +530,15 @@ class Adapter:
                 "path": self.target["path"] if self.target else None}
             if info.get("found"):
                 module_base = integer(info["base"])
-                result.update(moduleBase=hex(module_base), module=info.get("name"), path=info.get("path"), modulePath=info.get("path"),
-                              moduleSize=info.get("size"), RVA=hex(va - module_base))
+                mod_path_str = info.get("path")
+                mod_sha256 = None
+                try:
+                    if mod_path_str and Path(mod_path_str).is_file() and Path(mod_path_str).stat().st_size <= 64 * 1024 * 1024:
+                        mod_sha256 = hashlib.sha256(Path(mod_path_str).read_bytes()).hexdigest()
+                except Exception:
+                    mod_sha256 = None
+                result.update(moduleBase=hex(module_base), module=info.get("name"), path=mod_path_str, modulePath=mod_path_str,
+                              moduleSha256=mod_sha256, moduleSize=info.get("size"), RVA=hex(va - module_base))
             else:
                 result.update(moduleBase=None, module=None)
         return result
@@ -975,12 +982,22 @@ class Adapter:
             mark = self.event_seq
             def quoted(value):
                 return str(value).replace('"', '\\"').replace("\r", "").replace("\n", "")
-            command = 'init "{}", "{}", "{}"'.format(quoted(self.target["path"]), quoted(p.get("args", "")), quoted(p.get("dir") or Path(self.target["path"]).parent))
-            accepted = self.call("start_target", self.target["path"], str(p.get("args", "")), str(p.get("dir") or Path(self.target["path"]).parent)) if isinstance(self.client, NativeClient) else self.call("cmd_sync", command)
+            launch_args = str(p.get("args", ""))
+            launch_dir = str(p.get("dir") or Path(self.target["path"]).parent)
+            command = 'init "{}", "{}", "{}"'.format(quoted(self.target["path"]), quoted(launch_args), quoted(launch_dir))
+            accepted = self.call("start_target", self.target["path"], launch_args, launch_dir) if isinstance(self.client, NativeClient) else self.call("cmd_sync", command)
             if not accepted:
                 self.expected_native_run_epoch = None
                 return {"ok": False, "op": op, "error": "debugger rejected target launch", **self.state()}
-            started_result = {"op": op, **self.wait_state(mark)}
+            started_result = {
+                "op": op,
+                "launchScenario": {
+                    "argv": list(p.get("argv") or []),
+                    "commandLine": launch_args,
+                    "cwd": launch_dir,
+                },
+                **self.wait_state(mark),
+            }
             if scylla_bundle is not None:
                 from scylla_hide import apply_profile
                 try:
@@ -1096,7 +1113,14 @@ class Adapter:
                 for module_base, module in grouped.items():
                     info = self.call("module_info", module_base)
                     if info.get("found"):
-                        module.update(name=info.get("name"), path=info.get("path"), size=info.get("size"), source="module-api+memory-map")
+                        mp = info.get("path")
+                        msha = None
+                        try:
+                            if mp and "windows\\system32" not in mp.lower() and Path(mp).is_file() and Path(mp).stat().st_size <= 16 * 1024 * 1024:
+                                msha = hashlib.sha256(Path(mp).read_bytes()).hexdigest()
+                        except Exception:
+                            msha = None
+                        module.update(name=info.get("name"), path=mp, sha256=msha, size=info.get("size"), source="module-api+memory-map")
             grouped[main] = {**grouped.get(main, {}), "base": hex(main), "moduleBase": hex(main), "name": Path(self.target["path"]).name,
                              "path": self.target["path"], "size": self.evaluate(f"mod.size({hex(main)})"), "isMain": True, "source": "mod.main+memory-map"}
             return {"ok": True, "modules": list(grouped.values()), "context": self.context(), **self.state()}

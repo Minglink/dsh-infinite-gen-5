@@ -43,6 +43,9 @@ import { failureBinding } from './source/failure_adapters.js';
 import { planningRequestKey } from './source/planning_identity.js';
 import { planningImplementationDigest } from './source/planning_runtime.js';
 import { CapabilityAcceptance, runtimeIdentity } from './source/capability_acceptance.js';
+import { runManagedToolExecution, parseAndStripResearch, RESEARCH_BINDING_SCHEMA } from './source/delegation_execution.js';
+import { installAutonomyHost } from './source/autonomy_host.js';
+import { RootInvestigationStore } from './source/investigation_root.js';
 
 
 // ── 无限五代（IG5）v1.0.0 ──────────────────────────────────────────────────
@@ -50,7 +53,7 @@ import { CapabilityAcceptance, runtimeIdentity } from './source/capability_accep
 // 零提示词注入；指导载体 = 工具描述 + 会话流卡片。
 
 const PLUGIN_ID = 'dsh-infinite-gen-5';
-const PLUGIN_VERSION = '1.3.0';
+const PLUGIN_VERSION = '1.4.0';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WORKER = path.join(HERE, 'worker', 'ig5_worker.py');
 
@@ -273,6 +276,28 @@ function requireString(args, field) {
   return v.trim();
 }
 
+function formatWindowsCommandLineArgs(argv) {
+  return argv.map((arg) => {
+    if (arg === '') return '""';
+    if (!/[ \t"]/.test(arg)) return arg;
+    let out = '"';
+    let backslashes = 0;
+    for (const ch of arg) {
+      if (ch === '\\') {
+        backslashes += 1;
+      } else if (ch === '"') {
+        out += '\\'.repeat(backslashes * 2 + 1) + '"';
+        backslashes = 0;
+      } else {
+        out += '\\'.repeat(backslashes) + ch;
+        backslashes = 0;
+      }
+    }
+    out += '\\'.repeat(backslashes * 2) + '"';
+    return out;
+  }).join(' ');
+}
+
 function defineIg5Tools(ctx, mgr, cfg) {
   const spill = (session, ea, code) => {
     const dir = path.join(cfg.artifactDir, 'decompile', session.artifactId, session.engine);
@@ -286,8 +311,8 @@ function defineIg5Tools(ctx, mgr, cfg) {
     {
       name: 'ig5_profile',
       description:
-        'Return IG5 engines, projects, active tools and skills, plus the calling agent\'s host Goal availability/state. Optionally switch core (8 tools) or full (43) for the calling agent. guest_debug inspects a configured VMCI guest profile and returns its bindingSha256 before an approved debugger call; reads files only. history stats/archive/restore retain report IDs and refs. Address conversion, capability dimensions, local knowledge/memory and the shared collaboration budget are separate single-operation calls. For sustained reverse engineering use ig5-reverse-agent and native Goal tools. Investigation task notes and system evidence moved to ig5_workspace; recovery/failure planning moved to ig5_recovery.',
-      parameters: { type: 'object', properties: { target: { type: 'string', description: 'Explicit opened target, used by address conversion' }, guest_debug: { type: 'string', description: 'Inspect a configured VMCI guest profile and obtain its bindingSha256 before an approved debugger call; reads files only' }, toolset: { type: 'string', enum: ['core', 'full'] }, history: { type: 'object', properties: { action: { type: 'string', enum: ['stats', 'archive', 'restore'] }, ids: { type: 'array', minItems: 1, maxItems: 1000, items: { type: 'string' } } }, required: ['action'], additionalProperties: false } }, additionalProperties: false },
+        'IG5 status/toolset(core|full) or standalone op: guest_debug, history, address, capabilities, memory, knowledge, collaboration.',
+      parameters: { type: 'object', properties: { target: { type: 'string' }, guest_debug: { type: 'string' }, toolset: { type: 'string', enum: ['core', 'full'] }, history: { type: 'object', properties: { action: { type: 'string', enum: ['stats', 'archive', 'restore'] }, ids: { type: 'array', minItems: 1, maxItems: 1000, items: { type: 'string' } } }, required: ['action'], additionalProperties: false } }, additionalProperties: false },
       output: { schema: { type: 'object', additionalProperties: true }, render: textRender },
       async execute(args = {}, execution) {
         if (args.knowledge !== undefined) {
@@ -327,7 +352,7 @@ function defineIg5Tools(ctx, mgr, cfg) {
           engines: mgr.engines?.() || [],
           projects: mgr.projects?.listProjects?.() || [],
           ...(mgr.workflow?.snapshot(execution) || { toolset: cfg.toolset || 'core' }),
-          autonomy: autonomyStatus(ctx, execution),
+          autonomy: autonomyStatus(ctx, execution, mgr),
           ...(args.history ? { history: await mgr.analysis.history(args.history) } : {}),
           engineConfigured: cfg.defaultEngine === 'reverse' ? cfg.reverseAvailable : !!cfg[cfg.defaultEngine]?.available,
           pythonConfigured: cfg.defaultEngine === 'reverse' ? !!cfg.pythonExe : !!cfg[cfg.defaultEngine]?.pythonExe,
@@ -355,25 +380,22 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_workspace',
-      description:
-        'Static investigation notes and system evidence for an explicitly opened target: create/get/brief/list/update, evidence snapshots, handoff/claim/submit/review, plan/resume, research scope/revisions/dependencies/verification, private case index/search/read, fixed method registry/applicability, experiment-shadow proposals, bounded bit-vector candidate checks and CFF state/overlay reads. Updates require expected_task_revision; research-update requires both task and research revisions. A narrow pass never accepts the whole contract. Child reads exact task evidence; the parent reviews returned snapshot IDs. No agent spawning, permission grants or automatic completion. Reports are saved as immutable evidence.',
-      parameters: { type: 'object', properties: { workspace: workspaceSchema, target: { type: 'string', description: 'Explicit opened static target; required by every workspace action' } }, required: ['workspace'], additionalProperties: false },
+      description: 'Investigation workspace: notes, evidence, research CAS, handoffs, and root lifecycle (root-*/select/evaluate/assess).',
+      parameters: { type: 'object', properties: { workspace: workspaceSchema, target: { type: 'string' } }, required: ['workspace'], additionalProperties: false },
       output: { schema: { type: 'object', additionalProperties: true }, render: textRender },
       async execute(args = {}, execution) { return runWorkspace(mgr, cfg, args, execution); },
     },
     {
       name: 'ig5_recovery',
-      description:
-        'Bounded failure/dependency planning and recorded-observation recovery. case_ref reads a bounded recovery case. observations imports committed debug-trace reports into ordered source-bound pages. roles samples recorded addressing/load/control observations using an owned disassembly-only job. flow revalidates a committed role report plus recordings and checks structural load/index/target dependencies. instances captures explicit SHA-bound local small-VM model files; instance_check checks finite input/initial-result pairs in the original bounded data worker. role_compare/role_validate, declare_contract/program/function_check check owned executable models over finite contract domains. No native execution, invented intermediate state, VM/business proof, whole-function proof or ARM64 instance inference. All modes save immutable reports and reject unrelated options.',
+      description: 'Static VM recovery planning and recorded-trace analysis (case_ref/observations/roles/flow/recurrences/handlers/context/instances).',
       parameters: { type: 'object', properties: { recovery: recoveryProfileSchema }, required: ['recovery'], additionalProperties: false },
       output: { schema: { type: 'object', additionalProperties: true }, render: textRender },
       async execute(args = {}) { return runRecoveryProfile(mgr, args, cfg); },
     },
     {
       name: 'ig5_doctor',
-      description:
-        'Self-check the selected IG5 engine/provider. Default Reverse and Ghidra use the bundled Ghidra runtime; only explicitly selected commercial Reverse requires a licensed local installation. x64dbg reads file layout and retained launch-policy blocks without launching its debugger. not-probed is unknown; known blocks deny native launch before process creation. File presence is not startup verification; no OS policy changes.',
-      parameters: { type: 'object', properties: { operation: { type: 'string', enum: ['engine', 'session'], description: 'Default engine may launch a probe. session must be used alone: local executing-session metadata, no RPC or budget changes; reachable when ancestry is unavailable.' } }, additionalProperties: false },
+      description: 'Check IG5 engine/provider readiness or session metadata (operation=session).',
+      parameters: { type: 'object', properties: { operation: { type: 'string', enum: ['engine', 'session'] } }, additionalProperties: false },
       output: { schema: { type: 'object', additionalProperties: true }, render: textRender },
       async execute(args = {}, execution) {
         if (args.operation === 'session') return mgr.coordination.diagnose(execution?.agent, args);
@@ -395,23 +417,16 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_open',
-      description:
-        'Open a binary in the selected static engine and run auto-analysis. Returns project/artifact identity, engine, database revision, architecture, segments, function count and entries. One worker per target and engine. Analysis defaults to a native background job; pass background:false for inline results. A runtime pack is required for the selected engine.',
+      description: 'Open binary in static engine (default background=true; background=false inline).',
       parameters: {
         type: 'object',
         properties: {
-          path: { type: 'string', description: 'Absolute path of the target binary' },
-          auto_analysis: { type: 'boolean', description: 'Run automatic analysis using the selected profile (default true)' },
-          analysis_timeout: { type: 'number', description: 'Ghidra analysis budget in seconds, 1..600; returns explicitly partial evidence if exhausted' },
-          analysis_profile: { type: 'string', enum: ['interactive', 'full'], description: 'Ghidra: interactive (default) skips batch Decompiler Parameter ID; full enables that batch analyzer. Function decompilation is available in both.' },
-          background: {
-            type: 'boolean',
-            description: 'Run the analysis as a background job (default true). false = block this call until analysis finishes.',
-          },
-          fresh: {
-            type: 'boolean',
-            description: 'Ignore and back up an adjacent existing .i64/.idb so the database is re-analyzed from scratch (default false = reuse)',
-          },
+          path: { type: 'string' },
+          auto_analysis: { type: 'boolean' },
+          analysis_timeout: { type: 'number' },
+          analysis_profile: { type: 'string', enum: ['interactive', 'full'] },
+          background: { type: 'boolean' },
+          fresh: { type: 'boolean' },
         },
         required: ['path'],
       },
@@ -497,7 +512,7 @@ function defineIg5Tools(ctx, mgr, cfg) {
     {
       name: 'ig5_status',
       description:
-        'List open IG5 workers and pending remoteExecutions. Separately remoteCleanupEvidence revalidates at most eight stored terminal receipts against original bindings and byte hashes; missing/corrupt evidence stays unknown. An empty pending list is not proof of cleanup. Stored receipt validation is not a new HMAC exchange or authority for newer processes.',
+        'List open IG5 sessions, pending remoteExecutions, and stored remoteCleanupEvidence.',
       parameters: { type: 'object', properties: {}, additionalProperties: false },
       output: { schema: { type: 'object', additionalProperties: true }, render: textRender },
       execute() {
@@ -507,16 +522,15 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_funcs',
-      description:
-        'List functions of an open target, paged: address (EA), name, size. Use filter for a name substring. EA is the stable handle for every other ig5 tool.',
+      description: 'List functions of an open target (EA, name, size), paged.',
       parameters: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target path previously opened with ig5_open' },
-          offset: { type: 'number', description: 'Skip first N functions (cursor paging)' },
+          target: { type: 'string' },
+          offset: { type: 'number' },
           limit: { type: 'number', description: 'Max rows (default 30, max 200)' },
-          filter: { type: 'string', description: 'Case-insensitive name substring filter' },
-          user_only: { type: 'boolean', description: 'Exclude functions classified as library-related by the active provider. The bundled core excludes external/thunk functions only; remaining functions are not proof of user-authored logic.' },
+          filter: { type: 'string' },
+          user_only: { type: 'boolean' },
         },
         required: ['target'],
       },
@@ -530,17 +544,28 @@ function defineIg5Tools(ctx, mgr, cfg) {
           filter: typeof args?.filter === 'string' ? args.filter : '',
           user_only: args?.user_only === true,
         });
-        return { target: session.target, ...result };
+        const out = { target: session.target, ...result };
+        if (session._clrMetadata === undefined) {
+          session._clrMetadata = null;
+          try {
+            if (session.target && fs.existsSync(session.target)) {
+              const st = fs.statSync(session.target);
+              if (st.isFile() && st.size > 64 && st.size <= 16 * 1024 * 1024 && fs.readFileSync(session.target).includes(Buffer.from('BSJB'))) {
+                session._clrMetadata = (await mgr.rpc(session, 'scan', { max_bytes: 524288, max_matches: 4, max_strings: 4, max_imports: 4 }))?.clrMetadata || null;
+              }
+            }
+          } catch { session._clrMetadata = null; }
+        }
+        return session._clrMetadata ? { ...out, clrMetadata: session._clrMetadata } : out;
       },
     },
     {
       name: 'ig5_strings',
-      description:
-        'List strings of an open target with addresses, paged. First hop for locating license checks, messages, URLs, and crypto constants.',
+      description: 'List strings with addresses, paged.',
       parameters: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target path previously opened with ig5_open' },
+          target: { type: 'string' },
           offset: { type: 'number' },
           limit: { type: 'number', description: 'Max rows (default 30, max 200)' },
         },
@@ -554,31 +579,42 @@ function defineIg5Tools(ctx, mgr, cfg) {
           offset: Number(args?.offset ?? 0),
           limit: Number(args?.limit ?? 30),
         });
-        return { target: session.target, ...result };
+        const out = { target: session.target, ...result };
+        if (session._clrMetadata === undefined) {
+          session._clrMetadata = null;
+          try {
+            if (session.target && fs.existsSync(session.target)) {
+              const st = fs.statSync(session.target);
+              if (st.isFile() && st.size > 64 && st.size <= 16 * 1024 * 1024 && fs.readFileSync(session.target).includes(Buffer.from('BSJB'))) {
+                session._clrMetadata = (await mgr.rpc(session, 'scan', { max_bytes: 524288, max_matches: 4, max_strings: 4, max_imports: 4 }))?.clrMetadata || null;
+              }
+            }
+          } catch { session._clrMetadata = null; }
+        }
+        return session._clrMetadata ? { ...out, clrMetadata: session._clrMetadata } : out;
       },
     },
     {
       name: 'ig5_decompile',
-      description:
-        'Decompile one function by EA or exact name. style=dossier aggregates pseudocode, CFG, callers, callees and stack under one database revision, with explicit section status, response limits and provenance. Optional task_id records a system observation in an existing investigation task. style=llm returns provider-specific supporting metadata when available. Plain results over ~12KB spill to an artifact file with a preview. Read-only; does not execute the sample or verify hypotheses.',
+      description: 'Read-only decompilation by EA/name (plain, style=dossier, operation=read paged dossier, or operation=batch).',
       parameters: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target path previously opened with ig5_open' },
-          ea: { type: 'string', description: 'Function address, hex string like 0x140001070' },
-          name: { type: 'string', description: 'Exact function name (used when ea is absent)' },
-          style: { type: 'string', enum: ['', 'llm', 'dossier'], description: 'Omit for plain pseudocode; llm metadata depends on the provider; dossier aggregates real function context' },
-          operation: { type: 'string', enum: ['collect', 'read', 'batch'], description: 'Default collect. read retrieves a committed section. batch creates/runs/status/cancels a durable explicit function list, up to 8 sequential items per run with normal per-item charging.' },
+          target: { type: 'string' },
+          ea: { type: 'string' },
+          name: { type: 'string' },
+          style: { type: 'string', enum: ['', 'llm', 'dossier'] },
+          operation: { type: 'string', enum: ['collect', 'read', 'batch'] },
           batch: { type: 'object', properties: { action: { type: 'string', enum: ['create','status','run','cancel'] }, id: { type: 'string' }, functions: { type: 'array', minItems: 1, maxItems: 72, items: { type: 'string' } }, max_items: { type: 'integer', minimum: 1, maximum: 8 } }, required: ['action'], additionalProperties: false },
           result_ref: { type: 'object', properties: { id: { type: 'string' }, sha256: { type: 'string' }, expiresAt: { type: 'string' } }, required: ['id', 'sha256'], additionalProperties: false },
           section: { type: 'string', enum: ['decompile', 'cfg', 'callers', 'callees', 'stack'] },
-          format: { type: 'string', enum: ['text', 'records', 'json-text'], description: 'Default code text for decompile, stable records for other sections. json-text retrieves all saved section fields including oversized records.' },
-          cursor: { type: 'string', description: 'Authenticated continuation returned by a previous page of this result/section/format.' },
-          page_max_bytes: { type: 'integer', minimum: 4000, maximum: 64000, description: 'Whole serialized page UTF-8 bytes including provenance and cursor; default 8000.' },
-          dossier_max_bytes: { type: 'number', description: 'Dossier body UTF-8 response budget, 4000..64000 bytes, default 16000; not a total backend computation budget' },
-          dossier_max_rows: { type: 'number', description: 'Dossier per-array row cap, 1..128, default 32' },
-          refresh: { type: 'boolean', description: 'Dossier only: bypass response cache for this normally charged collection; does not force whole-program reanalysis.' },
-          task_id: { type: 'string', description: 'Existing workspace task UUID; requires style=dossier and records only system-produced observations' },
+          format: { type: 'string', enum: ['text', 'records', 'json-text'] },
+          cursor: { type: 'string' },
+          page_max_bytes: { type: 'integer', minimum: 4000, maximum: 64000 },
+          dossier_max_bytes: { type: 'number' },
+          dossier_max_rows: { type: 'number' },
+          refresh: { type: 'boolean' },
+          task_id: { type: 'string' },
         },
         required: ['target'],
       },
@@ -639,11 +675,10 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_close',
-      description:
-        'Close one open target and recycle its worker process. The analysis database stays on disk next to the target; reopening with ig5_open reuses it.',
+      description: 'Close an open target and stop its worker; analysis DB remains on disk.',
       parameters: {
         type: 'object',
-        properties: { target: { type: 'string', description: 'Target path to close' } },
+        properties: { target: { type: 'string' } },
         required: ['target'],
       },
       output: { schema: { type: 'object', additionalProperties: true }, render: textRender },
@@ -655,17 +690,16 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_xrefs',
-      description:
-        'Cross-references of an open target: references to an address/function, from it, or to strings matching a substring (str). Rows carry the other side EA and its containing function. Read-only.',
+      description: 'Read-only cross-references to/from EA, function name, or string substring (str).',
       parameters: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target path previously opened with ig5_open' },
-          ea: { type: 'string', description: 'Hex address, e.g. 0x140001070' },
-          name: { type: 'string', description: 'Exact function name (alternative to ea)' },
-          str: { type: 'string', description: 'String substring — lists xrefs to every matching string literal' },
-          direction: { type: 'string', description: '"to" (default) or "from"' },
-          limit: { type: 'number', description: 'Max rows (default 30, max 200)' },
+          target: { type: 'string' },
+          ea: { type: 'string' },
+          name: { type: 'string' },
+          str: { type: 'string', description: 'String substring' },
+          direction: { type: 'string', description: 'to|from' },
+          limit: { type: 'number' },
         },
         required: ['target'],
       },
@@ -683,15 +717,14 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_rename',
-      description:
-        'Rename a function or label. WRITE OPERATION: gated behind one-time human approval and recorded in approvals.jsonl. Provide ea or name plus new_name.',
+      description: 'Rename function/label by ea or name. WRITE OPERATION (approval-gated).',
       parameters: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target path previously opened with ig5_open' },
-          ea: { type: 'string', description: 'Hex address' },
-          name: { type: 'string', description: 'Current function name (alternative to ea)' },
-          new_name: { type: 'string', description: 'New name' },
+          target: { type: 'string' },
+          ea: { type: 'string' },
+          name: { type: 'string' },
+          new_name: { type: 'string' },
         },
         required: ['target', 'new_name'],
       },
@@ -708,15 +741,14 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_patch_bytes',
-      description:
-        'Patch raw bytes at an address, e.g. hex "74 05" or "74E8". WRITE OPERATION: gated behind one-time human approval; the result carries before/after hex for the diff and everything is recorded in approvals.jsonl.',
+      description: 'Patch hex bytes at ea (optional expected pre-check). WRITE OPERATION (approval-gated).',
       parameters: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target path previously opened with ig5_open' },
-          ea: { type: 'string', description: 'Hex address to patch' },
-          hex: { type: 'string', description: 'Byte payload as hex, spaces optional' },
-          expected: { type: 'string', description: 'Expected original hex bytes; mismatch rejects before mutation' },
+          target: { type: 'string' },
+          ea: { type: 'string' },
+          hex: { type: 'string' },
+          expected: { type: 'string', description: 'Expected original hex' },
         },
         required: ['target', 'ea', 'hex'],
       },
@@ -730,16 +762,15 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_comment',
-      description:
-        'Set a disassembly comment at an address. WRITE OPERATION: gated behind one-time human approval and recorded.',
+      description: 'Set disassembly comment at ea/name. WRITE OPERATION (approval-gated).',
       parameters: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target path previously opened with ig5_open' },
-          ea: { type: 'string', description: 'Hex address' },
-          name: { type: 'string', description: 'Function name (alternative to ea)' },
-          text: { type: 'string', description: 'Comment text' },
-          repeatable: { type: 'boolean', description: 'Repeatable comment (default false)' },
+          target: { type: 'string' },
+          ea: { type: 'string' },
+          name: { type: 'string' },
+          text: { type: 'string' },
+          repeatable: { type: 'boolean' },
         },
         required: ['target', 'text'],
       },
@@ -757,16 +788,15 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_calls',
-      description:
-        'Call graph of a function: callees (who it calls, with reference counts) or callers (who calls it). Read-only; pairs well with ig5_decompile style=llm.',
+      description: 'Read-only function call graph (callees or callers).',
       parameters: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target path previously opened with ig5_open' },
-          ea: { type: 'string', description: 'Hex address' },
-          name: { type: 'string', description: 'Function name (alternative to ea)' },
-          direction: { type: 'string', description: '"callees" (default) or "callers"' },
-          limit: { type: 'number', description: 'Max rows (default 30, max 200)' },
+          target: { type: 'string' },
+          ea: { type: 'string' },
+          name: { type: 'string' },
+          direction: { type: 'string', description: 'callees|callers' },
+          limit: { type: 'number' },
         },
         required: ['target'],
       },
@@ -783,19 +813,15 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_analyze',
-      description:
-        'Explicit static analysis-engine control: create_function, delete_function, undefine, mark_code, reanalyze. Range analysis does not certify completion of the whole program. WRITE OPERATION: approval-gated and recorded.',
+      description: 'Static analysis control (create_function|delete_function|undefine|mark_code|reanalyze). WRITE OPERATION (approval-gated).',
       parameters: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target path previously opened with ig5_open' },
-          action: {
-            type: 'string',
-            description: 'One of: create_function, delete_function, undefine, mark_code, reanalyze',
-          },
-          ea: { type: 'string', description: 'Hex address' },
-          end: { type: 'string', description: 'Hex end address (create_function / mark_code ranges)' },
-          size: { type: 'number', description: 'Byte count (undefine default 16; range fallback 4096)' },
+          target: { type: 'string' },
+          action: { type: 'string' },
+          ea: { type: 'string' },
+          end: { type: 'string' },
+          size: { type: 'number' },
         },
         required: ['target', 'action'],
       },
@@ -816,16 +842,15 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_set_type',
-      description:
-        'Apply a type to an address/function: either a local-types name (typename) or a C declaration (decl, e.g. "int check_serial(int a, int b)"). WRITE OPERATION: approval-gated; uses parse_decl + apply_tinfo.',
+      description: 'Apply local typename or C decl to ea/name. WRITE OPERATION (approval-gated).',
       parameters: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target path previously opened with ig5_open' },
-          ea: { type: 'string', description: 'Hex address' },
-          name: { type: 'string', description: 'Function name (alternative to ea)' },
-          decl: { type: 'string', description: 'C declaration snippet' },
-          typename: { type: 'string', description: 'Existing local-type name' },
+          target: { type: 'string' },
+          ea: { type: 'string' },
+          name: { type: 'string' },
+          decl: { type: 'string' },
+          typename: { type: 'string' },
         },
         required: ['target'],
       },
@@ -843,15 +868,14 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_bytes',
-      description:
-        'Read raw bytes currently in the analysis database at an address (static view). Returns hex.',
+      description: 'Read raw hex bytes from static analysis DB at ea/name.',
       parameters: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target path previously opened with ig5_open' },
-          ea: { type: 'string', description: 'Hex address' },
-          name: { type: 'string', description: 'Function name (alternative to ea)' },
-          size: { type: 'number', description: 'Byte count (default 64, max 4096)' },
+          target: { type: 'string' },
+          ea: { type: 'string' },
+          name: { type: 'string' },
+          size: { type: 'number', description: 'Bytes (default 64, max 4096)' },
         },
         required: ['target'],
       },
@@ -867,16 +891,15 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_search',
-      description:
-        'Byte-pattern search across the analysis database with ?? wildcards, e.g. "48 8B ?? 90" or "637C777B" for the AES sbox. Returns hit EAs. Read-only.',
+      description: 'Read-only hex byte-pattern search with ?? wildcards across DB.',
       parameters: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target path previously opened with ig5_open' },
-          pattern: { type: 'string', description: 'Hex pattern, space-separated, ?? = wildcard byte' },
-          start: { type: 'string', description: 'Hex start address (default first segment)' },
-          end: { type: 'string', description: 'Hex end address' },
-          limit: { type: 'number', description: 'Max hits (default 30, max 200)' },
+          target: { type: 'string' },
+          pattern: { type: 'string' },
+          start: { type: 'string' },
+          end: { type: 'string' },
+          limit: { type: 'number' },
         },
         required: ['target', 'pattern'],
       },
@@ -894,15 +917,14 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_listing',
-      description:
-        'Enumerate static structures: segments, imports, exports (actual export directory, may be partial/unsupported), or entries (analysis entrypoints, NOT exports; may include TLS callbacks and program entry). Preserve source, entryKind and diagnostics. Paged, read-only.',
+      description: 'Read-only paged static listing: segments, imports, exports (export dir), or entries (entrypoints/TLS).',
       parameters: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target path previously opened with ig5_open' },
-          kind: { type: 'string', enum: ['segments', 'imports', 'exports', 'entries'], description: 'exports is distinct from analysis entries/TLS callbacks' },
-          offset: { type: 'number', description: 'Skip first N rows' },
-          limit: { type: 'number', description: 'Max rows (default 100, max 500)' },
+          target: { type: 'string' },
+          kind: { type: 'string', enum: ['segments', 'imports', 'exports', 'entries'] },
+          offset: { type: 'number' },
+          limit: { type: 'number' },
         },
         required: ['target', 'kind'],
       },
@@ -916,13 +938,12 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_undo',
-      description:
-        'Roll back the most recent IG5 write operation via the in-worker operation journal (bytes/rename/comment/set_type/create_function/delete_function). action=list lists the journal without undoing. WRITE OPERATION: approval-gated.',
+      description: 'Roll back last IG5 DB write (action=list inspects journal). WRITE OPERATION (approval-gated).',
       parameters: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target path previously opened with ig5_open' },
-          action: { type: 'string', description: '"list" to inspect the journal (default: undo one step)' },
+          target: { type: 'string' },
+          action: { type: 'string', description: 'list or undo (default)' },
         },
         required: ['target'],
       },
@@ -934,21 +955,17 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_scan',
-      description:
-        'Bounded static sweep in Reverse/Ghidra: AES, MD5/shared initial-state, SHA-256/SHA-512 and CRC constants; categorized API imports; sampled segment entropy and string families. `behaviors` groups categorized APIs per function and names multi-API patterns found inside one function (for example another-process memory access, remote code injection, service/driver loading), including API names stored as strings; start there for a first overview, then drill down with ig5_decompile/ig5_xrefs. `packing` judges the file itself (entry point, empty or high-entropy executable sections, imports) as plain/suspected/protected/packed and says it did not unpack; check it first on unknown samples. `ruleMatches` applies the built-in signature table (packers/protectors, installers, managed runtimes) or a caller-supplied restricted YARA-style source (`rules`) to the same sampled bytes; each hit is a signature lead, not proof of packing, behavior or identity. Returns addresses, evidence, coverage and truncation. Hits, patterns and high entropy are clues, not proof of behavior, intent or an algorithm. Read-only.',
+      description: 'Read-only static sweep: crypto/CRC constants, API behaviors, entropy, packing/CLR metadata, and YARA-style ruleMatches.',
       parameters: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target path previously opened with ig5_open' },
-          max_bytes: { type: 'number', description: 'Global sampled bytes: default 8 MiB, maximum 64 MiB' },
-          max_segment_bytes: { type: 'number', description: 'Per-segment sampled bytes: default 1 MiB, maximum 16 MiB' },
+          target: { type: 'string' },
+          max_bytes: { type: 'number' },
+          max_segment_bytes: { type: 'number' },
           max_matches: { type: 'number' }, max_imports: { type: 'number' }, max_strings: { type: 'number' },
           max_segments: { type: 'number' }, max_api_matches: { type: 'number' }, max_string_chars: { type: 'number' },
-          max_rule_matches: { type: 'number', description: 'Recorded rule-match locations: default 256, maximum 4096' },
-          rules: {
-            type: 'string', maxLength: 65536,
-            description: 'Optional restricted YARA-style rule source that replaces the built-in signature table. Supports text and hex strings (?? / ?h / h? wildcards), description meta and conditions over $ids with all/any/N of them, not, and, or, parentheses. Jumps, regex, alternatives, fullword, counts and for-loops are rejected. Max 64 rules, 256 strings, 256 bytes per pattern.',
-          },
+          max_rule_matches: { type: 'number' },
+          rules: { type: 'string', maxLength: 65536, description: 'Restricted YARA-style rules (<=64)' },
         },
         required: ['target'],
       },
@@ -967,13 +984,12 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_run_idapython',
-      description:
-        'Execute approved Python in the selected analysis worker and capture bounded stdout. The bundled core exposes currentProgram, flat_api and a documented common legacy Reverse Python API subset; unavailable APIs fail explicitly. Database writes use one transaction with session Undo; external Python effects are not reversible. This is not a sandbox. Hanging scripts are stopped with their owned worker by the RPC timeout.',
+      description: 'APPROVAL REQUIRED. Run Python (currentProgram/flat_api or legacy Reverse API subset, <=64 KiB) inside the active worker; not a sandbox.',
       parameters: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target path previously opened with ig5_open' },
-          code: { type: 'string', description: 'Python source; bundled core: Ghidra FlatProgramAPI/currentProgram or documented legacy Reverse API subset, max 64 KiB' },
+          target: { type: 'string' },
+          code: { type: 'string' },
         },
         required: ['target', 'code'],
       },
@@ -986,48 +1002,49 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_dbg',
-      description:
-        'Debug lane using bundled x64dbg by default. Optional paired VMCI guest execution requires backend=x64dbg plus an explicitly inspected guest_profile and guest_binding_sha256 on every call; targets must match its pre-provisioned catalog. op=recover queries the original authenticated terminal cleanup receipt after disconnect, without executing a target: send only target/op/backend/guest_profile/guest_binding_sha256 and optional engine/control; omit timeout and expected_run_id/expected_stop_seq. No matching retained execution is not cleanup proof. Host/bridge exit alone cannot release guest custody. Optional win32/Bochs require the commercial Reverse provider. Approval-gated; start executes the debuggee. Runtime addresses must not be confused with static database addresses.',
+      description: 'APPROVAL REQUIRED. Bundled x64dbg debug lane (or VMCI guest with backend=x64dbg + guest_profile + guest_binding_sha256).',
       parameters: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target path previously opened with ig5_open' },
+          target: { type: 'string' },
           op: {
             type: 'string',
-            description: 'load | start | bpt | unbpt | regs | setreg | threads | callstack | modules | state | event | step | stepover | trace | apitrace | cont | suspend | readmem | writemem | stop | recover',
+            description: 'load|start|bpt|unbpt|regs|setreg|threads|callstack|modules|state|event|step|stepover|trace|apitrace|cont|suspend|readmem|writemem|stop|recover',
           },
-          kind: { type: 'string', enum: ['software', 'hardware'], default: 'software', description: 'Breakpoint kind for bpt/unbpt' },
-          access: { type: 'string', enum: ['execute', 'write', 'readwrite'], default: 'execute', description: 'Hardware breakpoint access' },
-          backend: { type: 'string', enum: ['auto', 'x64dbg', 'bochs', 'win32'], description: 'Explicit debugger selection; auto resumes the selected debugger, otherwise uses the configured default (bundled x64dbg). bochs/win32 require the commercial Reverse provider.' },
-          guest_profile: { type: 'string', description: 'Configured VMCI guest profile alias; requires explicit backend=x64dbg and its inspected binding digest on every guest call' },
-          guest_binding_sha256: { type: 'string', pattern: '^[a-f0-9]{64}$', description: 'Exact bindingSha256 returned by ig5_profile guest_debug; fixes guest/catalog/key-reference configuration' },
-          control: { type: 'string', enum: ['claim', 'takeover', 'release'], description: 'Explicit approval-gated debugger ownership change' },
-          expected_stop_seq: { type: 'number', description: 'Reject a plan made for a previous debugger pause' },
+          kind: { type: 'string', enum: ['software', 'hardware'], default: 'software' },
+          access: { type: 'string', enum: ['execute', 'write', 'readwrite'], default: 'execute' },
+          backend: { type: 'string', enum: ['auto', 'x64dbg', 'bochs', 'win32'] },
+          guest_profile: { type: 'string' },
+          guest_binding_sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+          control: { type: 'string', enum: ['claim', 'takeover', 'release'] },
+          expected_stop_seq: { type: 'number' },
           expected_run_id: { type: 'string' },
-          reg: { type: 'string', description: 'Register name for setreg' },
-          value: { type: 'string', description: 'Integer register value for setreg, decimal or hex' },
-          ea: { type: 'string', description: 'Hex address (bpt/unbpt/readmem/writemem)' },
-          rva: { type: 'string', description: 'Explicit main-module RVA for x64dbg; mapped against the current loaded module' },
-          address_space: { type: 'string', enum: ['runtime', 'database', 'rva'], description: 'Explicit address interpretation for x64dbg ea; default runtime' },
-          max_steps: { type: 'number', description: 'Bounded x64dbg single-step trace budget' },
-          api_names: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 64, description: 'op=apitrace only: optional imported API names (case-insensitive; module!name and #ordinal accepted). Omit to select imported APIs in the behavior taxonomy, breadth-first.' },
-          max_api_calls: { type: 'number', description: 'op=apitrace only: recorded API-entry hit budget, 1..1024 (default 128)' },
-          max_apis: { type: 'number', description: 'op=apitrace only: selected imported API budget, 1..256 (default 64)' },
-          record_trace: { type: 'boolean', description: 'op=trace only: record actual x64 registers, opcode bytes and memory reads to a hash-bound artifact, max_steps 1..512. Uses approved native single steps; optional explicit ABI widths below enable recoveryArgs.' },
-          record_image: { type: 'boolean', description: 'With record_trace, capture readable main-image pages at the same initial pause, max module 8 MiB. Saves holes and provenance; does not reconstruct imports or patch the original file.' },
-          record_events: { type: 'boolean', description: 'With record_trace, optionally capture bytes at decoded store locations before/after each owned native stop. Shares the original 1 MiB evidence/512 stop/40s budget; preserves unavailable bytes and pause mismatches. Not causal CPU write or VM phase proof. Guest requires an updated verified bundle.' },
-          until: { type: 'string', description: 'Optional trace stop address as an explicit main-module runtime VA, hex' },
-          interrupt_method: { type: 'string', enum: ['native-pause', 'break-process'], description: 'op=suspend only. break-process uses the standard Windows breakpoint interrupt on the already debugged process inside our cleanup job; can interrupt blocked system calls. May switch the current thread; refresh regs/threads afterward.' },
-          thread_id: { type: 'number', description: 'op=regs only: read a selected existing owned x64 debuggee thread while the debugger is paused. Returns selectedThreadRegs and readonly selectedThreadDebuggerVisibility; failed NT visibility queries remain null/unknown. Preserves the active debugger thread/cache.' },
-          anti_debug_profile: { type: 'string', enum: ['none', 'scyllahide-thread-context'], description: 'Explicit x64dbg op=start only. Installs the bundled GPL-3.0 ScyllaHide user-mode context hooks into the owned debuggee after startup pause. Modifies the target environment; records provenance. No drivers or OS security settings changes. Default none.' },
-          exception_disposition: { type: 'string', enum: ['preserve', 'handled'], description: 'Explicit backend=x64dbg op=cont at an observed exception pause only. handled resumes with DBG_CONTINUE and consumes that exception; preserve keeps the debugger default. Changes exception delivery, requires approval, and records the consumed exception.' },
+          reg: { type: 'string' },
+          value: { type: 'string' },
+          ea: { type: 'string' },
+          rva: { type: 'string' },
+          address_space: { type: 'string', enum: ['runtime', 'database', 'rva'] },
+          max_steps: { type: 'number' },
+          api_names: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 64 },
+          max_api_calls: { type: 'number' },
+          max_apis: { type: 'number' },
+          record_trace: { type: 'boolean' },
+          record_image: { type: 'boolean' },
+          record_events: { type: 'boolean' },
+          until: { type: 'string' },
+          interrupt_method: { type: 'string', enum: ['native-pause', 'break-process'] },
+          thread_id: { type: 'number' },
+          anti_debug_profile: { type: 'string', enum: ['none', 'scyllahide-thread-context'] },
+          exception_disposition: { type: 'string', enum: ['preserve', 'handled'] },
           trace_inputs: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'string', enum: ['dil', 'sil', 'di', 'si', 'edi', 'esi', 'rdi', 'rsi', 'cl', 'dl', 'cx', 'dx', 'ecx', 'edx', 'rcx', 'rdx'] } },
           trace_output: { type: 'string', enum: ['al', 'ax', 'eax', 'rax'] },
-          expected: { type: 'string', description: 'Optional original register or memory value checked before modification' },
-          size: { type: 'number', description: 'Memory byte count (default 64); hardware bpt size 1|2|4|8, execute requires 1' },
-          hex: { type: 'string', description: 'Byte payload (writemem)' },
-          path: { type: 'string', description: 'Debuggee path override (start)' },
-          timeout: { type: 'number', description: 'Event wait seconds (default 15; start/cont 30; recorded trace 45), max 60. Explicit backend=x64dbg op=cont allows max 120 with bounded RPC cleanup margin; capture/solver budgets remain unchanged.' },
+          expected: { type: 'string' },
+          size: { type: 'number' },
+          hex: { type: 'string' },
+          path: { type: 'string' },
+          args: { type: 'array', maxItems: 32, items: { type: 'string' } },
+          cwd: { type: 'string' },
+          timeout: { type: 'number' },
         },
         required: ['target', 'op'],
       },
@@ -1070,6 +1087,33 @@ function defineIg5Tools(ctx, mgr, cfg) {
         if (args.exception_disposition !== undefined && (!['preserve', 'handled'].includes(args.exception_disposition) || args.exception_disposition !== 'preserve' && (op !== 'cont' || args.backend !== 'x64dbg'))) throw new Error('exception_disposition requires an explicit typed x64dbg continuation');
         if (args.record_trace && args.max_steps !== undefined && (!Number.isSafeInteger(args.max_steps) || args.max_steps < 1 || args.max_steps > 512)) throw new Error('Recorded trace max_steps must be 1..512');
         if (args.trace_inputs && !['dil,sil', 'di,si', 'edi,esi', 'rdi,rsi', 'cl,dl', 'cx,dx', 'ecx,edx', 'rcx,rdx'].includes(args.trace_inputs.join(','))) throw new Error('Trace inputs must be an explicit equal-width RDI/RSI or RCX/RDX pair');
+        let launchCmdArgs;
+        let launchArgv;
+        let launchDir;
+        if (args.args !== undefined || args.cwd !== undefined) {
+          if (op !== 'start' || args.guest_profile !== undefined || (args.backend !== undefined && !['auto', 'x64dbg'].includes(args.backend))) {
+            throw Object.assign(new Error('args and cwd require local x64dbg op=start'), { code: 'INVALID_ARGUMENT' });
+          }
+          if (args.args !== undefined) {
+            if (!Array.isArray(args.args) || args.args.length > 32 || args.args.some(a => typeof a !== 'string' || a.length > 512 || /[\x00\r\n]/.test(a))) {
+              throw Object.assign(new Error('args must be an array of 0..32 single-line strings (<= 512 chars each)'), { code: 'INVALID_ARGUMENT' });
+            }
+            launchArgv = [...args.args];
+            launchCmdArgs = formatWindowsCommandLineArgs(launchArgv);
+          }
+          if (args.cwd !== undefined) {
+            if (typeof args.cwd !== 'string' || !args.cwd.trim() || args.cwd.includes('\0')) {
+              throw Object.assign(new Error('cwd must be a non-empty directory path'), { code: 'INVALID_ARGUMENT' });
+            }
+            const resolvedCwd = path.resolve(args.cwd.trim());
+            let st = null;
+            try { st = fs.lstatSync(resolvedCwd); } catch { st = null; }
+            if (!st || st.isSymbolicLink() || !st.isDirectory()) {
+              throw Object.assign(new Error('cwd must be an existing regular non-symlink directory'), { code: 'INVALID_ARGUMENT' });
+            }
+            launchDir = resolvedCwd;
+          }
+        }
         const timeout = debugTimeout(args, cfg);
         return mgr.rpc(mgr.get(target), 'dbg', {
           op,
@@ -1082,6 +1126,8 @@ function defineIg5Tools(ctx, mgr, cfg) {
           size: args?.size,
           hex: args?.hex || '',
           path: args?.path || '',
+          ...(launchArgv !== undefined ? { args: launchCmdArgs, argv: launchArgv } : {}),
+          ...(launchDir !== undefined ? { dir: launchDir } : {}),
           timeout: timeout.seconds,
           rva: args.rva, count: args.max_steps, addressSpace: args.address_space, expected: args.expected,
           api_names: args.api_names, max_api_calls: args.max_api_calls, max_apis: args.max_apis,
@@ -1096,11 +1142,10 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_export_diff',
-      description:
-        'Export a patched copy and changes report for audited byte regions, reading their current bytes from the open database so undone patches are excluded. Read-only to the analysis database; writes deliverable files.',
+      description: 'Export patched binary copy and changes report from current DB bytes.',
       parameters: {
         type: 'object',
-        properties: { target: { type: 'string', description: 'Target path previously opened with ig5_open' } },
+        properties: { target: { type: 'string' } },
         required: ['target'],
       },
       output: { schema: { type: 'object', additionalProperties: true }, render: textRender },
@@ -1110,22 +1155,17 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_struct',
-      description:
-        'Type system & Struct synthesizer (Local Types / Til). Define C struct declarations, inspect struct fields and offsets, list all user-defined types, or apply struct types to memory addresses. WRITE OPERATION (action=define/apply): approval-gated.',
+      description: 'Define, inspect, list, or apply local C structs (define/apply WRITE OPERATION, approval-gated).',
       parameters: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target binary path (omit for active session)' },
-          action: {
-            type: 'string',
-            enum: ['define', 'get', 'list', 'apply'],
-            description: "Action to perform: 'define' (compile C struct decl), 'get' (inspect struct fields), 'list' (list local types), 'apply' (apply struct to EA)",
-          },
-          decl: { type: 'string', description: "C language struct or typedef declaration (required for action='define'). E.g., 'struct Context { int id; char name[32]; void *buf; };'" },
-          name: { type: 'string', description: "Type/struct name (required for action='get' or 'apply')" },
-          ea: { type: 'string', description: "Target address (hex string, required for action='apply')" },
-          filter: { type: 'string', description: "Filter string for action='list'" },
-          limit: { type: 'number', description: "Max results for action='list' (default 100)" },
+          target: { type: 'string' },
+          action: { type: 'string', enum: ['define', 'get', 'list', 'apply'] },
+          decl: { type: 'string' },
+          name: { type: 'string' },
+          ea: { type: 'string' },
+          filter: { type: 'string' },
+          limit: { type: 'number' },
         },
         required: ['action'],
         additionalProperties: false,
@@ -1146,14 +1186,13 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_cfg',
-      description:
-        'Control Flow Graph (CFG) extraction. Generates a basic block topology map and standard Mermaid flowchart diagram (flowchart TD) for a function, revealing decision branches, loop cycles, and basic blocks. Read-only.',
+      description: 'Read-only function basic-block CFG and Mermaid flowchart.',
       parameters: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target binary path (omit for active session)' },
-          ea: { type: 'string', description: 'Function entry EA (e.g. 0x140001000)' },
-          name: { type: 'string', description: 'Function name (alternative to ea)' },
+          target: { type: 'string' },
+          ea: { type: 'string' },
+          name: { type: 'string' },
         },
         required: [],
         additionalProperties: false,
@@ -1167,14 +1206,13 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_slice',
-      description:
-        'Inspect decompiler variable metadata and optionally return pseudocode lines matching a variable name. Available metadata and lexical matching depend on the provider. This does not compute microcode slicing, complete def-use dependencies or taint analysis. Read-only.',
+      description: 'Read-only decompiler variable metadata and optional lexical line filter (not full taint/def-use slice).',
       parameters: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target binary path (omit for active session)' },
-          ea: { type: 'string', description: 'Function EA (e.g. 0x140001000)' },
-          var: { type: 'string', description: 'Optional variable name for provider-specific lexical pseudocode-line filtering; omit to inspect variable metadata.' },
+          target: { type: 'string' },
+          ea: { type: 'string' },
+          var: { type: 'string' },
         },
         required: ['ea'],
         additionalProperties: false,
@@ -1188,12 +1226,11 @@ function defineIg5Tools(ctx, mgr, cfg) {
     },
     {
       name: 'ig5_fingerprint',
-      description:
-        'Report compiler/ABI information and existing provider function classifications. The bundled core counts external/thunk functions only; this does not identify all static libraries or prove standard-library equivalence. Read-only.',
+      description: 'Read-only compiler/ABI info and provider function classifications.',
       parameters: {
         type: 'object',
         properties: {
-          target: { type: 'string', description: 'Target binary path (omit for active session)' },
+          target: { type: 'string' },
         },
         required: [],
         additionalProperties: false,
@@ -1222,18 +1259,36 @@ export function apply(ctx, config = {}) {
   diagAppend(cfg, `host: implementation=${IMPLEMENTATION_REVISION} module=${fileURLToPath(import.meta.url)}`);
   const mgr = new WorkerManager(cfg);
   // AnalysisArtifacts is installed by defineAnalysisTools later in registration.
-  let failureRecords, capabilityAcceptance;
+  let failureRecords, capabilityAcceptance, rootInvestigations;
   Object.defineProperties(mgr, {
     failures: { get: () => failureRecords ||= new FailureRecords({ root: cfg.projectRoot, artifacts: mgr.analysis.artifacts }) },
     capabilityAcceptance: { get: () => capabilityAcceptance ||= new CapabilityAcceptance({ root: cfg.projectRoot, artifacts: mgr.analysis.artifacts, cfg }) },
+    rootInvestigations: {
+      get: () => rootInvestigations ||= new RootInvestigationStore({ projectRoot: cfg.projectRoot }),
+      set: (value) => { rootInvestigations = value; },
+      configurable: true,
+    },
   });
   mgr.coordination = installDelegationControl(ctx, cfg);
   mgr.memory = installLcmBridge(ctx, cfg);
-  ctx.effect(() => () => mgr.memory.dispose());
+  const autonomyHost = installAutonomyHost(ctx, { cfg, getManager: () => mgr });
+  mgr.autonomyHost = autonomyHost;
+  ctx.effect(() => () => {
+    autonomyHost.dispose();
+    mgr.memory.dispose();
+  });
   installDiagRoute(ctx, cfg);
   installJobsRoute(ctx, mgr, cfg);
   installDataRoute(ctx, mgr, cfg);
-  installApprovalGate(ctx, cfg);
+  installApprovalGate(ctx, cfg, {
+    beforePreExecute: autonomyHost.beforePreExecute,
+    isAuthorizedOwnerCleanup: (exec) => {
+      const { cleanArgs } = parseAndStripResearch(exec?.arguments);
+      return mgr.coordination.hasActiveOwnerCleanup(exec?.agent, exec?.name, cleanArgs, {
+        allowLocalFallback: exec?.agent?.session === undefined,
+      });
+    },
+  });
 
   ctx.effect(() => {
     const definitions = defineIg5Tools(ctx, mgr, cfg).map((definition) => {
@@ -1242,95 +1297,104 @@ export function apply(ctx, config = {}) {
         definition.parameters.properties.address = { type: 'object', properties: {
           value: { type: 'string' }, space: { type: 'string', enum: ['ghidra_va','elf_vaddr','file_offset','module_offset','runtime_va'] },
           to_space: { type: 'string', enum: ['ghidra_va','elf_vaddr','file_offset','module_offset','runtime_va'] } },
-          required: ['value','space','to_space'], additionalProperties: false, description: 'Use with target separately. Exact ELF PT_LOAD + actual Ghidra source mapping; BSS/overlays/ambiguity reject. module_offset is relative to lowest PT_LOAD vaddr; runtime_va remains unavailable without trusted live load context.' };
-        definition.parameters.properties.capabilities = { type: 'boolean', const: true, description: 'Use separately: read current capability dimensions without probes or execution' };
-        definition.description += ' capabilities=true reads capability dimensions and scoped acceptance history without probes.';
+          required: ['value','space','to_space'], additionalProperties: false };
+        definition.parameters.properties.capabilities = { type: 'boolean', const: true };
         definition.parameters.properties.memory = memorySchema;
         definition.parameters.properties.knowledge = knowledgeSchema;
-        definition.description += ' knowledge={action:"status"|"search"|"methods"|"documents"|"read"} explicitly looks up local methods or imported original research texts. documents optionally accepts query; read uses the returned exact ref/cursor. Review notes and relatedReferences preserve caveats and links. Use separately, without target/engine. References are never current-target proof or execution permission.';
-        definition.description += ' memory={action:"restore"|"search"|"read"|"expand"|"checkpoint"|"status"} accesses the executing session\'s local LCM history after compaction; source refs carry exact hashes, summaries are unverified navigation. Use memory separately.';
       }
-      const isCapture = ['ig5_capture', 'ig5_capture_control'].includes(definition.name);
+      const isCapture = ['ig5_capture', 'ig5_capture_control', 'ig5_app_observe'].includes(definition.name);
       const isGlobal = isCapture || ['ig5_profile', 'ig5_workspace', 'ig5_recovery', 'ig5_status', 'ig5_crypto', 'ig5_protocol', 'ig5_package'].includes(definition.name);
       const isData = isCapture || ['ig5_crypto', 'ig5_protocol', 'ig5_package'].includes(definition.name);
       if (!isCapture) definition.parameters.properties.engine = { type: 'string', enum: definition.name === 'ig5_doctor'
-        ? ['reverse', 'ghidra', 'x64dbg'] : ['reverse', 'ghidra'],
-        description: isData ? 'Optional result association or static source backend; standalone byte/file/ref analysis does not require an engine.' : 'Explicit backend. Omit to use the configured primary static engine; results identify their source.' };
+        ? ['reverse', 'ghidra', 'x64dbg'] : ['reverse', 'ghidra'] };
       if (definition.name === 'ig5_profile') definition.parameters.properties.collaboration = {
         type: 'object', properties: { action: { type: 'string', enum: ['start', 'status'] },
-          max_calls: { type: 'integer', minimum: 1, maximum: 1000, description: 'start only: persistent shared cap for parent + all descendant IG5 dispatches; cannot be reset/enlarged' } },
-        required: ['action'], additionalProperties: false,
-        description: 'Use separately BEFORE work: start shared budget, or status (exempt control-plane query). Counts all IG5 calls incl. child profile/open/evidence/errors, not just parent calls. No token/non-IG5 limit.' };
+          max_calls: { type: 'integer', minimum: 1, maximum: 1000 } },
+        required: ['action'], additionalProperties: false };
       if (!isCapture && IG5_WRITE_TOOLS.has(definition.name) && definition.name !== 'ig5_sync') definition.parameters.properties.expected_revision = {
-        type: 'number', description: 'Reject this operation if the selected database revision has changed since planning' };
-      definition.execute = (args = {}, execution) => mgr.scope.run({ engine: args.engine || (definition.name === 'ig5_ir' && cfg.reverseProvider !== 'bundled' ? 'ghidra' : cfg.defaultEngine), agentId: execution?.agent?.id || execution?.agent?.sessionId, signal: execution?.signal }, async () => {
-        try {
-        if (execution?.signal?.aborted) throw new Error('IG5 operation cancelled');
-        if (definition.name === 'ig5_doctor' && args.operation === 'session')
-          return jsonToolOutput(mgr.coordination.diagnose(execution?.agent, args));
-        mgr.coordination.charge(execution?.agent, definition.name, args);
-        await mgr.memory.activate(execution?.agent);
-        if (args.engine) engineId(args.engine);
-        const selected = !args.target && !isGlobal && !['ig5_open', 'ig5_doctor', 'ig5_bindiff', 'ig5_sync'].includes(definition.name)
-          && !definition.parameters.required?.includes('target') ? mgr.selectedTarget() : args.target;
-        if (selected) args = { ...args, target: selected };
-        const standaloneKernel = definition.name === 'ig5_ir' && ['kernel', 'trace', 'lift', 'project'].includes(args.level);
-        const session = selected && !isData && !standaloneKernel ? mgr.get(selected) : null;
-        const selectedAttachment = session?.attachmentId;
-        const perform = async () => {
-        if (session?.state === 'opening') {
-          await mgr.launching.get(session.key);
-          if (session.state !== 'open' || mgr.get(session.target, session.engine) !== session) throw new Error('Target did not finish opening');
-        }
-        // A failed predecessor can recycle its worker while this operation is
-        // queued. execute() resolves target again; never let old planning and
-        // expected_revision checks transfer to a newly opened attachment.
-        if (session && (mgr.get(session.target, session.engine) !== session
-          || selectedAttachment !== undefined && session.attachmentId !== selectedAttachment)) {
-          throw Object.assign(new Error('Target session changed while this operation was queued; reopen its context and review the operation again'), { code: 'STALE_SESSION_CONTEXT' });
-        }
-        mgr.checkCancelled();
-        if (session?.closing) throw new Error('Target is closing; wait for it to finish');
-        if (args.expected_revision !== undefined && (!session || session.dbRevision !== args.expected_revision)) {
-          throw new Error('Database revision changed; read current evidence and review the operation again');
-        }
-        let result = await execute(args, execution);
-        if (['ig5_xrefs','ig5_calls','ig5_cfg'].includes(definition.name) && result && typeof result === 'object') {
-          const rows = result.hits || result.calls || result.blocks || [];
-          const total = result.total ?? result.total_blocks;
-          const truncated = result.truncated === true || Number.isSafeInteger(total) && total > rows.length;
-          const incomplete = session?.info?.analysisComplete === false || session?.info?.partial === true;
-          result = { ...result, queryState: { status: result.error ? 'error' : truncated ? 'truncated' : incomplete ? 'analysis_incomplete' : rows.length ? 'observed' : 'empty',
-            empty: rows.length === 0, returned: rows.length, total: Number.isSafeInteger(total) ? total : null,
-            analysisComplete: typeof session?.info?.analysisComplete === 'boolean' ? session.info.analysisComplete : null,
-            coverage: 'provider-observations-only', unresolvedIndirectCalls: 'unknown' } };
-        }
-        if (definition.name === 'ig5_decompile' && args.style === 'dossier' && args.operation !== 'read') {
-          try { mgr.capabilityAcceptance.registerDossier(result); }
-          catch (error) { diagAppend(cfg, `host: capability acceptance not indexed: ${error.code || 'ACCEPTANCE_RECORD_FAILED'}`); }
-        }
-        return jsonToolOutput(result && typeof result === 'object' && !Array.isArray(result) && session && !isGlobal
-          ? { ...result, _ig5: result._ig5 || mgr.evidence(session) } : result);
-        };
-        const batchControl = definition.name === 'ig5_decompile' && args.operation === 'batch' && ['cancel','status'].includes(args.batch?.action);
-        const queuedRead = definition.name === 'ig5_decompile' && !batchControl || definition.name === 'ig5_workspace' || definition.name === 'ig5_profile' && args.address !== undefined;
-        if (!session || !(IG5_WRITE_TOOLS.has(definition.name) || definition.name === 'ig5_export_diff' || queuedRead) || ['ig5_sync', 'ig5_dbg'].includes(definition.name)) return await perform();
-        return await mgr.withSessions([session], perform);
-        } catch (error) {
-          // Keep the original Error/receipt and rejection semantics. Diagnostics are advisory.
+        type: 'number' };
+      if (!['ig5_profile', 'ig5_workspace', 'ig5_doctor', 'ig5_status'].includes(definition.name)) {
+        definition.parameters.properties.research = RESEARCH_BINDING_SCHEMA;
+      }
+      definition.execute = (rawArgs = {}, execution) => runManagedToolExecution({
+        mgr,
+        toolName: definition.name,
+        rawArgs,
+        execution,
+        runCore: (cleanArgs, effectiveSignal, dispatchContext) => mgr.scope.run({
+          engine: cleanArgs.engine || (definition.name === 'ig5_ir' && cfg.reverseProvider !== 'bundled' ? 'ghidra' : cfg.defaultEngine),
+          agentId: execution?.agent?.id || execution?.agent?.sessionId,
+          signal: effectiveSignal,
+        }, async () => {
+          let args = cleanArgs;
           try {
-            const current = args.target ? mgr.get(args.target) : null;
-            const scope = current && mgr.alive(current) ? mgr.evidence(current) : null;
-            const failure = mgr.failures.add({ operation: definition.name, scope, ...failureBinding(definition.name, args, mgr, error), error,
-              planningKey: planningRequestKey({ tool: definition.name, ...args }, scope, planningImplementationDigest),
-              runtimeDigest: runtimeIdentity(cfg, definition.name==='ig5_dbg'?'x64dbg':current?.engine||args.engine||cfg.defaultEngine),
-              ...(error.analysisFailure?.failedStage || error.stage ? { failedStage: error.analysisFailure?.failedStage || error.stage } : {}) });
-            if (error && typeof error === 'object' && Object.isExtensible(error)) error.investigationFailure = failure;
-          } catch (diagnosticError) {
-            if(error&&typeof error==='object'&&Object.isExtensible(error))error.investigationFailureStatus={persisted:false,code:diagnosticError.code||'FAILURE_RECORD_UNAVAILABLE'};
+          if (effectiveSignal?.aborted) throw new Error('IG5 operation cancelled');
+          await mgr.memory.activate(execution?.agent);
+          if (args.engine) engineId(args.engine);
+          const selected = !args.target && !isGlobal && !['ig5_open', 'ig5_doctor', 'ig5_bindiff', 'ig5_sync'].includes(definition.name)
+            && !definition.parameters.required?.includes('target') ? mgr.selectedTarget() : args.target;
+          if (selected) args = { ...args, target: selected };
+          const standaloneKernel = definition.name === 'ig5_ir' && ['kernel', 'trace', 'lift', 'project'].includes(args.level);
+          const session = selected && !isData && !standaloneKernel ? mgr.get(selected) : null;
+          const selectedAttachment = session?.attachmentId;
+          const perform = async () => {
+          if (session?.state === 'opening') {
+            await mgr.launching.get(session.key);
+            if (session.state !== 'open' || mgr.get(session.target, session.engine) !== session) throw new Error('Target did not finish opening');
           }
-          throw error;
-        }
+          // A failed predecessor can recycle its worker while this operation is
+          // queued. execute() resolves target again; never let old planning and
+          // expected_revision checks transfer to a newly opened attachment.
+          if (session && (mgr.get(session.target, session.engine) !== session
+            || selectedAttachment !== undefined && session.attachmentId !== selectedAttachment)) {
+            throw Object.assign(new Error('Target session changed while this operation was queued; reopen its context and review the operation again'), { code: 'STALE_SESSION_CONTEXT' });
+          }
+          mgr.checkCancelled();
+          if (session?.closing) throw new Error('Target is closing; wait for it to finish');
+          if (args.expected_revision !== undefined && (!session || session.dbRevision !== args.expected_revision)) {
+            throw new Error('Database revision changed; read current evidence and review the operation again');
+          }
+          const nextExec = execution
+            ? { ...execution, signal: effectiveSignal, _boundScenarioSnapshot: dispatchContext?.boundScenarioSnapshot || null }
+            : (dispatchContext?.boundScenarioSnapshot ? { signal: effectiveSignal, _boundScenarioSnapshot: dispatchContext.boundScenarioSnapshot } : execution);
+          let result = await execute(args, nextExec);
+          if (['ig5_xrefs','ig5_calls','ig5_cfg'].includes(definition.name) && result && typeof result === 'object') {
+            const rows = result.hits || result.calls || result.blocks || [];
+            const total = result.total ?? result.total_blocks;
+            const truncated = result.truncated === true || Number.isSafeInteger(total) && total > rows.length;
+            const incomplete = session?.info?.analysisComplete === false || session?.info?.partial === true;
+            result = { ...result, queryState: { status: result.error ? 'error' : truncated ? 'truncated' : incomplete ? 'analysis_incomplete' : rows.length ? 'observed' : 'empty',
+              empty: rows.length === 0, returned: rows.length, total: Number.isSafeInteger(total) ? total : null,
+              analysisComplete: typeof session?.info?.analysisComplete === 'boolean' ? session.info.analysisComplete : null,
+              coverage: 'provider-observations-only', unresolvedIndirectCalls: 'unknown' } };
+          }
+          if (definition.name === 'ig5_decompile' && args.style === 'dossier' && args.operation !== 'read') {
+            try { mgr.capabilityAcceptance.registerDossier(result); }
+            catch (error) { diagAppend(cfg, `host: capability acceptance not indexed: ${error.code || 'ACCEPTANCE_RECORD_FAILED'}`); }
+          }
+          return jsonToolOutput(result && typeof result === 'object' && !Array.isArray(result) && session && !isGlobal
+            ? { ...result, _ig5: result._ig5 || mgr.evidence(session) } : result);
+          };
+          const batchControl = definition.name === 'ig5_decompile' && args.operation === 'batch' && ['cancel','status'].includes(args.batch?.action);
+          const queuedRead = definition.name === 'ig5_decompile' && !batchControl || definition.name === 'ig5_workspace' || definition.name === 'ig5_profile' && args.address !== undefined;
+          if (!session || !(IG5_WRITE_TOOLS.has(definition.name) || definition.name === 'ig5_export_diff' || queuedRead) || ['ig5_sync', 'ig5_dbg'].includes(definition.name)) return await perform();
+          return await mgr.withSessions([session], perform);
+          } catch (error) {
+            // Keep the original Error/receipt and rejection semantics. Diagnostics are advisory.
+            try {
+              const current = args.target ? mgr.get(args.target) : null;
+              const scope = current && mgr.alive(current) ? mgr.evidence(current) : null;
+              const failure = mgr.failures.add({ operation: definition.name, scope, ...failureBinding(definition.name, args, mgr, error), error,
+                planningKey: planningRequestKey({ tool: definition.name, ...args }, scope, planningImplementationDigest),
+                runtimeDigest: runtimeIdentity(cfg, definition.name==='ig5_dbg'?'x64dbg':current?.engine||args.engine||cfg.defaultEngine),
+                ...(error.analysisFailure?.failedStage || error.stage ? { failedStage: error.analysisFailure?.failedStage || error.stage } : {}) });
+              if (error && typeof error === 'object' && Object.isExtensible(error)) error.investigationFailure = failure;
+            } catch (diagnosticError) {
+              if(error&&typeof error==='object'&&Object.isExtensible(error))error.investigationFailureStatus={persisted:false,code:diagnosticError.code||'FAILURE_RECORD_UNAVAILABLE'};
+            }
+            throw error;
+          }
+        }),
       });
       return definition;
     });
@@ -1339,6 +1403,8 @@ export function apply(ctx, config = {}) {
     return async () => {
       await workflow.dispose();
       await mgr.capture?.dispose();
+      await mgr.appObserver?.dispose();
+      await mgr.androidProvider?.dispose();
       await mgr.analysis?.dispose();
       await mgr.kernel?.dispose();
       await mgr.trace?.dispose();

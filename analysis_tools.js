@@ -4,15 +4,17 @@ import { randomUUID } from 'node:crypto';
 import { AnalysisJobs } from './source/analysis_jobs.js';
 import { FirmwareJobs } from './source/firmware_jobs.js';
 import { normalizeHex } from './source/address_ref.js';
+import { analyzeJsApplicationStatic } from './source/native_rea_bridge.js';
+import { diffTraces } from './source/analysis_trace_diff.js';
 
 const fail = (code, message) => { throw Object.assign(new Error(message), { code }); };
 const INPUT_LIMIT = { crypto: 1024 * 1024, protocol: 8 * 1024 * 1024 };
 const bytesProperty = { type: 'object', properties: { encoding: { type: 'string', enum: ['hex', 'base64'] }, data: { type: 'string' } }, required: ['encoding', 'data'], additionalProperties: false };
 const inputProperty = { type: 'object', properties: {
   encoding: { type: 'string', enum: ['hex', 'base64'] }, data: { type: 'string' },
-  ref: { type: 'string', description: 'sha256: analysis blob reference; avoids resending large buffers. Producer-marked sensitive keys are only accepted as controlled recovery.key_source or recipe.key_ref. Unbound refs retain explicit raw data reads.' },
-  result_id: { type: 'string', description: 'For ref input, explicit producer report ID to preserve provenance; never inferred from a shared hash' },
-  path: { type: 'string', description: 'Explicit local regular input file; read only with a byte budget' },
+  ref: { type: 'string' },
+  result_id: { type: 'string' },
+  path: { type: 'string' },
   source: { type: 'object', properties: { target: { type: 'string' }, engine: { type: 'string', enum: ['reverse', 'ghidra'] }, ea: { type: 'string' }, size: { type: 'number' }, expected_revision: { type: 'number' } }, required: ['target', 'ea', 'size'], additionalProperties: false },
 }, required: [], additionalProperties: false };
 const keyRefProperty = { type: 'object', properties: { ref: { type: 'string' }, result_id: { type: 'string' } }, required: ['ref', 'result_id'], additionalProperties: false };
@@ -23,18 +25,18 @@ const recoveryProperty = { type: 'object', properties: {
   sample_bytes: { type: 'integer', minimum: 256, maximum: 65536 }, max_work_bytes: { type: 'integer', minimum: 1, maximum: 67108864 },
   material_stride: { type: 'integer', minimum: 1, maximum: 32 }, key_lengths: { type: 'array', maxItems: 32, items: { type: 'integer', minimum: 1, maximum: 32 } },
   key_candidates: { type: 'array', maxItems: 256, items: bytesProperty }, key_material: bytesProperty,
-  key_source: { ...inputProperty, description: 'Explicit bounded key-material input, up to 64 KiB. Bound producer/static inputs must match the ciphertext target, engine and sample identity. Material bytes are not saved in reports.' },
+  key_source: inputProperty,
   known_plaintext: { type: 'array', maxItems: 16, items: { type: 'object', properties: { offset: { type: 'integer', minimum: 0 }, encoding: { type: 'string', enum: ['hex', 'base64'] }, data: { type: 'string' } }, required: ['offset', 'encoding', 'data'], additionalProperties: false } },
   aes: aesProperty,
 }, required: [], additionalProperties: false };
 const inferenceProperty = { type: 'object', properties: {
   format: { type: 'string', enum: ['auto', 'stream', 'messages', 'capture'] }, boundary: { type: 'string', enum: ['unknown', 'message-start'] },
-  samples: { type: 'array', maxItems: 64, items: bytesProperty, description: 'When present, these are the training messages; the primary input is retained as provenance rather than added to training.' },
-  holdout_samples: { type: 'array', maxItems: 64, items: bytesProperty, description: 'Independent validation messages; train and holdout combined are limited to 64 samples and 1 MiB.' },
+  samples: { type: 'array', maxItems: 64, items: bytesProperty },
+  holdout_samples: { type: 'array', maxItems: 64, items: bytesProperty },
   min_frames: { type: 'integer', minimum: 3, maximum: 64 }, max_candidates: { type: 'integer', minimum: 1, maximum: 8 }, max_scan_bytes: { type: 'integer', minimum: 1, maximum: 262144 }, max_work: { type: 'integer', minimum: 1, maximum: 2000000 },
 }, required: [], additionalProperties: false };
 const stateModelProperty = { type: 'object', properties: {
-  result_id: { type: 'string', description: 'For state_validate, saved state_infer producer report; reconstruction verifies the full model digest, never a truncated UI preview.' },
+  result_id: { type: 'string' },
   model: { type: 'string', enum: ['prefix-tree', 'merged-hypothesis'] },
   merge: { type: 'string', enum: ['none', 'future-equivalent'] }, merge_depth: { type: 'integer', minimum: 1, maximum: 3 },
   max_traces: { type: 'integer', minimum: 1, maximum: 256 }, max_events: { type: 'integer', minimum: 1, maximum: 8192 },
@@ -231,15 +233,45 @@ export function createAnalysisService(mgr, cfg) {
       if (args.action === 'result') {
         let record;
         try { record = artifacts.get(args.result_id); } catch (error) { if (error.code === 'ENOENT') fail('NOT_FOUND', 'No such analysis result'); throw error; }
-        if (!['apk', 'firmware'].includes(record.kind)) fail('INVALID_REF', 'Result belongs to a different analysis lane');
+        if (!['apk', 'firmware', 'js_app', 'trace_diff'].includes(record.kind)) fail('INVALID_REF', 'Result belongs to a different analysis lane');
         return this.result(args.result_id, args.select);
       }
-      if (!['apk', 'firmware', 'unpack'].includes(args.action)) fail('INVALID_INPUT', 'action must be apk, firmware, unpack or result');
+      if (args.action === 'trace_diff') {
+        if (!args.trace_diff || typeof args.trace_diff !== 'object') fail('INVALID_INPUT', 'trace_diff={trace_a, trace_b} is required for action=trace_diff');
+        const diffReport = diffTraces(args.trace_diff.trace_a, args.trace_diff.trace_b, { allowSameRun: Boolean(args.trace_diff.allow_same_run) });
+        const association = { target: args.target ? path.resolve(args.target) : diffReport.provenance.targetSha256 };
+        const record = artifacts.save({ kind: 'trace_diff', action: 'trace_diff', association, input: { provenance: diffReport.provenance }, result: diffReport });
+        return { result_id: record.id, kind: 'trace_diff', action: 'trace_diff', association, ...compactAnalysis(bindRefs(diffReport, record.id)),
+          note: 'Offline differential trace alignment only; no target execution.' };
+      }
+      if (!['apk', 'firmware', 'unpack', 'js_app'].includes(args.action)) fail('INVALID_INPUT', 'action must be apk, firmware, unpack, js_app, trace_diff or result');
       const source = args.input;
-      if (!source || typeof source !== 'object' || Array.isArray(source) || Object.keys(source).some(key => key !== 'path') || typeof source.path !== 'string') fail('INVALID_INPUT', 'ig5_package reads an explicit local file: input={path}');
+      if (!source || typeof source !== 'object' || Array.isArray(source) || Object.keys(source).some(key => key !== 'path') || typeof source.path !== 'string') fail('INVALID_INPUT', 'ig5_package reads an explicit local file or directory: input={path}');
       if (args.select !== undefined || args.result_id !== undefined) fail('INVALID_INPUT', 'select and result_id are only used with action=result');
       const resolved = path.resolve(source.path), signal = mgr.scope?.getStore()?.signal;
       const association = { target: args.target ? path.resolve(args.target) : resolved };
+      if (args.action === 'js_app') {
+        const report = analyzeJsApplicationStatic(resolved, { cfg, signal });
+        mgr.checkCancelled();
+        const record = artifacts.save({ kind: 'js_app', action: 'js_app', association, input: { origin: { kind: 'directory-or-file', path: resolved } }, result: report });
+        const brief = {
+          schema: report.schema,
+          executionPerformed: false,
+          reaEngine: report.reaEngine,
+          targetAppPath: report.targetAppPath,
+          nativeArtifacts: report.nativeArtifacts,
+          reaSummary: {
+            entrypoints: report.reaAnalysis?.application_graph?.entrypoints || report.reaAnalysis?.entrypoints || [],
+            ipcChannels: report.reaAnalysis?.application_graph?.ipc_channels || report.reaAnalysis?.ipc_channels || [],
+            boundaries: report.reaAnalysis?.application_graph?.boundaries || report.reaAnalysis?.boundaries || [],
+          },
+        };
+        const engineLabel = report.reaEngine?.provider === 'ig5-builtin-js-static'
+          ? 'built-in ig5-builtin-js-static-v1'
+          : `pinned rea@${report.reaEngine?.version || '6.4.0'}`;
+        return { result_id: record.id, kind: 'js_app', action: 'js_app', association, input: record.input, ...compactAnalysis(bindRefs(brief, record.id)),
+          note: `Static JS/Electron reconstruction via ${engineLabel}; nothing was executed. Read full evidence with action=result and select=reaAnalysis.` };
+      }
       if (args.action === 'apk') {
         const report = await apkJobs.run('apk', { path: resolved }, signal);
         mgr.checkCancelled();
@@ -332,19 +364,29 @@ export function createAnalysisService(mgr, cfg) {
 
 export function defineAnalysisTools(mgr, cfg, render) {
   mgr.analysis ??= createAnalysisService(mgr, cfg);
-  const common = { input: inputProperty, target: { type: 'string', description: 'Optional result association only; no open session needed for file/ref/inline input' }, result_id: { type: 'string' }, select: { type: 'string', description: 'For action=result, optional bounded dot path such as flows.0' }, preview_limit: { type: 'number' } };
+  const common = { input: inputProperty, target: { type: 'string' }, result_id: { type: 'string' }, select: { type: 'string' }, preview_limit: { type: 'number' } };
   const tool = (name, kind, description, properties) => ({ name, description, parameters: { type: 'object', properties: { ...common, ...properties }, required: ['action'], additionalProperties: false }, output: { schema: { type: 'object', additionalProperties: true }, render }, execute: args => mgr.analysis.execute(kind, args) });
   return [
-    tool('ig5_crypto', 'crypto', 'Inspect, decrypt XOR/AES-CBC/CTR/GCM, decompress or verify bounded bytes. action=recover searches bounded single/repeating XOR keys and validates supplied/extracted AES candidates; it does not exhaust strong AES key spaces. Candidate keys are sensitive SHA-256 refs; transform recipe.key_ref reuses a complete recover candidate without exposing key bytes. Producer-marked sensitive refs are rejected as ordinary input; unbound refs/local files keep raw access and are not a secret access-control boundary. Explicit expected or GCM authentication distinguishes verified plaintext from statistical guesses. No sample execution or database write. action=result reads a prior report.', {
+    tool('ig5_crypto', 'crypto', 'Static byte/crypto: inspect, transform (XOR/AES/gzip/zlib), recover XOR/AES keys, verify, or result.', {
       action: { type: 'string', enum: ['inspect', 'transform', 'recover', 'verify', 'result'] }, offset: { type: 'number' }, length: { type: 'number' }, output_limit: { type: 'number' }, expected: bytesProperty, recovery: recoveryProperty,
-      recipe: { type: 'object', properties: { kind: { type: 'string', enum: ['xor', 'aes-cbc', 'aes-ctr', 'aes-gcm', 'gzip', 'zlib'] }, key: bytesProperty, key_ref: keyRefProperty, iv: bytesProperty, tag: bytesProperty, aad: bytesProperty, padding: { type: 'string', enum: ['none', 'pkcs7'] }, key_offset: { type: 'number', description: 'Explicit repeating XOR key start offset' } }, required: ['kind'], additionalProperties: false },
+      recipe: { type: 'object', properties: { kind: { type: 'string', enum: ['xor', 'aes-cbc', 'aes-ctr', 'aes-gcm', 'gzip', 'zlib'] }, key: bytesProperty, key_ref: keyRefProperty, iv: bytesProperty, tag: bytesProperty, aad: bytesProperty, padding: { type: 'string', enum: ['none', 'pkcs7'] }, key_offset: { type: 'number' } }, required: ['kind'], additionalProperties: false },
     }),
-    tool('ig5_package', 'package', "Static front end for packaged samples given as a local file path (input={path}). action=apk: Android APK - ZIP container, binary manifest (permissions, components with effective exported state), signing certificates (identified, not verified), every classes*.dex scanned per method for capability call sites with class/method evidence, native libraries, nested or disguised payloads, high-entropy assets, URLs/IPs with the loading method. action=firmware: validated container inventory of a flash/firmware image (SquashFS, ext2/3/4, cpio, tar, zip, gzip/xz/bzip2/lzma/zlib, U-Boot/FIT, Android boot/sparse, TRX; JFFS2/UBI/UBIFS/CramFS/ROMFS identified only), compressed payloads opened recursively, file tables, interesting files, ELF architectures, kernel/BusyBox banners. action=unpack: firmware plus sanitized extraction under the returned root (no links or devices, size/count/depth budgets). Findings are leads with locations and limits. action=result reads sections of a saved report with select (apk: manifest, signatures, dex, capabilities.rules, indicators; firmware: components, summary, extraction.items). No sample execution, no network, no engine session.", {
-      action: { type: 'string', enum: ['apk', 'firmware', 'unpack', 'result'] },
-      input: { type: 'object', properties: { path: { type: 'string', description: 'Explicit local file; read-only, size and entry budgets enforced' } }, required: ['path'], additionalProperties: false },
+    tool('ig5_package', 'package', 'Static package analysis: apk, js_app (Electron/JS graph + native inventory), trace_diff, firmware/unpack, or result.', {
+      action: { type: 'string', enum: ['apk', 'firmware', 'unpack', 'js_app', 'trace_diff', 'result'] },
+      input: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'], additionalProperties: false },
+      trace_diff: {
+        type: 'object',
+        properties: {
+          allow_same_run: { type: 'boolean' },
+          trace_a: { type: 'object', additionalProperties: true },
+          trace_b: { type: 'object', additionalProperties: true },
+        },
+        required: ['trace_a', 'trace_b'],
+        additionalProperties: false,
+      },
     }),
-    tool('ig5_protocol', 'protocol', 'Inspect bytes, parse PCAP/PCAPNG, reassemble directions, decode schemas or infer bounded framing/field hypotheses. state_infer consumes a <=1 MiB JSON manifest {version:1,traces:[{id,start:"session-start"|"unknown",complete:boolean,events:[{direction:"client_to_server"|"server_to_client",symbol,sourceId?,complete?}]}],holdout?:[]} through the existing input path/ref/bytes. It builds an observed prefix tree and optional future-equivalence merge hypothesis. state_validate replays new manifest.traces against state_model.result_id; reports accepted/rejected/unknown, overlap and counterexamples separately from training. Explicit session boundaries are required; TCP does not establish them. Models do not prove hidden server state, semantic meanings or complete protocol behavior. No network sends or sample execution. action=result reads a saved report; use select=state.holdout or state.observedModel.states.0 for bounded detail.', {
-      action: { type: 'string', enum: ['inspect', 'capture', 'decode', 'infer', 'state_infer', 'state_validate', 'result'] }, offset: { type: 'integer', minimum: 0, description: 'Relative input-byte offset; capture the bounded full source first, then select this range. Useful with infer candidate.decodeInput.startOffset.' }, length: { type: 'integer', minimum: 0, description: 'Selected byte length; preserve skipped prefix/tail in the source reference. Useful with infer candidate.decodeInput.byteLength.' }, max_packets: { type: 'number' }, max_frames: { type: 'number' }, max_reassembly_bytes: { type: 'number' }, inference: inferenceProperty, state_model: stateModelProperty,
+    tool('ig5_protocol', 'protocol', 'Static protocol/packet: inspect, capture (PCAP/PCAPNG), decode, infer, state_infer/state_validate, or result.', {
+      action: { type: 'string', enum: ['inspect', 'capture', 'decode', 'infer', 'state_infer', 'state_validate', 'result'] }, offset: { type: 'integer', minimum: 0 }, length: { type: 'integer', minimum: 0 }, max_packets: { type: 'number' }, max_frames: { type: 'number' }, max_reassembly_bytes: { type: 'number' }, inference: inferenceProperty, state_model: stateModelProperty,
       schema: { type: 'object', properties: { name: { type: 'string' }, fields: { type: 'array', items: { type: 'object', properties: { name: { type: 'string' }, offset: { type: 'number' }, type: { type: 'string', enum: ['u8', 'u16', 'u32', 'u64', 'i8', 'i16', 'i32', 'i64', 'bytes', 'utf8', 'varint'] }, length: { type: 'number' }, endian: { type: 'string', enum: ['little', 'big'] } }, required: ['name', 'offset', 'type'], additionalProperties: false } } }, required: ['fields'], additionalProperties: false },
       framing: { type: 'object', properties: { type: { type: 'string', enum: ['fixed', 'length-prefix', 'delimiter', 'varint-prefix', 'tlv'] }, delimiterHex: { type: 'string', enum: ['0a', '0d0a'] }, includeDelimiter: { type: 'boolean' }, length: { type: 'number' }, offset: { type: 'number' }, size: { type: 'number', enum: [1, 2, 4] }, maxBytes: { type: 'integer', minimum: 1, maximum: 5 }, headerBytesAfterLength: { type: 'integer', minimum: 0, maximum: 4096 }, typeSize: { type: 'integer', enum: [1, 2] }, lengthSize: { type: 'integer', enum: [1, 2, 4] }, endian: { type: 'string', enum: ['little', 'big'] }, headerLength: { type: 'number' }, lengthIncludesHeader: { type: 'boolean' }, adjustment: { type: 'number' } }, required: ['type'], additionalProperties: false },
     }),

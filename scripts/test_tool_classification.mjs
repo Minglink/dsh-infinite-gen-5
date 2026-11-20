@@ -10,8 +10,8 @@ test('the approval gate list equals the reviewed approval-gated list, in both di
 
 test('every tool is classified exactly once', () => {
   assert.equal(new Set(ALL_TOOLS).size, ALL_TOOLS.length, 'a tool appears in both lists or twice');
-  assert.equal(ALL_TOOLS.length, 43, 'Full 43 contract (P2 split): changing the tool count needs a separate review');
-  assert.equal(APPROVAL_GATED.length, 13, '13 approval gates contract');
+  assert.equal(ALL_TOOLS.length, 44, 'Full 44 contract (P2 + M3/M4 ig5_app_observe): changing the tool count needs a separate review');
+  assert.equal(APPROVAL_GATED.length, 14, '14 approval gates contract');
   assert(ALL_TOOLS.every(name => /^ig5_[a-z_]+$/.test(name)));
 });
 

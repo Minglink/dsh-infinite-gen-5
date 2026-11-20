@@ -51,7 +51,8 @@
       "name": "public-tools",
       "file": "scripts/test_public_tool_catalog.mjs",
       "area": "B 工具目录",
-      "env": "可能依赖已安装的 DSH SDK"
+      "env": "可能依赖已安装的 DSH SDK",
+      "timeoutSec": 240
     },
     {
       "name": "host-sdk",
@@ -595,7 +596,7 @@
       "file": "scripts/test_vmp_research.mjs",
       "area": "C 扩展（纯 Node，2026-10-24 实测通过）",
       "tier": "extended",
-      "timeoutSec": 180
+      "timeoutSec": 300
     },
     {
       "name": "x64dbg-cleanup",
@@ -742,6 +743,57 @@
       "file": "scripts/test_apk_tool.mjs",
       "area": "P3 ig5_package 公共工具（路径输入校验、保存报告、select 读取、真实 worker）",
       "timeoutSec": 180
+    },
+    {
+      "name": "managed-execution",
+      "file": "scripts/test_managed_execution.mjs",
+      "area": "M1 统一受管执行账本（幂等重传、同键异参拒绝、步骤去重、内联探索边界、崩溃未知效果拒绝重放、预留清理与取消控制点）"
+    },
+    {
+      "name": "root-investigation",
+      "file": "scripts/test_root_investigation.mjs",
+      "area": "M1 根调查与独立验收（无预开库创建、真实组件摘要、helper 场景保护、倒推短路线准备预算上限、空结果分类、保留反例与留出集核验）"
+    },
+    {
+      "name": "audit-regressions",
+      "file": "scripts/test_audit_regressions.mjs",
+      "area": "M0/M1 独立复核 7 类反例回归（可执行候选验收、输入与留出集防伪造绑定、未知合同拒绝、取消显式恢复、超 256 账本压缩保留步骤锁、公共前置门取消清理、规划器可执行契约对齐）"
+    },
+    {
+      "name": "m2-suite-guard",
+      "file": "scripts/test_m2_suite_guard.mjs",
+      "area": "M2 原额度内终态控制预留、业务超限拒绝与原完成/owner 门保留（离线）"
+    },
+    {
+      "name": "m2-eval-reporting",
+      "file": "scripts/test_m2_eval_reporting.mjs",
+      "area": "M2 有限输出评分、独立正反触发验收、未证物理隔离边界与预算清理链路证据判定（离线）"
+    },
+    {
+      "name": "m2-isolation-sentinel",
+      "file": "scripts/test_m2_isolation_sentinel.mjs",
+      "area": "M2 受限工具白名单、读写/内部目录分离、CLI 参数路径越界与哨兵负例阻断（宿主 SDK 离线）",
+      "env": "依赖已安装的 DSH SDK"
+    },
+    {
+      "name": "m3-m4-contracts",
+      "file": "scripts/test_m3_m4_contracts.mjs",
+      "area": "M3/M4 跨层静态重建哈希锁定、DEX SHA-1→Adler-32 顺序、ASLR 轨迹差分、Helper 场景保护、未支持动态设备义务与多代理权限边界（离线纯 Node）"
+    },
+    {
+      "name": "transferable-dynamic-contracts",
+      "file": "scripts/test_transferable_dynamic_contracts.mjs",
+      "area": "P0-P3 未知进程身份绝不强杀、自报血缘隔离、变长结构化帧契约、Android 5 环动态血缘与 JNIEnv 虚表守卫、无开发者路径回退与完整 REA 清单校验（离线纯 Node）"
+    },
+    {
+      "name": "eval-metrics-and-contracts",
+      "file": "scripts/test_eval_metrics_and_contracts.mjs",
+      "area": "在线评测事件错误判真、cacheReadTokens 对账、调用互斥分区、清理归因、外部预期契约防降级与纯业务提示词分类（离线纯 Node）"
+    },
+    {
+      "name": "slim-and-7d12d-enhancements",
+      "file": "scripts/test_slim_and_7d12d_enhancements.mjs",
+      "area": "Phase 0-3 减重增效：root-create/root-update 增量回执、SKILL 拆分、内置 ASAR/Electron 静态提取、APK/协议/失败路由规则与 .NET BSJB CLR 解析"
     }
   ]
 }

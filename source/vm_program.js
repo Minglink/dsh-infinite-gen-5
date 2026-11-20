@@ -22,7 +22,7 @@ const CONTRACT = { type: 'object', properties: {
   environment: { type: 'string', enum: ['single-threaded-no-external-calls'] }, exclusions: { type: 'array', maxItems: 16, items: { type: 'string', maxLength: 256 } },
 }, required: ['schema','targetSha256','entryRva','normalReturn','input','outputs','environment','exclusions'], additionalProperties: false };
 export const progressionSchemas = {
-  declare_contract: { type: 'object', description: 'Caller-declared function scope only; does not accept business results.', properties: { contract: CONTRACT }, required: ['contract'], additionalProperties: false },
+  declare_contract: { type: 'object', properties: { contract: CONTRACT }, required: ['contract'], additionalProperties: false },
   role_compare: { type: 'object', properties: { context_refs: { type: 'array', minItems: 1, maxItems: 8, items: REF }, contract_ref: REF }, required: ['context_refs','contract_ref'], additionalProperties: false },
   role_validate:{type:'object',properties:{comparison_ref:REF,recording_bindings:{type:'array',minItems:1,maxItems:8,items:{type:'object',properties:{context_ref:REF,recordings:{type:'array',minItems:1,maxItems:256,items:REF}},required:['context_ref','recordings'],additionalProperties:false}}},required:['comparison_ref','recording_bindings'],additionalProperties:false},
   program: { type: 'object', properties: { comparison_ref: REF, contract_ref: REF,

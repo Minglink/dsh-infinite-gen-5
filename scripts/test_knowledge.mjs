@@ -8,9 +8,35 @@ import { knowledgeSeeds } from '../source/knowledge_seeds.js';
 import { installReadOnlyDataRoute } from '../source/read_only_data_route.js';
 
 test('bilingual lookup ranks expected methods without evidence or execution promotion', () => {
-  for (const [query, id] of [['混合布尔算术','mba-synthesis'],['MBA','mba-synthesis'],['控制流平坦化','cff-investigation'],['去虚拟化','vm-role-experiments'],['ReCopilot','homology-review'],['加密','crypto-evaluation']]) {
+  const expectedQueries = [
+    ['混合布尔算术', 'mba-synthesis'],
+    ['MBA', 'mba-synthesis'],
+    ['控制流平坦化', 'cff-investigation'],
+    ['去虚拟化', 'vm-role-experiments'],
+    ['ReCopilot', 'homology-review'],
+    ['加密', 'crypto-evaluation'],
+    ['S-box 常量指纹', 'crypto-constant-triage'],
+    ['PBKDF2 密钥派生', 'crypto-key-provenance'],
+    ['whitebox 白盒', 'whitebox-table-inspection'],
+    ['协议 分帧 CRC', 'protocol-frame-correlation'],
+    ['UPX 节熵 查壳', 'packer-entropy-triage'],
+    ['OEP IAT修复 脱壳', 'unpacking-reconstruction-levels'],
+    ['PUSHFQ 上下文槽', 'vm-handler-projection-bounds'],
+    ['不透明谓词 花指令', 'opaque-predicate-verification'],
+    ['vtable 虚表 RTTI', 'indirect-call-vtable-dispatch'],
+    ['stack-strings 栈字符串', 'encoded-string-materialization'],
+    ['pclntab Go逆向 Rust逆向', 'language-abi-recovery'],
+    ['BinDiff 补丁对比', 'patch-bindiff-triage'],
+    ['CWE-121 栈溢出 漏洞审计', 'decompiled-vuln-audit'],
+    ['结构体恢复 字段偏移', 'struct-stack-reconstruction'],
+    ['RegisterNatives JNI APK', 'android-apk-jni-workflow'],
+    ['Electron ASAR IPC 进程链', 'electron-process-chain-workflow'],
+    ['firmware 固件分析 向量表', 'firmware-address-alignment'],
+    ['常量展开 位域混淆', 'bitfield-constant-folding'],
+  ];
+  for (const [query, id] of expectedQueries) {
     const value = runKnowledge({}, { action: 'search', query });
-    assert.equal(value.items[0].ref.id, id);
+    assert.equal(value.items[0].ref.id, id, `expected top match ${id} for query: ${query}`);
     assert.equal(value.semanticVerified, false); assert.equal(value.executionAuthorized, false); assert.equal(value.automaticInjection, false);
     assert(Buffer.byteLength(JSON.stringify(value)) <= KNOWLEDGE_LIMITS.responseBytes);
   }
@@ -19,10 +45,21 @@ test('bilingual lookup ranks expected methods without evidence or execution prom
 });
 
 test('catalog pages are stable and bound to the queried generation', () => {
-  const first = runKnowledge({}, { action: 'methods', limit: 5 });
-  const second = runKnowledge({}, { action: 'methods', limit: 5, offset: first.nextOffset, generation: first.generation });
-  assert.equal(new Set([...first.items, ...second.items].map(x => x.ref.id)).size, 6);
-  assert.equal(second.nextOffset, null);
+  assert.equal(knowledgeSeeds.length, 24);
+  const seen = new Set();
+  let offset = 0;
+  let generation;
+  let pages = 0;
+  while (offset !== null) {
+    const page = runKnowledge({}, { action: 'methods', limit: 5, offset, ...(generation ? { generation } : {}) });
+    generation ??= page.generation;
+    assert.equal(page.generation, generation);
+    for (const item of page.items) seen.add(item.ref.id);
+    offset = page.nextOffset;
+    pages++;
+    assert(pages <= 20);
+  }
+  assert.equal(seen.size, knowledgeSeeds.length);
   assert.throws(() => runKnowledge({}, { action: 'methods', generation: '0'.repeat(64) }), { code: 'STALE_KNOWLEDGE_GENERATION' });
 });
 

@@ -104,7 +104,7 @@ try {
         'adapters/ghidra/local-project-path/local-project-path.patch','adapters/ghidra/local-project-path/NOTICE.txt','adapters/ghidra/local-project-path/README.md',
         'adapters/x64dbg/adapter.py','adapters/x64dbg/native/ig5-bridge.dp32','adapters/x64dbg/native/ig5-bridge.dp64','adapters/x64dbg/native/sha256.json',
         'cordis.patch.yml','README.md','HARNESS_PLUGIN.md','LICENSE','THIRD_PARTY_NOTICES.txt')) { Put (Join-Path $fixture $file) }
-    foreach ($skill in @('ig5-triage','ig5-deep-dive','ig5-patch-and-sign','ig5-diff','ig5-debug-live','ig5-crypto','ig5-protocol')) { Put (Join-Path $fixture "skills/$skill/SKILL.md") }
+    foreach ($skill in @('ig5-triage','ig5-deep-dive','ig5-patch-and-sign','ig5-diff','ig5-debug-live','ig5-crypto','ig5-protocol','ig5-reverse-agent')) { Put (Join-Path $fixture "skills/$skill/SKILL.md") }
     Put (Join-Path $fixture 'third_party\sources\upstream\LICENSE') 'upstream license/source asset'
     Put (Join-Path $fixture 'third_party\sources\upstream\code.cpp') 'source audit asset'
     Put (Join-Path $fixture 'worker\vendor\unicorn\lib\unicorn.dll') 'vendor fixture binary'

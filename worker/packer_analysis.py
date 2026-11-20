@@ -185,6 +185,43 @@ def _parse_pe(src, limits):
             'imageSize': image_size, 'headersSize': headers_size, 'headers_size': headers_size, 'directories': directories, 'sections': sections, 'sectionCountDeclared': section_count}
 
 
+def _extract_pe_clr_metadata(src, pe):
+    clr_rva, clr_size = pe['directories'][14]
+    if not clr_rva or clr_size < 24:
+        return None
+    clr_off = _rva_to_offset(clr_rva, pe['sections'], pe['headers_size'])
+    if clr_off is None:
+        return None
+    clr_hdr = src.read(clr_off, 24)
+    if len(clr_hdr) < 24:
+        return None
+    _, maj_rt, min_rt, meta_rva, meta_size, clr_flags, ep_token = struct.unpack_from('<IHHIIII', clr_hdr, 0)
+    if not meta_rva or not meta_size:
+        return None
+    meta_off = _rva_to_offset(meta_rva, pe['sections'], pe['headers_size'])
+    if meta_off is None:
+        return None
+    from scan_analysis import parse_clr_metadata_bytes, decode_cil_method
+    meta_blob = src.read(meta_off, min(meta_size, 524288))
+    parsed = parse_clr_metadata_bytes(meta_blob)
+    if parsed is None:
+        return None
+    parsed['clrRuntimeHeader'] = {'rva': hex(clr_rva), 'majorRuntimeVersion': maj_rt, 'minorRuntimeVersion': min_rt,
+                                  'metadataRva': hex(meta_rva), 'metadataSize': meta_size, 'flags': hex(clr_flags),
+                                  'entryPointToken': f'0x{ep_token:08x}' if ep_token else None}
+    for m in parsed.get('methods', ()):
+        if m.get('rva'):
+            rva_i = int(m['rva'], 16)
+            m['ea'] = hex(pe['imageBase'] + rva_i)
+            m_off = _rva_to_offset(rva_i, pe['sections'], pe['headers_size'])
+            mb = src.read(m_off, 524) if m_off is not None else b''
+            fmt, csize, ops = decode_cil_method(mb, parsed)
+            if fmt:
+                m['ilFormat'], m['ilCodeSize'], m['ilOps'] = fmt, csize, ops
+    parsed.pop('_usMap', None)
+    return parsed
+
+
 def _tls_callbacks(src, pe, limits):
     rva, size = pe['directories'][9]
     off = _rva_to_offset(rva, pe['sections'], pe['headers_size']) if rva else None
@@ -473,6 +510,10 @@ def analyze_packing(path=None, *, data=None, limits=None):
                           entry={'rva': pe['entryRva'], 'section': entry['name'] if entry else None, 'intact': entry_intact},
                           sections=detail['rows'], imports={'libraries': imports['dlls'][:32], 'functions': imports['functions'], 'sample': imports['sample'], 'truncated': imports['truncated']},
                           overlay=detail['overlay'], anomalies=detail['anomalies'])
+            if detail['managed']:
+                clr_info = _extract_pe_clr_metadata(src, pe)
+                if clr_info is not None:
+                    report['clrMetadata'] = clr_info
         else:
             identified, findings = elf['identified'], elf['findings']
             identified.extend(markers)

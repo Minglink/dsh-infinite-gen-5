@@ -1,6 +1,6 @@
 (() => {
   try {
-    /* 无限五代 (dsh-infinite-gen-5) v1.3.0 专业无头逆向工程工作台
+    /* 无限五代 (dsh-infinite-gen-5) v1.4.0 专业无头逆向工程工作台
        视觉系统深度对齐 DeepSeek Harness「上下文」原生设计语言：
        - 全量采用官方 CSS 变量 tokens (--dsw-alias-*, --ds-*, tabular-nums)
        - 原生卡片容器 (.ig5-card)、统计磁贴 (.ig5-stat)、分段胶囊选择器 (.ig5-kinds / .ig5-gran-btn)
@@ -27,7 +27,7 @@
         var inject = ["slots"];
         var PLUGIN_ID = "dsh-infinite-gen-5";
         var PANEL_ID = "ig5-workbench-panel";
-        var VERSION = "1.3.0";
+        var VERSION = "1.4.0";
         var PROJECT_URL = "https://github.com/Minglink/dsh-infinite-gen-5";
         var WORKBENCH_TAB_LABEL = "IG5 逆向工作台";
 

@@ -7,15 +7,15 @@ import { readNativeStoreEvents } from './native_store_events.js';
 const fail = message => { throw Object.assign(new Error(message), { code: 'INVALID_VM_OBSERVATION' }); };
 export const observationProfileSchema = { type: 'object', properties: {
   recordings: { type: 'array', minItems: 1, maxItems: 256, items: { type: 'object', properties: {
-    id: { type: 'string', description: 'debug-trace report UUID in this configured artifact store' },
-    sha256: { type: 'string', pattern: '^[a-f0-9]{64}$', description: 'Exact report SHA-256, not the trace blob SHA' },
+    id: { type: 'string' },
+    sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
   }, required: ['id', 'sha256'], additionalProperties: false } },
   target_sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
-  phase_context_ref: { type: 'object', properties: { id: { type: 'string' }, sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' } }, required: ['id', 'sha256'], additionalProperties: false, description: 'Optional committed context UUID/SHA, only with phase_model=true; full recording manifest must match' },
-  phase_model: { type: 'boolean', description: 'Opt-in offline observation-local code versions and temporal candidates; no verified VM phase or global epoch' },
-  max_instructions: { type: 'integer', minimum: 1, maximum: 100000, description: 'Default 50000, checked over every supplied window even for a small output page' },
+  phase_context_ref: { type: 'object', properties: { id: { type: 'string' }, sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' } }, required: ['id', 'sha256'], additionalProperties: false },
+  phase_model: { type: 'boolean' },
+  max_instructions: { type: 'integer', minimum: 1, maximum: 100000 },
   offset: { type: 'integer', minimum: 0, maximum: 100000 },
-  limit: { type: 'integer', minimum: 1, maximum: 64, description: 'Observed stop groups, default 32; a CPUID group may include a continuation without intermediate state' },
+  limit: { type: 'integer', minimum: 1, maximum: 64 },
 }, required: ['recordings', 'target_sha256'], additionalProperties: false };
 function object(value, allowed, required) {
   if (!value || typeof value !== 'object' || ![Object.prototype, null].includes(Object.getPrototypeOf(value))

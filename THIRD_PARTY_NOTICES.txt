@@ -128,3 +128,18 @@ IG5 supplies its own exact DSH JSON event adapter and scoped retrieval API;
 upstream capture hooks, scrubber, daemon and model providers are not enabled.
 Build: scripts/build_lcm_vendor.mjs. Scope and proof: docs/LCM_THEORY.md.
 IG5's noncommercial license does not apply to these third-party components.
+
+REA (JavaScript / Electron static application graph analyzer): MIT License,
+Copyright (c) 2026 morluto. Pinned standalone CLI bundle (rea@6.4.0) is
+retained in vendor/rea/rea.mjs (SHA-256
+3554288a08c455fa419dad662d73710fb17debe94b9e71dd1282761117c5981e) alongside
+its original MIT LICENSE and vendor/rea/provenance.json. IG5's noncommercial
+license does not apply to this third-party component.
+
+apk-reverse (capability dependency closure and differential trace reduction
+concepts): MIT License, Copyright (c) 2026 apk-reverse contributors
+(https://github.com/newliver666/apk-reverse). Clean IG5 JavaScript adaptations
+in source/analysis_trace_diff.js and source/native_android_bridge.js add
+mandatory targetSha256/moduleBase/runId provenance, explicit timeout bounds,
+and non-swallowed cleanup error reporting. IG5's noncommercial terms do not
+replace upstream MIT terms for adapted upstream concepts.

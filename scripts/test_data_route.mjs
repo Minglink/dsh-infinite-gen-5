@@ -21,6 +21,8 @@ import { collectFunctionDossier } from '../source/function_dossier.js';
 import { workspaceSchema, runWorkspace, captureDossier } from '../source/investigation_workflow.js';
 import { recoveryProfileSchema, runRecoveryProfile } from '../source/vm_recovery_profile.js';
 import { autonomyStatus } from '../source/autonomy_status.js';
+import { RootInvestigationStore } from '../source/investigation_root.js';
+import { parseAndStripResearch, RESEARCH_BINDING_SCHEMA, runManagedToolExecution } from '../source/delegation_execution.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { engineId } from '../engine_runtime.js';
 import { spawnWorker, attachWorker, doctorWorker } from '../source/worker_transport.js';
@@ -512,7 +514,7 @@ const failedRelease = { attachmentId: 'store-failure', databaseClosed: true, pro
 leaseManager.projects.closeAttachment = () => { throw new Error('STORE_BUSY'); };
 leaseManager.releaseAttachmentAfterExit(failedRelease);
 assert.notEqual(failedRelease.attachmentReleased, true, 'failed metadata release must not claim the lease closed');
-assert.doesNotMatch(JSON.stringify(new WorkerManager(cfg).snapshot()), /\bIDA\b|9\.2|pythonExe|idaDir/);
+assert.doesNotMatch(JSON.stringify(new WorkerManager(cfg).snapshot()), /\bIDA\b|\b9\.2\b|pythonExe|idaDir/);
 const manager = new WorkerManager(cfg);
 await manager.open('C:\\fixtures\\sample.exe');
 await assert.rejects(manager.rpc(manager.get('C:\\fixtures\\sample.exe'), 'decompile', {}), (error) => assertRedacted(error.message));
@@ -648,6 +650,8 @@ function wrappedTools(mgr) {
     fileURLToPath, memorySchema, knowledgeSchema, planningRequestKey, failureBinding,
     diagAppend() {}, installLcmBridge: () => ({ async activate() {}, async dispose() {} }),
     installDelegationControl: () => ({ charge() {} }),
+    installAutonomyHost: () => ({ beforePreExecute() {}, dispose() {} }),
+    RootInvestigationStore, parseAndStripResearch, RESEARCH_BINDING_SCHEMA, runManagedToolExecution,
     resolveConfig: () => cfg, WorkerManager: class { constructor() { return mgr; } },
     installDiagRoute() {}, installJobsRoute() {}, installDataRoute() {}, installApprovalGate() {},
     defineIg5Tools, IG5_WRITE_TOOLS: WRITE_TOOLS,

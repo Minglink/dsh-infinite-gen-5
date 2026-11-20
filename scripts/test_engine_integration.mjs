@@ -28,7 +28,7 @@ const read = (type, engine, extra = {}) => new Promise((resolve, reject) => {
 try {
   // Proves Ghidra can bootstrap with the commercial runtime deliberately disabled.
   apply(ctx, { reverse: false, defaultEngine: 'ghidra', toolset: 'full', artifactDir: path.join(scratch, 'artifacts'), requestTimeoutMs: 120000 });
-  assert.equal(tools.size, 43);
+  assert.equal(tools.size, 44);
   const profile = await call('ig5_profile');
   const builtin = profile.engines.find((item) => item.id === 'reverse');
   assert.equal(builtin.available, true); assert.equal(builtin.provider, 'ghidra'); assert.equal(builtin.distribution, 'bundled');

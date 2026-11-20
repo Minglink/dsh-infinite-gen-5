@@ -19,10 +19,10 @@ function host() {
   return { tools, hooks, call: (name, args = {}) => tools.get(name).execute(args, {}), async dispose() { for (const clean of effects.reverse()) await clean(); } };
 }
 
-test('public Full43/Core8 entry uses real state workers, bound manifests and full saved models', async () => {
+test('public Full44/Core8 entry uses real state workers, bound manifests and full saved models', async () => {
   const fixture = host(), artifacts = new AnalysisArtifacts(path.join(scratch, 'artifacts', 'analysis-data'));
   try {
-    assert.equal(fixture.tools.size, 43);
+    assert.equal(fixture.tools.size, 44);
     const protocol = fixture.tools.get('ig5_protocol');
     assert(protocol.parameters.properties.action.enum.includes('state_infer'));
     assert(protocol.parameters.properties.action.enum.includes('state_validate'));
@@ -53,7 +53,7 @@ test('public Full43/Core8 entry uses real state workers, bound manifests and ful
     assert.equal(reused.value.state.modelDigest, inferred.value.state.modelDigest);
     assert.equal(reused.input.origin.derivedFrom.resultId, inferred.result_id);
     await fixture.call('ig5_profile', { toolset: 'core' }); assert.equal(fixture.tools.size, 8);
-    await fixture.call('ig5_profile', { toolset: 'full' }); assert.equal(fixture.tools.size, 43);
+    await fixture.call('ig5_profile', { toolset: 'full' }); assert.equal(fixture.tools.size, 44);
     assert.equal((await fixture.call('ig5_status')).sessions.length, 0);
     fs.writeFileSync(path.join(scratch, 'acceptance.json'), JSON.stringify({ realDataWorker: true, nativeEngineExecuted: false, inference: inferred.result_id, validation: validated.result_id, fullModelStates: 21, verdicts: ['accepted', 'rejected', 'unknown'], tools: 40 }, null, 2));
   } finally { await fixture.dispose(); await artifacts.dispose(); }

@@ -58,7 +58,26 @@ export function assertKnowledgeInput(input, maxOffset = 128) {
   return input;
 }
 
-const aliases = [ ['mba','混合布尔算术','程序合成','msynth','bitvector','位向量'], ['cff','控制流平坦化','flattening','dispatcher','ollvm'], ['vm','虚拟化','去虚拟化','vmprotect','vmp','vip','vsp','handler'], ['知识库','knowledge','rag','方法检索'], ['同源','homology','recopilot','符号恢复','类型恢复'], ['加密','crypto','crebench','算法识别'] ];
+const aliases = [
+  ['mba','混合布尔算术','程序合成','msynth','bitvector','位向量'],
+  ['cff','控制流平坦化','flattening','dispatcher','ollvm'],
+  ['vm','虚拟化','去虚拟化','vmprotect','vmp','vip','vsp','handler'],
+  ['知识库','knowledge','rag','方法检索'],
+  ['同源','homology','recopilot','符号恢复','类型恢复'],
+  ['加密','crypto','crebench','算法识别'],
+  ['查壳','加壳','脱壳','packer','unpack','upx','oep'],
+  ['白盒','whitebox','tbox','查表加密'],
+  ['密钥','key','pbkdf2','hkdf','kdf'],
+  ['协议','protocol','分帧','pcap','报文'],
+  ['apk','android','安卓','dex','jni','registernatives'],
+  ['electron','asar','ipc','进程链'],
+  ['固件','firmware','基址','地址空间','rva'],
+  ['补丁','bindiff','diff','变体'],
+  ['漏洞','cwe','栈溢出','uaf','安全审计'],
+  ['虚表','vtable','rtti','跳转表','switch'],
+  ['花指令','opaque','不透明谓词','死分支'],
+  ['字符串解密','栈字符串','异或解码','strings'],
+];
 const normalize = s => s.normalize('NFKC').toLowerCase();
 function queryTerms(query) {
   const original = [...new Set((normalize(query).match(/[a-z0-9_]+|[\p{Script=Han}]+/gu) || []).filter(t => t.length > 1 || /\p{Script=Han}/u.test(t)))];
@@ -164,7 +183,7 @@ export function runKnowledge(cfg = {}, input) {
   return result;
 }
 
-export const knowledgeSchema = { type: 'object', description: 'Explicit local research reference lookup; source notes are not target evidence. No network, execution or automatic injection. Use separately.',
+export const knowledgeSchema = { type: 'object',
   properties: { action: { type: 'string', enum: ['status','search','methods','documents','read'] }, query: { type: 'string', minLength: 1, maxLength: 256 },
     category: { type: 'string', enum: ['mba','control-flow','vm','workflow','homology','crypto'] }, limit: { type: 'integer', minimum: 1, maximum: 10 }, offset: { type: 'integer', minimum: 0, maximum: 512 },
     generation: { type: 'string', pattern: '^[a-f0-9]{64}$' }, cursor: { type: 'string', maxLength: 1024 },

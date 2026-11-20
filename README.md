@@ -13,12 +13,12 @@
 <br />
 <img src="assets/ig5-whale.png" width="20%" alt="无限五代 IG5 · 二进制鲸鱼视觉 · DeepSeek Harness 最强开源逆向工程工作台" />
 <br />
-<a href="#local-install"><img src="https://img.shields.io/badge/Windows_x64-%E8%87%AA%E5%8C%85%E5%90%AB%E5%AE%89%E8%A3%85-10B981?style=flat-square" alt="Windows x64" /></a>
-<img src="https://img.shields.io/badge/%E5%B7%A5%E5%85%B7%E9%9D%A2-Core_8_%C2%B7_Full_43-8B5CF6?style=flat-square" alt="Core 8 / Full 43" />
+<a href="#local-install"><img src="https://img.shields.io/badge/Windows_x64-%E4%B8%80%E9%94%AE%E5%AE%89%E8%A3%85-10B981?style=flat-square" alt="Windows x64" /></a>
+<img src="https://img.shields.io/badge/%E5%B7%A5%E5%85%B7%E9%9D%A2-Core_8_%C2%B7_Full_44-8B5CF6?style=flat-square" alt="Core 8 / Full 44" />
 <img src="https://img.shields.io/badge/%E6%8A%80%E6%9C%AF%E6%96%87%E6%A1%A3-85%2B%E7%AF%87-0EA5E9?style=flat-square" alt="85+ 文档" />
 <a href="LICENSE"><img src="https://img.shields.io/badge/License-CC_BY--NC--SA_4.0-brightgreen?style=flat-square" alt="License" /></a>
 
-**⭐ 4,100+ Stars · 🍴 530+ Forks · 📦 43 工具 · 🛠 8 技能 · 🚀 90 天 3 个正式版 · 📅 数据截至 2026-11-10**
+**⭐ 4,600+ Stars · 🍴 530+ Forks · 📦 44 工具 · 🛠 8 技能 · 🚀 4 个正式版 · 📅 数据截至 2026-11-20**
 
 <a href="#local-install">🚀 快速安装</a> · <a href="#-30-秒看懂-ig5">⚡ 30 秒看懂</a> · <a href="#-为什么选-ig5与其他方案对比">🏆 方案对比</a> · <a href="#-faq高频问题直答">❓ FAQ</a> · <a href="#documentation">📚 文档</a> · <a href="#community">💬 社区</a> · <a href="llms.txt">🤖 llms.txt</a>
 
@@ -28,9 +28,9 @@
 
 ---
 
-**无限五代（Infinite Gen 5 / IG5，仓库 `dsh-infinite-gen-5`）** 是 DeepSeek Harness（DSH）生态中 **Star 数最高、功能最完整的开源逆向工程插件与可视化工作台**：**43 个分析工具、8 个工作流技能**，把 **Ghidra**（静态）+ **x64dbg**（原生调试）+ **Unicorn**（仿真）三引擎与流量采集、解密恢复、协议还原、多智能体协作全部接入同一套工作流。Windows x64 **自包含安装包开箱即用，不需要商业 IDA**。项目 2026-08-15 创建，**90 天内收获 4,100+ Stars、530+ Forks**，配套 85+ 篇技术文档（数据截至 2026-11-10）。
+**无限五代（Infinite Gen 5 / IG5，仓库 `dsh-infinite-gen-5`）** 是 DeepSeek Harness（DSH）生态中 **Star 数最高、功能最完整的开源逆向工程插件与可视化工作台**：**44 个分析工具、8 个工作流技能**，把 **Ghidra**（静态）+ **x64dbg**（原生调试）+ **Unicorn**（仿真）三引擎与 **Electron / 多进程跨层观测**、**.NET BSJB 元数据反汇编**、流量采集、解密恢复、协议还原、多智能体协作全部接入同一套工作流。Windows x64 **自包含安装包解压即用，双击 `install.bat` 一键完成安装，不需要商业 IDA**。项目 2026-08-15 创建，已收获 **4,600+ Stars、530+ Forks**，配套 85+ 篇技术文档（数据截至 2026-11-20）。
 
-> **English TL;DR** — Infinite Gen 5 (IG5) is the most-starred open-source reverse-engineering plugin and visual workbench for **DeepSeek Harness (DSH)**: **43 tools, 8 workflow skills**, and three engines — **Ghidra** (static), **x64dbg** (native debugging), **Unicorn** (emulation) — plus HTTP/HTTPS capture, crypto extraction and multi-agent investigation, all behind one DSH plugin. Ships as a self-contained Windows x64 installer; **no commercial IDA required**. 4,100+ stars within 90 days of launch. License: CC BY-NC-SA 4.0 (non-commercial).
+> **English TL;DR** — Infinite Gen 5 (IG5) is the most-starred open-source reverse-engineering plugin and visual workbench for **DeepSeek Harness (DSH)**: **44 tools, 8 workflow skills**, three engines — **Ghidra** (static), **x64dbg** (native debugging), **Unicorn** (emulation) — plus cross-layer Electron/multi-process observation, .NET BSJB IL decoding, HTTP/HTTPS capture, crypto extraction and multi-agent investigation, all behind one DSH plugin. Ships as a ~413 MB self-contained Windows x64 installer (`install.bat`); **no commercial IDA required**. 4,600+ stars. License: CC BY-NC-SA 4.0 (non-commercial).
 
 > 仅限自有或合法授权目标的逆向工程、安全审计与教学研究。项目独立维护，与 DeepSeek 官方无隶属或官方背书关系。技术社区论坛：[OpenOrigin](https://openorigin.link/)
 
@@ -40,22 +40,23 @@
 
 | | | | |
 |:---:|:---:|:---:|:---:|
-| **⭐ 4,100+**<br />Stars（90 天） | **🍴 530+**<br />Forks | **📦 43**<br />分析工具 | **🛠 8**<br />工作流技能 |
-| **🚀 3**<br />正式版本 | **📚 85+**<br />技术文档 | **🔒 13**<br />审批安全门 | **🆕 v1.3.0**<br />2026-10-27 |
+| **⭐ 4,600+**<br />Stars | **🍴 530+**<br />Forks | **📦 44**<br />分析工具 | **🛠 8**<br />工作流技能 |
+| **🚀 4**<br />正式版本 | **📚 85+**<br />技术文档 | **🔒 14**<br />审批安全门 | **🆕 v1.4.0**<br />2026-11-20 |
 
 <details open>
 <summary><b>核心速览</b></summary>
 
-| 项目 | 数据（截至 2026-11-10） |
+| 项目 | 数据（截至 2026-11-20） |
 | :--- | :--- |
 | 定位 | DeepSeek Harness（DSH）生态最强开源逆向工程插件与可视化工作台 |
-| 工具面 | **43 个工具** = Core 8（默认）+ 28 静态入口 + 13 审批入口 + 2 生命周期 |
+| 工具面 | **44 个工具** = Core 8（默认，`1,890` tokens）+ 28 静态入口 + 14 审批入口（含 `ig5_app_observe`）+ 2 生命周期 |
 | 工作流技能 | **8 个原生技能**（triage / deep-dive / patch-and-sign / diff / debug-live / crypto / protocol / reverse-agent） |
 | 斜杠命令 | **10 条** `/ig5 *` 宿主命令，无需模型先生成工具调用 |
-| 分析引擎 | **Ghidra**（静态）+ **x64dbg**（原生调试）+ **Unicorn**（单函数仿真） |
+| 分析引擎 | **Ghidra**（静态 + 精确指令边界/callSites RVA）+ **x64dbg**（原生调试 + 中指令断点护栏）+ **Unicorn**（单函数仿真） |
+| 跨层与托管分析 | 内置零依赖 **Electron/ASAR** 静态解构、**.NET BSJB/CIL** 自动解码、多进程血缘追踪、Android 7 阶段探测 |
 | 网络能力 | 内置 HTTP/HTTPS 采集、显式 TLS 解密、PCAP/PCAPNG 解析、请求重放 |
-| 安装方式 | Windows x64 **自包含安装包**（内置 Ghidra/JDK/Python、x64dbg/bridge），解压 + 一条命令 |
-| 宿主兼容 | `@deepseek-ai/dsh >=0.2.0-rc.1 <0.3.0-0`（已验证 `0.2.1-alpha.1`） |
+| 安装方式 | Windows x64 **自包含安装包（~413 MB）**，内置双引擎与完整运行时，**解压后双击 `install.bat` 一键安装** |
+| 宿主兼容 | `@deepseek-ai/dsh >=0.2.0-rc.1 <0.3.0-0`（已实测最新 `0.2.2` 与 `0.2.1-alpha.1`） |
 | 许可 | CC BY-NC-SA 4.0（免费开源，非商业使用） |
 
 </details>
@@ -76,9 +77,9 @@
 
 1. **生态内唯一全链路** — 静态分析、原生调试、单函数仿真、流量采集、解密恢复、协议还原、去混淆研究与子代理协作，一个插件全覆盖，不需要在多个工具之间搬运上下文。
 2. **AI 原生证据链** — 单函数 dossier（伪代码 + CFG + 调用关系 + 栈帧，同一数据库修订）、持久调查任务、stale 证据标记、共享调用预算——把"模型推测"与"已验证结论"分开，这是给 AI 用的逆向工作台与 GUI 套壳的本质区别。
-3. **零配置自包含** — 完整安装包内置 Ghidra/JDK/Python 与 x64dbg/bridge 及上游源码、许可与哈希清单，一次解压 + 一条 PowerShell 命令完成安装，全程不需要商业 IDA。
-4. **审批安全模型** — 13 个修改/执行入口全部经过宿主审批（`allowed-once`），配合 Undo、审计流水与 SHA-256 哈希清单，适合团队与教学环境的可控授权分析。
-5. **增长最快的 DSH 逆向插件** — 上线 90 天 4,100+ Stars、530+ Forks，Star 增速居 DSH 插件生态首位；85 篇文档与 Release 节奏持续更新。
+3. **零配置一键自包含** — v1.4.0 压缩包仅约 **413 MB**（较 v1.3.0 瘦身超 60%），依然完整内置 Ghidra/JDK/Python 与 x64dbg/bridge 及许可清单；解压后**双击 `install.bat`**（或执行 `& .\plugin\install.ps1`）即可自动完成校验、注册与宿主重启，全程不需要商业 IDA。
+4. **审批安全模型与防伪闭环** — 14 个修改/执行入口全部经过宿主审批（`allowed-once`），配合"先提交可执行规则、再跑未知留出集独立验真"与 `MID_INSTRUCTION_BREAKPOINT` 断点护栏，避免模型幻觉与中指令断点破坏。
+5. **增长最快的 DSH 逆向插件** — 已收获 **4,600+ Stars、530+ Forks**，Star 增速居 DSH 插件生态首位；85+ 篇文档与 Release 节奏持续更新。
 
 ## ✨ 七大能力域
 
@@ -107,20 +108,20 @@
 
 ## 🚀 快速安装
 
-### Windows x64（推荐，约 3 分钟）
+### Windows x64（推荐，双击一键安装 · 约 2 分钟）
 
-需要已安装的 DeepSeek Harness profile。完整包内置 Ghidra/JDK/Python、x64dbg/Python/bridge 和上游源码、许可及哈希清单；**不需要商业 IDA 安装**，DSH 本身不随包提供。
+需要已安装的 DeepSeek Harness（推荐官方最新 `v0.2.2` 系列，兼容 `>=0.2.0-rc.1 <0.3.0-0`）。完整包约 **413 MB**，内置 Ghidra/JDK/Python、x64dbg/Python/bridge 与上游许可清单；**不需要商业 IDA 安装**，DSH 本体需提前安装并至少启动过一次（以初始化 `%USERPROFILE%\.dsh\profiles`）。
 
-1. 从 [v1.3.0 Release](https://github.com/Minglink/dsh-infinite-gen-5/releases/tag/v1.3.0) 下载 `IG5-1.3.0-Windows-x64-portable-full.zip` 和同名 `.sha256`，核对 SHA-256：`04273147dde23976a625c582773c33ca1df7b851da0bd5a6e52e2a7c6530b815`
-2. 完整解压，保留 `plugin/`、`manifest.json` 及所有运行资产；不要只复制安装脚本
-3. 在解压根目录打开 PowerShell，执行：
+1. 从 [v1.4.0 Release](https://github.com/Minglink/dsh-infinite-gen-5/releases/tag/v1.4.0) 下载 `IG5-1.4.0-Windows-x64-portable.zip` 和同名 `.sha256`，核对 SHA-256：`ebfebc785d7044e60f6b7910cf721775c284e11bbeb1cfe`
+2. 完整解压到一个独立目录（保留根目录 `install.bat`、`plugin/`、`manifest.json`）
+3. **方式 A（推荐，一键安装）**：直接**双击 `install.bat`**（自动关闭运行中的 `DeepSeek Harness.exe`、绕过 PowerShell 执行策略完成全量 SHA-256 校验与 Profile 注册，并自动重新拉起 DSH）
+4. **方式 B（PowerShell 命令行）**：在解压根目录打开 PowerShell，执行：
 
 ```powershell
 & .\plugin\install.ps1
 ```
 
-4. 完全退出并重启 DSH，执行 `/ig5 engines` 和 `ig5_doctor` 检查实际可用性
-5. 本地 1.3.0 安装后用 `ig5_profile` 核对 `version=1.3.0`、`implementationRevision=20261026-release-1.3.0`，确认新实现已加载
+5. 启动 DSH 后，在会话中执行 `/ig5 engines` 与 `ig5_doctor` 确认引擎就绪；通过 `ig5_profile` 可核对 `version=1.4.0`、`implementationRevision=20261120-release-1.4.0`（支持 `uninstall.bat` 一键卸载）
 
 > [!NOTE]
 > **Source code ZIP / tar.gz 与 git clone 是维护源码，不是完整离线安装包。** 普通安装请下载上述命名的 Windows 完整 ZIP。仅切换插件开关可能复用旧模块，更新后应冷启动 DSH。
@@ -166,17 +167,15 @@
 
 - **macOS Apple Silicon** — 实验性 `darwin-arm64` Ghidra 静态车道，需要独立准备运行包；Windows ZIP 和 `install.ps1` 不适用。不支持 x64dbg/Windows 原生调试，也不包含可用的 macOS Unicorn 运行时。见 [macOS 指南](docs/MACOS_RUNTIME.md)
 - **Android / iOS** — 未完成真机验收或原生运行包。支持 ARM64 目标分析，不等于支持手机宿主
-- **DSH** — 声明范围为 `@deepseek-ai/dsh >=0.2.0-rc.1 <0.3.0-0`，宿主按 `includePrerelease: true` 判断。已记录验证的宿主为 `0.2.1-alpha.1`，不代表范围内所有版本都实测通过。见 [兼容记录](docs/DSH_COMPATIBILITY.md)
+- **DSH** — 声明范围为 `@deepseek-ai/dsh >=0.2.0-rc.1 <0.3.0-0`（同时写入 `engines.dsh` 与 `peerDependencies`），宿主按 `includePrerelease: true` 判断。已实测验证 **DeepSeek Harness `0.2.2`（`dsh-v0.2.2-rc.x`）** 与 `0.2.1-alpha.1`。见 [兼容记录](docs/DSH_COMPATIBILITY.md)
 
-## 🧭 开始一次调查（5 步）
+## 🧭 新手 5 步快速上手（教程）
 
-1. 用 `/ig5 engines` 确认后端，再用 `/ig5 open --engine ghidra <样本路径>` 打开目标；打开不启动样本
-2. 从函数、字符串和交叉引用定位问题，用 `ig5_decompile style=dossier` 获取同一修订下的伪代码、CFG、调用关系和栈帧证据
-3. 需要持续调查时，通过 `ig5_workspace` 保存目标、进度与假设；旧 attachment 或修订的证据会标为 stale。详见 [调查工作流](docs/INVESTIGATION_WORKFLOW.md)
-4. 需要高级工具时切换 Full 43；补丁、调试、仿真、重放等操作仍须单独审批
-5. 子代理任务由 DSH 原生派工。IG5 支持 `handoff → claim → evidence → submit → 子代理完成 → review`，正式复核必须绑定同一交接和实际生命周期。见 [子代理工作流](docs/SUBAGENT_WORKFLOW.md)
-
-父、子及后代共享的 IG5 调用预算须显式启用，例如 `ig5_profile collaboration={action:"start",max_calls:20}`；状态查询用 `collaboration={action:"status"}`。额度不从提示词自动推断，不计 token 或非 IG5 工具；重复 start 或重载不能放大额度。证据提交和正式复核仍不等于语义结论认证。
+1. **打开样本并切换完整工具面**：对 DeepSeek Harness 发送 `/ig5 open --engine ghidra <样本路径>`（仅静态解析，不运行样本），或让模型开局调 `ig5_profile {toolset:"full"}` 展开 Full 44 工具（整场保持不切换可获得 `94%–97%` KV 缓存命中率）。
+2. **静态定位与反编译**：用 `ig5_funcs` / `ig5_strings` / `ig5_xrefs` 定位关键逻辑；`ig5_decompile` 一次性返回伪代码、入口 `rva` 与精准 `callSites[].returnRva` / `returnSites[].rva`；遇 `.NET`（`BSJB`）或 `Electron/ASAR` 目标时，`ig5_scan` 与 `ig5_package` 会自动解码 CLR/CIL 与 JS/IPC 拓扑。
+3. **动态调试与跨层观测**：使用 `ig5_dbg`（`backend="x64dbg"`）按 Ghidra 返回的 RVA 下断并读取内存/寄存器（内置 `MID_INSTRUCTION_BREAKPOINT` 护栏自动拦截中指令断点）；Electron UI/IPC 或多进程链可直接用 `ig5_app_observe` 采集真实进程血缘与输出。
+4. **先规则、后留出集独立验真**：通过 `ig5_workspace` 管理调查任务，先预提交可执行数学规则（`executableRule`），再跑未知留出输入（`isHoldout=true`），调用 `assess` 确认 `satisfied` 且资源已 `stop`/`close`。
+5. **子代理协作（可选）**：长周期复杂任务可开启共享预算 `ig5_profile collaboration={action:"start",max_calls:20}`，按 `handoff → claim → evidence → submit → review` 闭环派发子代理。详见 [调查工作流](docs/INVESTIGATION_WORKFLOW.md) 与 [子代理工作流](docs/SUBAGENT_WORKFLOW.md)。
 
 ## ⌨️ 常用指令与工具
 
@@ -196,14 +195,14 @@
 
 斜杠命令直接走宿主命令入口，无需模型先生成工具调用。`state-validate` 默认验证保存的前缀树；验证合并假设需用 `ig5_protocol` 显式指定模型。
 
-### Core 8 / Full 43
+### Core 8 / Full 44
 
-默认 **Core 8**：`ig5_doctor`、`ig5_open`、`ig5_status`、`ig5_funcs`、`ig5_strings`、`ig5_decompile`、`ig5_close`、`ig5_profile`
+默认 **Core 8**（`1,890 / 4,000` tokens）：`ig5_doctor`、`ig5_open`、`ig5_status`、`ig5_funcs`、`ig5_strings`、`ig5_decompile`、`ig5_close`、`ig5_profile`
 
-**Full 43** = **28 非审批静态入口 + 13 审批入口 + 2 生命周期/配置**。"静态"指不执行目标、不开引擎、不发网络，但不等于不写文件：`ig5_workspace` 会更新本会话任务存储并写不可变报告，`ig5_recovery` 会写不可变报告，`ig5_package unpack` 会写解包文件。支持 scoped API 的 DSH 只向当前 agent 展开 Full；旧宿主明确返回 `toolsetScope=plugin-instance`。切换不持久化，也不授予执行或写入权限。
+**Full 44** = **28 非审批静态入口 + 14 审批入口 + 2 生命周期/配置**。"静态"指不执行目标、不开引擎、不发网络，但不等于不写文件：`ig5_workspace` 会更新本会话任务存储并写不可变报告，`ig5_recovery` 会写不可变报告，`ig5_package unpack` 会写解包文件。支持 scoped API 的 DSH 只向当前 agent 展开 Full；旧宿主明确返回 `toolsetScope=plugin-instance`。切换不持久化，也不授予执行或写入权限。
 
 <details>
-<summary><b>📄 展开完整工具清单（43）</b></summary>
+<summary><b>📄 展开完整工具清单（44）</b></summary>
 
 **静态、无目标执行（28）**
 
@@ -211,9 +210,9 @@
 
 > 其中 `ig5_open` 管理会话与驱动库，`ig5_workspace`/`ig5_recovery`/`ig5_package unpack` 会写任务存储或文件；它们都不执行样本、不开调试会话、不发网络请求。
 
-**审批入口（13）**
+**审批入口（14）**
 
-`ig5_rename` · `ig5_patch_bytes` · `ig5_comment` · `ig5_analyze` · `ig5_set_type` · `ig5_undo` · `ig5_run_idapython` · `ig5_dbg` · `ig5_struct` · `ig5_switch_repair` · `ig5_emulate` · `ig5_sync` · `ig5_capture_control`
+`ig5_rename` · `ig5_patch_bytes` · `ig5_comment` · `ig5_analyze` · `ig5_set_type` · `ig5_undo` · `ig5_run_idapython` · `ig5_dbg` · `ig5_struct` · `ig5_switch_repair` · `ig5_emulate` · `ig5_sync` · `ig5_capture_control` · `ig5_app_observe`
 
 > 审批入口只在宿主返回 `allowed-once` 后继续后续策略；拒绝、服务不可用、未知结果或异常均不执行，取消保持取消。Undo 范围以具体后端为准，不能假设所有修改都可回滚。
 
@@ -243,7 +242,7 @@
 ## ❓ FAQ（高频问题直答）
 
 **IG5 是什么？**
-无限五代（Infinite Gen 5 / IG5，仓库 `dsh-infinite-gen-5`）是面向 DeepSeek Harness（DSH）的开源逆向工程插件与可视化工作台，提供 43 个工具、8 个工作流技能，把 Ghidra 静态分析、x64dbg 原生调试、Unicorn 仿真、HTTP/HTTPS 流量采集与解密、多智能体调查协作整合进同一套 DSH 工作流。
+无限五代（Infinite Gen 5 / IG5，仓库 `dsh-infinite-gen-5`）是面向 DeepSeek Harness（DSH）的开源逆向工程插件与可视化工作台，提供 44 个工具、8 个工作流技能，把 Ghidra 静态分析、x64dbg 原生调试、Unicorn 仿真、Electron/多进程跨层观测、.NET BSJB 元数据反汇编、HTTP/HTTPS 流量采集与解密、多智能体调查协作整合进同一套 DSH 工作流。
 
 **IG5 与 IDA Pro / Binary Ninja 是什么关系？**
 互补而非替代。IG5 使用 Ghidra 作为静态后端并内置完整运行时，**安装 IG5 不需要购买任何商业反编译器授权**；已有 IDA 的用户也可以通过 `ig5_run_idapython`（审批入口）在授权环境中复用现有脚本。
@@ -252,7 +251,7 @@
 免费开源，采用 CC BY-NC-SA 4.0（署名-非商业性使用-相同方式共享）。可自由用于个人研究、安全审计、CTF 与教学；商业售卖、付费倒卖与二开商用被明确禁止，详见文末许可声明。
 
 **怎么安装 IG5？**
-Windows x64 用户从 [v1.3.0 Release](https://github.com/Minglink/dsh-infinite-gen-5/releases/tag/v1.3.0) 下载自包含安装包，解压后在根目录执行 `& .\plugin\install.ps1`，重启 DSH 后用 `/ig5 engines` 验证。完整步骤见[快速安装](#local-install)。
+Windows x64 用户从 [v1.4.0 Release](https://github.com/Minglink/dsh-infinite-gen-5/releases/tag/v1.4.0) 下载自包含安装包（约 413 MB），解压后直接**双击 `install.bat`**（或在根目录 PowerShell 执行 `& .\plugin\install.ps1`），启动 DSH 后用 `/ig5 engines` 验证。完整步骤见[快速安装](#local-install)。
 
 **IG5 支持哪些平台？**
 Windows x64 完整支持（安装包内置全部运行时）；macOS Apple Silicon 提供实验性 Ghidra 静态车道；目标侧支持 x86/x64/ARM64 等架构的静态分析。详见 [macOS 指南](docs/MACOS_RUNTIME.md) 与 [DSH 兼容记录](docs/DSH_COMPATIBILITY.md)。
@@ -263,11 +262,11 @@ Windows x64 完整支持（安装包内置全部运行时）；macOS Apple Silic
 **IG5 和 DeepSeek 官方是什么关系？**
 完全独立的第三方开源项目，与 DeepSeek 官方或其关联主体无隶属、无商业合作、无官方背书。IG5 通过 DSH 插件机制扩展宿主能力，DSH 本身不随 IG5 分发。
 
-**为什么 IG5 要做 13 个审批门？**
+**为什么 IG5 要做 14 个审批门？**
 安全模型设计。所有修改字节、执行样本、仿真、重放、采集控制入口都必须经宿主显式审批（`allowed-once`），配合 Undo、审计流水与 SHA-256 哈希清单，让 AI 驱动的逆向操作在授权范围内可审计、可控、可回溯——这是 IG5 与"裸工具包"类插件的核心差异。
 
 **IG5 的版本节奏如何？**
-2026-08-15 创建以来已发布 v1.0.0、v1.1.0、v1.3.0 三个正式版本（90 天内），当前最新版 v1.3.0（2026-10-27）将工具面扩展至 Full 43 并新增 APK/固件静态前端、API trace 与 CFF 状态分析。历史版本见 [Releases](https://github.com/Minglink/dsh-infinite-gen-5/releases)。
+2026-08-15 创建以来已发布 v1.0.0、v1.1.0、v1.3.0、v1.4.0 四个正式版本，当前最新版 v1.4.0（2026-11-20）将工具面扩展至 Full 44（新增 `ig5_app_observe`）、内置 Electron/ASAR 与 .NET BSJB/CIL 解析、增加 Ghidra↔x64dbg 精准断点护栏，并将自包含压缩包瘦身至 ~413 MB、提供 `install.bat` 一键安装。历史版本见 [Releases](https://github.com/Minglink/dsh-infinite-gen-5/releases)。
 
 **如何在论文/报告中引用 IG5？**
 推荐引用格式：`Minglink, "Infinite Gen 5 (IG5): An Open-Source Reverse-Engineering Workbench Plugin for DeepSeek Harness", GitHub repository dsh-infinite-gen-5, 2026. https://github.com/Minglink/dsh-infinite-gen-5`（引用时请注明所用版本号与访问日期）。
@@ -285,7 +284,7 @@ Windows x64 完整支持（安装包内置全部运行时）；macOS Apple Silic
 | 调试与隔离环境 | [原生轨迹与离线恢复](docs/TRACE_RECOVERY.md) · [VMCI 客体调试](docs/GUEST_DEBUG.md) · [可选 ScyllaHide](docs/SCYLLAHIDE.md) |
 | IR 与状态分析 | [路径发现](docs/PATH_DISCOVERY.md) · [状态投影](docs/STATE_PROJECTION.md) · [Java 解码](docs/JAVA_PROJECTION.md) · [状态组合](docs/STATE_COMPOSITION.md) · [Mergen 提升（实验性）](docs/LIFTER.md) |
 | 样本与验证范围 | [复杂保护样本库](docs/PROTECTION_CORPUS.md) · [现代保护自产样本](docs/MODERN_PROTECTION_CORPUS.md) · [实验规划](docs/EXPERIMENT_PLANNER.md) · [研究性质](docs/RESEARCH_PROPERTIES.md) |
-| 发布记录 | [v1.3.0](docs/RELEASE_1.3.0.md) · [v1.1.0](docs/RELEASE_1.1.0.md) · [VM 研究推进](docs/VM_RESEARCH_PROGRESSION.md) · [真实使用反馈改造](docs/UXR_USAGE.md) |
+| 发布记录 | [v1.4.0](docs/RELEASE_1.4.0.md) · [v1.3.0](docs/RELEASE_1.3.0.md) · [v1.1.0](docs/RELEASE_1.1.0.md) · [VM 研究推进](docs/VM_RESEARCH_PROGRESSION.md) · [真实使用反馈改造](docs/UXR_USAGE.md) |
 
 <details>
 <summary><b>🔬 进阶研究索引：录制、VM 假设与局部证明</b></summary>
@@ -330,7 +329,19 @@ dsh-infinite-gen-5/
 
 ## 🔄 版本更新
 
-> 🆕 最新正式版 **v1.3.0（2026-10-27）** · 本 README 数据截至 **2026-11-10** · 全部版本见 [Releases](https://github.com/Minglink/dsh-infinite-gen-5/releases)
+> 🆕 最新正式版 **v1.4.0（2026-11-20）** · 本 README 数据截至 **2026-11-20** · 全部版本见 [Releases](https://github.com/Minglink/dsh-infinite-gen-5/releases)
+
+### v1.4.0 · 2026-11-20
+
+工具面扩展至 **Full 44**（新增 `ig5_app_observe`，14 个审批门），实现跨层观测、.NET/Electron 原生解析、精准断点护栏与极致减重增效。
+
+- **一键安装与 413 MB 精简包** — 引入无损精简运行时供体与伴随合规源码包，Windows 便携压缩包由 `1.12 GB` 降至 **`~413 MB`**；新增双击即用 `install.bat` / `uninstall.bat`，完整适配最新官方 DeepSeek Harness `v0.2.2`
+- **跨层动态观测（`ig5_app_observe`）** — 支持非合作式 Electron UI/IPC → Native Helper 联动触发、多进程真实血缘（`process_chain_scenario`）与 Android 7 阶段就绪探测及 JNI 虚表守卫
+- **零依赖 JS/ASAR 与 .NET BSJB 解析** — 新增 `source/native_js_static.js` 离线解构 ASAR 与 Electron Fuses；`ig5_scan` / `ig5_funcs` / `ig5_strings` 遇 `.NET` `BSJB` 自动输出 `clrMetadata` 与可读 `ilOps` CIL 反汇编
+- **Ghidra ↔ x64dbg 精准断点护栏** — `ig5_decompile` 直接返回 `rva`、`callSites[].returnRva` 与 `returnSites[].rva`，`ig5_dbg` 增加 `MID_INSTRUCTION_BREAKPOINT` 预检拦截，彻底消除手算偏移破坏多字节指令问题
+- **上下文瘦身与防伪闭环** — `root-create`/`root-update` 增量摘要体积缩减 `>90%`，实测 KV 缓存命中率达 **`94%–97%`**；强制“先预提交可执行规则、再跑留出集独立验真”，门禁测试 `131/131` 全过
+
+完整变更、审查口径与打包校验见 [1.4.0 说明](docs/RELEASE_1.4.0.md)。
 
 ### v1.3.0 · 2026-10-27
 
@@ -403,6 +414,6 @@ dsh-infinite-gen-5/
   <b>如果 IG5 对你的有帮助，点一个 Star ⭐ 就是最大的支持</b><br/><br/>
   <img src="https://img.shields.io/github/stars/Minglink/dsh-infinite-gen-5?style=flat-square&color=yellow&label=%E5%BD%93%E5%89%8D%20Stars" alt="当前 Stars" />
   <img src="https://img.shields.io/github/commit-activity/m/Minglink/dsh-infinite-gen-5?style=flat-square&color=orange&label=%E6%9C%88%E6%8F%90%E4%BA%A4%E6%B4%BB%E8%B7%83%E5%BA%A6" alt="提交活跃度" />
-  <img src="https://img.shields.io/badge/%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC-v1.3.0-blue?style=flat-square" alt="最新版本" />
-  <img src="https://img.shields.io/badge/%E6%95%B0%E6%8D%AE%E6%88%AA%E8%87%B3-2026--11--10-blue?style=flat-square" alt="数据截至" />
+  <img src="https://img.shields.io/badge/%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC-v1.4.0-blue?style=flat-square" alt="最新版本" />
+  <img src="https://img.shields.io/badge/%E6%95%B0%E6%8D%AE%E6%88%AA%E8%87%B3-2026--11--20-blue?style=flat-square" alt="数据截至" />
 </p>

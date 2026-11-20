@@ -26,7 +26,7 @@ const route = async query => new Promise(resolve => routes.get('/ig5-data')({ me
 try {
   await new Promise(resolve => origin.listen(0, '127.0.0.1', resolve));
   apply(ctx, { artifactDir: root, toolset: 'full' });
-  assert.equal(definitions.size, 43);
+  assert.equal(definitions.size, 44);
   const scope = ['http://127.0.0.1:' + origin.address().port];
   assert.deepEqual(await call('ig5_capture_control', { action: 'start', scope }), { denied: true });
   assert.equal((await route('type=capture_status')).data.running, false);

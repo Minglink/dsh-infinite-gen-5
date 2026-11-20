@@ -55,7 +55,8 @@ SECTION_NAMES = {
     '.aspack': ('ASPack', 'compressor'), '.adata': ('ASPack', 'compressor'),
     '.themida': ('Themida/WinLicense', 'protector'), '.winlice': ('Themida/WinLicense', 'protector'),
     '.vmp0': ('VMProtect', 'protector'), '.vmp1': ('VMProtect', 'protector'), '.vmp2': ('VMProtect', 'protector'), '.vmp3': ('VMProtect', 'protector'),
-    '.enigma1': ('Enigma Protector', 'protector'), '.enigma2': ('Enigma Protector', 'protector'),
+    '.enigma': ('Enigma Protector', 'protector'), '.enigma1': ('Enigma Protector', 'protector'), '.enigma2': ('Enigma Protector', 'protector'),
+    '.obsidiu': ('Obsidium', 'protector'), '.taz': ('PESpin', 'protector'), '.perplex': ('Perplex', 'compressor'), '.packed': ('Generic Packer', 'compressor'),
     '.mpress1': ('MPRESS', 'compressor'), '.mpress2': ('MPRESS', 'compressor'),
     '.petite': ('Petite', 'compressor'),
     '.nsp0': ('NsPack', 'compressor'), '.nsp1': ('NsPack', 'compressor'), '.nsp2': ('NsPack', 'compressor'), 'nsp0': ('NsPack', 'compressor'), 'nsp1': ('NsPack', 'compressor'), 'nsp2': ('NsPack', 'compressor'),
@@ -67,6 +68,8 @@ SECTION_NAMES = {
 MARKERS = (
     (b'UPX!', 'UPX', 'compressor'),
     (b'$Info: This file is packed with the UPX executable packer', 'UPX', 'compressor'),
+    (b'ConfuserEx v', 'ConfuserEx', 'protector'),
+    (b'MEI\x0c\x0b\x0a\x0b\x0e', 'PyInstaller', 'compressor'),
 )
 MARKER_SCAN_BYTES = 16 * 1024 * 1024
 
@@ -75,7 +78,8 @@ STANDARD_CODE_NAMES = frozenset({'.text', 'text', 'code', '.code', '.init', '.fi
 STANDARD_NAMES = frozenset(STANDARD_CODE_NAMES | {
     '.data', '.rdata', '.idata', '.edata', '.pdata', '.xdata', '.bss', '.rsrc', '.reloc', '.tls', '.crt', '.didat', '.gfids', '.00cfg', '.msvcjmc', '.fptable', '.sxdata', '.cormeta',
     '.eh_fram', '.ctors', '.dtors', '.drectve', '.stab', '.stabstr', '.retplne', '.voltbl', '.rodata', '_rdata', '.data1', 'pad1', 'pad2', 'pad3', 'pad4', 'pad5', 'pad6', 'pad7', 'pad8', 'pad9', '.sdata', '.srdata', '.page', 'page', 'init', 'data', 'bss', 'rsrc', 'idata', 'edata', 'tls',
-    '.bildata', '.gnu_deb', '.rustc', '.link', '.detourc', '.detourd', '.wixburn', '.ndata', '.minjv', '.gehcont', '.giats', '.rtc', '.xtls', '.tracet', '.trace'})
+    '.bildata', '.gnu_deb', '.rustc', '.link', '.detourc', '.detourd', '.wixburn', '.ndata', '.minjv', '.gehcont', '.giats', '.rtc', '.xtls', '.tracet', '.trace',
+    '.go.buil', '.gopclnt', '.symtab', '.strtab', '.note'})
 # MinGW/GNU toolchains name debug sections "/4", ".debug_info", ".zdebug_*"; they are large and compressed but not executable.
 DEBUG_NAME = re.compile(r'^(/\d+|\.z?debug_.*)$')
 # A name made of ordinary identifier characters; anything else (control bytes, quotes, braces, high bytes) is not what a linker writes.

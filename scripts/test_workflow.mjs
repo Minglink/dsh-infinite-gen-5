@@ -404,10 +404,15 @@ async function installedRegistry() {
   }
   let context, controller;
   try {
-    for (const name of ['@deepseek-ai/cordis', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-system-prompt', '@deepseek-ai/dsh-scope']) copyPackage(name);
+    const hasNativeExecutor = Boolean(entry('dsh/node_modules/@deepseek-ai/dsh-tool-executor-native')?.files);
+    for (const name of ['@deepseek-ai/cordis', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-system-prompt', '@deepseek-ai/dsh-scope', ...(hasNativeExecutor ? ['@deepseek-ai/dsh-tool-executor-native'] : [])]) copyPackage(name);
     const load = name => import(pathToFileURL(path.join(temporary, 'node_modules', name, 'lib', 'index.js')).href);
-    const [{ Context }, { default: Tools }, { default: SystemPrompt }, { createScope }] = await Promise.all(['@deepseek-ai/cordis', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-system-prompt', '@deepseek-ai/dsh-scope'].map(load));
+    const [{ Context }, { default: Tools }, { default: SystemPrompt }, { createScope }, nativeExecMod] = await Promise.all([
+      '@deepseek-ai/cordis', '@deepseek-ai/dsh-tools', '@deepseek-ai/dsh-system-prompt', '@deepseek-ai/dsh-scope',
+      ...(hasNativeExecutor ? ['@deepseek-ai/dsh-tool-executor-native'] : []),
+    ].map(load));
     context = new Context(); await context.plugin(SystemPrompt, {}); await context.plugin(Tools);
+    if (nativeExecMod) await context.plugin(nativeExecMod);
     const agents = [];
     await context.plugin(Object.assign(inner => {
       for (const id of ['real-A', 'real-B']) { const agent = { id }, scope = createScope(inner, agent); agent.ctx = scope.ctx; agents.push(agent); }
@@ -423,8 +428,18 @@ async function installedRegistry() {
     controller.setToolset('full', a);
     assert.equal(context.tools.schemas().length, 8); assert.equal(context.tools.schemas(a).length, 43); assert.equal(context.tools.schemas(b).length, 8);
     assert(context.tools.get('ig5_crypto', a)); assert.equal(context.tools.get('ig5_crypto', b), undefined);
-    const run = agent => context.tools.execute({ name: 'ig5_crypto', arguments: {}, agent, signal: new AbortController().signal, callId: 'scope-test-call' });
-    assert.equal((await run(a)).isError, false); assert.match((await run(b)).content[0].text, /unknown tool/);
+    const run = async agent => {
+      if (hasNativeExecutor) {
+        const batch = await context.tools.execute({
+          calls: [{ id: 'scope-test-call', name: 'ig5_crypto', arguments: '{}' }],
+          agent,
+          signal: new AbortController().signal,
+        });
+        return batch.results[0].result;
+      }
+      return context.tools.execute({ name: 'ig5_crypto', arguments: {}, agent, signal: new AbortController().signal, callId: 'scope-test-call' });
+    };
+    assert.equal((await run(a)).isError, false); assert.match((await run(b)).content[0].text, /unknown tool/i);
     controller.setToolset('full', b); controller.setToolset('core', a);
     assert.equal(context.tools.schemas(a).length, 8); assert.equal(context.tools.schemas(b).length, 43);
     const collision = a.ctx.tools.register(data.definitions.find(tool => tool.name === 'ig5_patch_bytes'));

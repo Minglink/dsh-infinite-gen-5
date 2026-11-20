@@ -1,11 +1,18 @@
 /** Inspect the caller's host goal surface without creating or driving work. */
-export function autonomyStatus(ctx, execution) {
+export function autonomyStatus(ctx, execution, mgr = null) {
   const agent = execution?.agent;
+  const hostMeta = mgr?.autonomyHost ? {
+    completionGateInstalled: true,
+    directGoalCompleteInterceptable: false,
+    lastMessageSource: mgr.autonomyHost.lastMessageSource(agent),
+    goalAlignment: mgr.autonomyHost.goalAlignmentStatus(agent),
+  } : {};
   const baseline = {
     skill: 'ig5-reverse-agent', continuation: 'DSH Goal Rounds',
     goalTools: [], goalServiceAvailable: false, goal: null,
     continuationEligible: false, driverVerifiedByThisQuery: false,
     queryStartsWork: false,
+    ...hostMeta,
   };
   if (!agent?.ctx) return { ...baseline, scopeAvailable: false };
   try {

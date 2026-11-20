@@ -157,15 +157,15 @@ try {
     assert.equal(allowed.kind, 'allow'); assert.equal(allowedDelegations, 1);
     approvalChecks.push({ tool: name, publicServiceRequested: true, rejectedDecision: 'deny', deniedDispatchCalls, allowedOnceDelegations: allowedDelegations });
   }
-  await check('ig5_profile', 'host', 'Full43 / Core8 / Full43 schemas', async () => {
+  await check('ig5_profile', 'host', 'Full44 / Core8 / Full44 schemas', async () => {
     assert.equal((await call('ig5_profile', { toolset: 'core' })).activeTools.length, 8); assert.equal(tools.size, 8);
-    const full = await call('ig5_profile', { toolset: 'full' }); assert.equal(full.activeTools.length, 43); assert.equal(tools.size, 43);
+    const full = await call('ig5_profile', { toolset: 'full' }); assert.equal(full.activeTools.length, 44); assert.equal(tools.size, 44);
     for (const engine of requestedEngines) assert.equal(full.engines.find(e => e.id === engine)?.available, true, engine + ' must actually be available');
     if (reverseProvider === 'bundled') {
       const reverse = full.engines.find(e => e.id === 'reverse');
       assert.equal(reverse.available, true); assert.equal(reverse.provider, 'ghidra'); assert.match(reverse.label, /内置/);
     }
-    return { core: 8, full: 43, approvalTools: approvalChecks.length };
+    return { core: 8, full: 44, approvalTools: approvalChecks.length };
   });
   await check('ig5_recovery', 'host', 'fixed case_ref saves an immutable plan report', async () => {
     const bytes = fs.readFileSync(path.join(pluginRoot, 'scripts/fixtures/vm_recovery_case.example.json'));
@@ -442,6 +442,14 @@ try {
     const rules = await call('ig5_package', { action: 'result', result_id: value.result_id, select: 'capabilities.rules' });
     const sms = rules.value.find(rule => rule.id === 'sms.send'); assert(sms && sms.samples[0].method === 'Lcom/example/tool/Main;->go()V');
     return { package: value.value.overview.package, smsCallSite: sms.samples[0].method };
+  });
+  await check('ig5_app_observe', 'host', 'Android capability closure & symptom diagnosis through approval gate', async () => {
+    const value = await call('ig5_app_observe', { action: 'android_probe', symptom_code: 'INSTALL_PARSE_FAILED_NO_CERTIFICATES' }, undefined, null);
+    assert.equal(value.ok, true);
+    assert.equal(value.action, 'android_probe');
+    assert.equal(value.symptom?.symptomCode, 'INSTALL_PARSE_FAILED_NO_CERTIFICATES');
+    assert(value.closure?.capabilities?.android_static_apk_dex_jni);
+    return { action: value.action, symptomCode: value.symptom.symptomCode };
   });
   if (executeDebugger) await check('ig5_dbg', 'x64dbg', 'generated PE headless breakpoint / registers / memory / step / stop', async () => {
     const engine = requestedEngines.includes('ghidra') ? 'ghidra' : requestedEngines[0];

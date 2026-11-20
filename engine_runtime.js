@@ -198,7 +198,8 @@ export function readRuntime(root, engine, override, options = {}) {
     under(java, windows ? 'bin/server/jvm.dll' : mac ? 'lib/server/libjvm.dylib' : 'lib/server/libjvm.so', 'JDK JVM', 'file', 64);
     if (windows) for (const name of ['vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll']) under(java, 'bin/' + name, 'JDK C++ runtime ' + name, 'file', 64);
     if (!windows) { under(java, mac ? 'lib/libjli.dylib' : 'lib/jli/libjli.so', 'JDK launcher library', 'file', 64); under(java, 'lib/modules', 'JDK runtime modules'); }
-    under(java, 'jmods/java.base.jmod', 'JDK base module');
+    if (java && fs.existsSync(path.join(java, 'lib', 'modules'))) under(java, 'lib/modules', 'JDK runtime modules');
+    else under(java, 'jmods/java.base.jmod', 'JDK base module');
     under(java, 'legal', 'JDK licenses', 'directory');
     for (const [suffix, label] of [
       ['Ghidra/Framework/Utility/lib/Utility.jar', 'Ghidra Utility.jar'],

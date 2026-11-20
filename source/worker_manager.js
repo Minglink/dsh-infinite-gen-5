@@ -49,7 +49,13 @@ export class WorkerManager {
   }
 
   get(target, engine) {
-    return this.sessions.get(this.sessionKey(target, engine));
+    const exact = this.sessions.get(this.sessionKey(target, engine));
+    if (exact) return exact;
+    if (!engine && !this.scope.getStore()?.engine) {
+      const ghidraSession = this.sessions.get(this.sessionKey(target, 'ghidra'));
+      if (ghidraSession) return ghidraSession;
+    }
+    return undefined;
   }
 
   selectedTarget() {
@@ -454,6 +460,26 @@ export class WorkerManager {
       const value = BigInt(params.ea);
       if (!session.info?.imageBase || !session.info.segments?.some((s) => value >= BigInt(s.start) && value < BigInt(s.end))) throw new Error('Database address is outside the selected loaded image');
       params = { ...params, rva: '0x' + (value - BigInt(session.info.imageBase)).toString(16), addressSpace: 'runtime' };
+    }
+    if (params.op === 'bpt' && (params.kind || 'software') === 'software' && session?.engine === 'ghidra' && session?.info?.imageBase) {
+      let staticEa = null;
+      try {
+        const imgBase = BigInt(session.info.imageBase);
+        if (params.rva) staticEa = imgBase + BigInt(params.rva);
+        else if (params.ea && params.addressSpace === 'rva') staticEa = imgBase + BigInt(params.ea);
+        else if (params.ea && params.addressSpace === 'database') staticEa = BigInt(params.ea);
+      } catch { staticEa = null; }
+      if (staticEa !== null) {
+        const dis = await this.rpc(session, 'disasm', { ea: '0x' + staticEa.toString(16), limit: 4, size: 32 }).catch(() => null);
+        if (dis && dis.isInstructionBoundary === false && dis.containingInstruction) {
+          const ci = dis.containingInstruction;
+          const nearby = (dis.rows || []).map(r => `${r.rva || r.ea} (${r.text})`).join(', ');
+          throw Object.assign(
+            new Error(`MID_INSTRUCTION_BREAKPOINT: Software breakpoint at ${params.rva || params.ea} lands inside multi-byte instruction at ${ci.ea} (RVA ${ci.rva}: "${ci.text}", ${ci.size} bytes). Setting INT3 (0xCC) mid-instruction corrupts instruction operands/registers. Use an exact instruction boundary RVA such as: ${nearby}`),
+            { code: 'MID_INSTRUCTION_BREAKPOINT' },
+          );
+        }
+      }
     }
     let debugSession = session;
     if (debuggerEngine === 'x64dbg') {

@@ -3,7 +3,7 @@ import { LcmMemory } from './lcm_memory.js';
 
 const refSchema = { type: 'object', properties: { kind: { type: 'string', enum: ['event', 'summary'] }, id: { type: 'string', maxLength: 80 }, sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' } }, required: ['kind', 'id', 'sha256'], additionalProperties: false };
 export const memorySchema = {
-  type: 'object', description: 'Session-bound LCM history. Search returns candidates; read recovers exact event JSON by hash in pages; expand follows summary sources; checkpoint saves caller-unverified navigation. Use restore after compaction. No sample execution or proof promotion.',
+  type: 'object',
   properties: {
     action: { type: 'string', enum: ['status', 'restore', 'search', 'read', 'expand', 'checkpoint'] },
     query: { type: 'string', minLength: 1, maxLength: 256 },

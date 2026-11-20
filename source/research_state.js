@@ -67,7 +67,7 @@ export const researchMutationSchema = shape({
   expected_task_revision: { type: 'integer', minimum: 0 },
   scope_digest: { type: 'string', pattern: SHA.source },
 });
-researchMutationSchema.properties.entity_id = { type: 'string', pattern: UUID.source, description: 'revise-* only: superseded proposal UUID; previous versions remain retained' };
+researchMutationSchema.properties.entity_id = { type: 'string', pattern: UUID.source };
 researchMutationSchema.properties.value = { oneOf: [
   shape(Object.fromEntries(['question', 'inputDomain', 'returns', 'outputs', 'sideEffects', 'environment', 'exclusions'].map(k => [k, boundedText]))),
   shape({ proposition: boundedText, supporting: references, opposing: references,

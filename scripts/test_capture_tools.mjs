@@ -39,7 +39,7 @@ test('capture status/list are dormant reads; tool shapes isolate read and contro
     assert.equal(f.service.status().running, false); assert.equal(f.service.list().total, 0); assert.equal(FakeProxy.created, before);
     f.mgr.capture = f.service;
     const tools = defineCaptureTools({}, f.mgr, f.cfg);
-    assert.deepEqual(tools.map(t => t.name), ['ig5_capture', 'ig5_capture_control']);
+    assert.deepEqual(tools.map(t => t.name), ['ig5_capture', 'ig5_capture_control', 'ig5_app_observe']);
     assert.equal(tools[0].execute({ action: 'status' }).running, false);
     assert.throws(() => tools[0].execute({ action: 'start', scope: ['http://localhost'] }), /Capture action/);
     assert.equal(FakeProxy.created, before);

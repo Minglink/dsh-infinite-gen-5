@@ -76,13 +76,13 @@ function assertNoRawParameters(value) {
   }
 }
 
-await test('Full43 → Core8 → Full43 and 12 original approval tools', async () => {
-  assert.equal(fixtureHost.tools.size, 43);
+await test('Full44 → Core8 → Full44 and approval tools', async () => {
+  assert.equal(fixtureHost.tools.size, 44);
   const core = await fixtureHost.call('ig5_profile', { toolset: 'core' });
   assert.equal(core.activeTools.length, 8); assert.equal(fixtureHost.tools.size, 8);
   assert(!fixtureHost.tools.has('ig5_crypto') && !fixtureHost.tools.has('ig5_protocol'));
-  await fixtureHost.call('ig5_profile', { toolset: 'full' }); assert.equal(fixtureHost.tools.size, 43);
-  const writeNames = ['rename', 'patch_bytes', 'comment', 'analyze', 'set_type', 'undo', 'run_idapython', 'dbg', 'struct', 'switch_repair', 'emulate', 'sync'].map(name => 'ig5_' + name);
+  await fixtureHost.call('ig5_profile', { toolset: 'full' }); assert.equal(fixtureHost.tools.size, 44);
+  const writeNames = ['rename', 'patch_bytes', 'comment', 'analyze', 'set_type', 'undo', 'run_idapython', 'dbg', 'struct', 'switch_repair', 'emulate', 'sync', 'app_observe'].map(name => 'ig5_' + name);
   const pre = fixtureHost.hooks.get('tools/pre-execute');
   for (const name of writeNames) {
     let dispatched = false;

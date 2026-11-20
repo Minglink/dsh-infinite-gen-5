@@ -11,7 +11,8 @@ import { buildPE64Fixture } from './fixtures/pe64.mjs';
 
 const scratch = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'ig5-correlate-runtime-'));
 const sourceRoot = fs.realpathSync(new URL('..', import.meta.url));
-const reportPath = path.join(os.homedir(), '.dsh', 'ig5', 'artifacts', 'capture-v110', `correlate-runtime-${randomUUID()}.json`);
+const reportDir = process.env.IG5_CORRELATE_REPORT_DIR || path.join(os.homedir(), '.dsh', 'ig5', 'artifacts', 'capture-v110');
+const reportPath = path.join(reportDir, `correlate-runtime-${randomUUID()}.json`);
 const fixture = buildPE64Fixture(1);
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const sourceFiles = ['index.js', 'capture_tools.js', 'source/traffic_correlate.js', 'scripts/test_capture_correlate_runtime.mjs'];
@@ -50,7 +51,7 @@ try {
   apply(ctx, { artifactDir: path.join(scratch, 'artifacts'), projectRoot: path.join(scratch, 'projects'),
     toolset: 'full', reverseProvider: 'bundled', defaultEngine: 'reverse', backgroundOpen: false,
     requestTimeoutMs: 120000, openTimeoutMs: 180000 });
-  assert.equal(definitions.size, 43);
+  assert.equal(definitions.size, 44);
   const session = await call('ig5_capture_control', { action: 'start', scope: [base], port: 0 });
   const response = await new Promise((resolve, reject) => {
     http.get({ hostname: '127.0.0.1', port: session.port, path: `${base}/net/beacon?token=fixture-secret`,

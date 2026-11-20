@@ -96,11 +96,31 @@ function Resolve-IG5PackPath {
     return $full
 }
 
+function Test-IG5VersionAtLeast {
+    param([string]$Version, [string]$Minimum)
+    if ($Version -notmatch '^\d+\.\d+\.\d+$' -or $Minimum -notmatch '^\d+\.\d+\.\d+$') { return $false }
+    return ([Version]::new($Version) -ge [Version]::new($Minimum))
+}
+
+function Get-IG5SampleSpecificFiles {
+    param([Parameter(Mandatory)][string]$SourceRoot)
+    $manifestPath = Join-Path $SourceRoot 'tools\ci\sample-specific.json'
+    if (-not (Test-IG5Path $manifestPath Leaf)) { return @() }
+    $data = Read-IG5Text $manifestPath | ConvertFrom-Json
+    return @($data.files | ForEach-Object { ([string]$_).Replace('\', '/').ToLowerInvariant() })
+}
+
 function Test-IG5ExcludedPath {
-    param([string]$Relative, [switch]$RuntimeRoot)
-    $parts = $Relative.Replace('\', '/').Split('/')
+    param(
+        [string]$Relative,
+        [switch]$RuntimeRoot,
+        [switch]$PortableRelease,
+        [string[]]$SampleSpecificFiles = @()
+    )
+    $norm = $Relative.Replace('\', '/')
+    $parts = $norm.Split('/')
     if ($parts -contains '.git') { return $true }
-    if ($parts[0] -eq 'plugin') { $parts = @($parts | Select-Object -Skip 1) }
+    if ($parts[0] -eq 'plugin') { $parts = @($parts | Select-Object -Skip 1); $norm = ($parts -join '/') }
     if ($parts[0] -eq '.downloads') { return $true }
     if ($parts[0] -eq 'scratch') { return $true }
     if ($parts.Count -eq 4 -and $parts[0] -eq 'adapters' -and $parts[1] -eq 'vmci' -and $parts[2] -eq 'native' -and $parts[3] -like '*.obj') { return $true }
@@ -109,11 +129,24 @@ function Test-IG5ExcludedPath {
     if ($parts -contains '__pycache__' -or $parts -contains '.pytest_cache' -or $parts -contains 'node_modules') { return $true }
     if ($parts[0] -eq 'runtimes') { $parts = @($parts | Select-Object -Skip 1); $RuntimeRoot = $true }
     if ($RuntimeRoot -and $parts.Count -ge 2 -and $parts[0] -in @('ghidra','x64dbg') -and $parts[1] -in $script:IG5RuntimeCaches) { return $true }
+    if ($PortableRelease -and -not $RuntimeRoot) {
+        if ($parts[0] -eq 'archive') { return $true }
+        if ($parts.Count -ge 2 -and $parts[0] -eq 'docs' -and $parts[1] -eq 'review') { return $true }
+        if ($parts.Count -ge 2 -and $parts[0] -eq 'scripts' -and ($parts[1] -like 'test_*' -or $parts[1] -like 'accept_*')) { return $true }
+        if ($SampleSpecificFiles.Count -and ($SampleSpecificFiles -contains $norm.ToLowerInvariant())) { return $true }
+    }
     return $false
 }
 
 function Get-IG5PackFiles {
-    param([Parameter(Mandatory)][string]$Root, [switch]$IncludeExcluded, [switch]$IncludeUnlistedRootFiles)
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [switch]$IncludeExcluded,
+        [switch]$IncludeUnlistedRootFiles,
+        [switch]$PortableRelease,
+        [string[]]$SampleSpecificFiles = @(),
+        [string[]]$ExtraExclude = @()
+    )
     $base = Get-IG5FullPath $Root
     $isRuntime = (Test-IG5Path (Join-Path $base 'ghidra\runtime.json')) -or (Test-IG5Path (Join-Path $base 'x64dbg\runtime.json'))
     $isPluginRoot = -not $isRuntime -and (Test-IG5Path (Join-Path $base 'package.json') Leaf) -and (Test-IG5Path (Join-Path $base 'index.js') Leaf)
@@ -125,8 +158,16 @@ function Get-IG5PackFiles {
         $directoryInfo = New-Object IO.DirectoryInfo (ConvertTo-IG5IOPath $dir)
         foreach ($entry in $directoryInfo.GetFileSystemInfos()) {
             $relative = Get-IG5RelativePath $base $entry.FullName
+            if ($ExtraExclude.Count) {
+                $skipExtra = $false
+                foreach ($excluded in $ExtraExclude) {
+                    $trimEx = $excluded.TrimEnd('/')
+                    if ($relative.Equals($trimEx, [StringComparison]::OrdinalIgnoreCase) -or $relative.StartsWith($trimEx + '/', [StringComparison]::OrdinalIgnoreCase)) { $skipExtra = $true; break }
+                }
+                if ($skipExtra) { continue }
+            }
             $filterPath = if ($isSourceTree) { 'third_party/sources/' + $relative } else { $relative }
-            if (-not $IncludeExcluded -and (Test-IG5ExcludedPath $filterPath -RuntimeRoot:$isRuntime)) { continue }
+            if (-not $IncludeExcluded -and (Test-IG5ExcludedPath $filterPath -RuntimeRoot:$isRuntime -PortableRelease:$PortableRelease -SampleSpecificFiles $SampleSpecificFiles)) { continue }
             if (-not $IncludeExcluded -and -not $IncludeUnlistedRootFiles -and $isPluginRoot -and $entry -isnot [IO.DirectoryInfo] -and $relative.IndexOf('/') -lt 0 -and $script:IG5PackRootFiles -notcontains $relative) {
                 if ($relative -match '\.(?:js|mjs|cjs|json|ps1|psm1|ya?ml)$') { throw "Unexpected plugin root file; add it to IG5PackRootFiles or move it out of the source tree: $relative" }
                 $script:IG5SkippedRootFiles.Add($relative)
@@ -283,15 +324,16 @@ function Assert-IG5RuntimePack {
 }
 
 function Copy-IG5Pack {
-    param([Parameter(Mandatory)][string]$From, [Parameter(Mandatory)][string]$To, [string[]]$ExtraExclude = @())
+    param(
+        [Parameter(Mandatory)][string]$From,
+        [Parameter(Mandatory)][string]$To,
+        [string[]]$ExtraExclude = @(),
+        [switch]$PortableRelease,
+        [string[]]$SampleSpecificFiles = @()
+    )
     [IO.Directory]::CreateDirectory((ConvertTo-IG5IOPath $To)) | Out-Null
-    foreach ($file in Get-IG5PackFiles $From) {
+    foreach ($file in Get-IG5PackFiles $From -PortableRelease:$PortableRelease -SampleSpecificFiles $SampleSpecificFiles -ExtraExclude $ExtraExclude) {
         $relative = Get-IG5RelativePath $From $file.FullName
-        $skip = $false
-        foreach ($excluded in $ExtraExclude) {
-            if ($relative -eq $excluded -or $relative.StartsWith($excluded.TrimEnd('/') + '/', [StringComparison]::OrdinalIgnoreCase)) { $skip = $true; break }
-        }
-        if ($skip) { continue }
         $destination = Resolve-IG5PackPath $To $relative
         [IO.Directory]::CreateDirectory((ConvertTo-IG5IOPath (Split-Path $destination -Parent))) | Out-Null
         [IO.File]::Copy((ConvertTo-IG5IOPath $file.FullName), (ConvertTo-IG5IOPath $destination), $true)
@@ -300,8 +342,9 @@ function Copy-IG5Pack {
 
 function Test-IG5RuntimeVersion {
     param([string]$AssetVersion, [string]$PluginVersion)
-    # 1.1/1.2 reuse the exact sealed native engines; compatibility is explicit.
-    # Keep the original manifests and SHA-256 pins byte-for-byte intact.
+    # 1.1/1.2/1.3 reuse the exact sealed 1.0.0 native engines; 1.4.0+ ships its own
+    # verified headless-slim runtime manifest matching exact pluginVersion.
+    # Keep the original 1.0.0 manifests and SHA-256 pins byte-for-byte intact.
     return ($AssetVersion -ceq $PluginVersion -or ($PluginVersion -cin @('1.1.0','1.2.0','1.3.0') -and $AssetVersion -ceq '1.0.0'))
 }
 
@@ -408,15 +451,18 @@ function Assert-IG5PluginSource {
         'adapters/x64dbg/adapter.py','adapters/x64dbg/native/ig5-bridge.dp32','adapters/x64dbg/native/ig5-bridge.dp64','adapters/x64dbg/native/sha256.json',
         'scripts/runtime_pack.ps1','scripts/recover_legacy_project_lock.mjs','scripts/bootstrap_distribution.ps1','scripts/distribution.json','install.ps1','uninstall.ps1','cordis.patch.yml','README.md','HARNESS_PLUGIN.md','LICENSE','THIRD_PARTY_NOTICES.txt')
     $sourcePackage = Read-IG5Text (Join-Path $Root 'package.json') | ConvertFrom-Json
-    if ([string]$sourcePackage.version -cin @('1.1.0','1.2.0','1.3.0')) { $required += @('capture_tools.js','source/capture_service.js','source/capture_proxy.js','source/capture_ca.js','source/capture_review.js','source/capture_payload.js','source/delivered_payload.js','source/capture_state_trace.js','source/protocol_state.js','adapters/ghidra/deobfuscation_analysis.py','adapters/ghidra/deobfuscation_symbolic.py') }
-    if ([string]$sourcePackage.version -cin @('1.1.0','1.2.0','1.3.0')) { $required += @('source/trace_jobs.js','worker/ig5_trace.py','worker/trace_analysis.py','worker/requirements-trace.txt','worker/trace_vendor/ig5-manifest.json','worker/trace_vendor/NOTICE.txt','worker/trace_vendor/triton.cp312-win_amd64.pyd','worker/trace_vendor/triton_library-1.0.0rc4.dist-info/RECORD','worker/trace_vendor/triton_library-1.0.0rc4.dist-info/LICENSE.txt','worker/trace_vendor/licenses/sources.json') }
-    if ([string]$sourcePackage.version -cin @('1.2.0','1.3.0')) { $required += @('source/delegation_control.js','source/result_artifacts.js','source/function_batches.js','source/capability_catalog.js','source/json_output.js','adapters/ghidra/elf_addresses.py','adapters/ghidra/result_capture.py','docs/RELEASE_1.2.0.md') }
-    if ([string]$sourcePackage.version -ceq '1.3.0') { $required += 'docs/RELEASE_1.3.0.md' }
+    $pkgVer = [string]$sourcePackage.version
+    if ($pkgVer -cin @('1.1.0','1.2.0','1.3.0') -or (Test-IG5VersionAtLeast $pkgVer '1.4.0')) { $required += @('capture_tools.js','source/capture_service.js','source/capture_proxy.js','source/capture_ca.js','source/capture_review.js','source/capture_payload.js','source/delivered_payload.js','source/capture_state_trace.js','source/protocol_state.js','adapters/ghidra/deobfuscation_analysis.py','adapters/ghidra/deobfuscation_symbolic.py') }
+    if ($pkgVer -cin @('1.1.0','1.2.0','1.3.0') -or (Test-IG5VersionAtLeast $pkgVer '1.4.0')) { $required += @('source/trace_jobs.js','worker/ig5_trace.py','worker/trace_analysis.py','worker/requirements-trace.txt','worker/trace_vendor/ig5-manifest.json','worker/trace_vendor/NOTICE.txt','worker/trace_vendor/triton.cp312-win_amd64.pyd','worker/trace_vendor/triton_library-1.0.0rc4.dist-info/RECORD','worker/trace_vendor/triton_library-1.0.0rc4.dist-info/LICENSE.txt','worker/trace_vendor/licenses/sources.json') }
+    if ($pkgVer -cin @('1.2.0','1.3.0') -or (Test-IG5VersionAtLeast $pkgVer '1.4.0')) { $required += @('source/delegation_control.js','source/result_artifacts.js','source/function_batches.js','source/capability_catalog.js','source/json_output.js','adapters/ghidra/elf_addresses.py','adapters/ghidra/result_capture.py','docs/RELEASE_1.2.0.md') }
+    if ($pkgVer -ceq '1.3.0' -or (Test-IG5VersionAtLeast $pkgVer '1.4.0')) { $required += @('docs/RELEASE_1.3.0.md','source/delegation_execution.js','source/investigation_root.js','source/investigation_assessment.js','source/investigation_verifier.js','source/autonomy_host.js','source/native_rea_bridge.js','source/native_js_static.js','source/native_android_bridge.js','source/analysis_trace_diff.js','source/delegation_messages.js','vendor/rea/rea.mjs','vendor/rea/LICENSE','vendor/rea/provenance.json') }
+    if (Test-IG5VersionAtLeast $pkgVer '1.4.0') { $required += @('docs/RELEASE_1.4.0.md','scripts/build_slim_donor.ps1') }
     if (-not $CoreOnly) { $required += 'third_party/sources/manifest.json' }
-    foreach ($skill in @('ig5-triage','ig5-deep-dive','ig5-patch-and-sign','ig5-diff','ig5-debug-live','ig5-crypto','ig5-protocol')) { $required += "skills/$skill/SKILL.md" }
+    foreach ($skill in @('ig5-triage','ig5-deep-dive','ig5-patch-and-sign','ig5-diff','ig5-debug-live','ig5-crypto','ig5-protocol','ig5-reverse-agent')) { $required += "skills/$skill/SKILL.md" }
     foreach ($relative in $required) { if (-not (Test-IG5Path (Resolve-IG5PackPath $Root $relative) Leaf)) { throw "安装源缺少插件文件: $relative" } }
     # Enumerate before network or profile writes; reject links in the source code.
-    foreach ($unused in Get-IG5PackFiles $Root) { }
+    $scanExclude = if ($CoreOnly) { @('runtimes', 'third_party/sources') } else { @() }
+    foreach ($unused in Get-IG5PackFiles $Root -ExtraExclude $scanExclude) { }
     if ($CoreOnly) { return }
     $parentManifest = Join-Path (Split-Path $Root -Parent) 'manifest.json'
     if (Test-IG5Path $parentManifest Leaf) {
@@ -431,15 +477,64 @@ function Assert-IG5PluginSource {
         # artifacts. The source-pack allowlist must not hide injected files here.
         Assert-IG5FileInventory $Root $files 'plugin' -IncludeUnlistedRootFiles
     }
-    Assert-IG5SourceAssets $Root
+    Assert-IG5SourceAssets $Root $pkgVer
 }
 
 function Assert-IG5SourceAssets {
-    param([string]$Root)
+    param([string]$Root, [string]$PluginVersion = '')
     $sourcesRoot = Join-Path $Root 'third_party\sources'
-    try { $sources = Read-IG5Text (Join-Path $sourcesRoot 'manifest.json') | ConvertFrom-Json }
+    $manifestPath = Join-Path $sourcesRoot 'manifest.json'
+    try { $sources = Read-IG5Text $manifestPath | ConvertFrom-Json }
     catch { throw '第三方源码清单 JSON 无效' }
     if ($sources.schemaVersion -ne 1 -or -not $sources.sources) { throw '第三方源码清单无效或为空' }
+    if (-not $PluginVersion -and (Test-IG5Path (Join-Path $Root 'package.json') Leaf)) {
+        try { $PluginVersion = [string](Read-IG5Text (Join-Path $Root 'package.json') | ConvertFrom-Json).version } catch {}
+    }
+    $companionPath = Join-Path $sourcesRoot 'companion-sources.json'
+    $anySourceDirPresent = $false
+    foreach ($source in $sources.sources) {
+        $dirCheck = Resolve-IG5PackPath $sourcesRoot ([string]$source.directory)
+        if (Test-IG5Path $dirCheck Container) { $anySourceDirPresent = $true; break }
+    }
+    if (-not $anySourceDirPresent -and (Test-IG5VersionAtLeast $PluginVersion '1.4.0') -and (Test-IG5Path $companionPath Leaf)) {
+        try { $companion = Read-IG5Text $companionPath | ConvertFrom-Json }
+        catch { throw '第三方伴随源码清单 JSON 无效' }
+        if ($companion.schemaVersion -ne 1 -or [string]$companion.pluginVersion -cne $PluginVersion -or
+            [string]$companion.archiveName -notmatch '^IG5-\d+\.\d+\.\d+-sources-compliance\.zip$' -or
+            [long]$companion.archiveBytes -le 0 -or [string]$companion.archiveSha256 -notmatch '^[a-f0-9]{64}$' -or
+            [string]$companion.sourceManifestSha256 -cne (Get-IG5Hash $manifestPath)) {
+            throw '第三方伴随源码清单元数据或主清单 SHA-256 校验失败'
+        }
+        foreach ($notice in @('THIRD_PARTY_NOTICES.txt', 'LICENSE')) {
+            if (-not (Test-IG5Path (Resolve-IG5PackPath $Root $notice) Leaf)) { throw "伴随源码模式缺少必需合规声明文件: $notice" }
+        }
+        $allowedFiles = @{ 'manifest.json' = $true; 'companion-sources.json' = $true }
+        $seenInv = @{}
+        foreach ($source in $sources.sources) {
+            $invRel = ([string]$source.fileInventory).Replace('\', '/')
+            $inventoryPath = Resolve-IG5PackPath $sourcesRoot $invRel
+            if ($seenInv.ContainsKey($invRel)) { throw "第三方源码清单重复: $invRel" }
+            $seenInv[$invRel] = $true
+            if (-not (Test-IG5Path $inventoryPath Leaf)) { throw "缺少第三方源码逐文件清单: $invRel" }
+            $expectedHash = [string]$companion.provenanceSha256.$invRel
+            if ($expectedHash -notmatch '^[a-f0-9]{64}$' -or (Get-IG5Hash $inventoryPath) -cne $expectedHash) {
+                throw "伴随源码溯源清单 SHA-256 不符: $invRel"
+            }
+            $inventoryText = Read-IG5Text $inventoryPath
+            $inventory = $inventoryText | ConvertFrom-Json
+            $rawRows = $inventoryText.TrimStart().StartsWith('[')
+            $inventoryRows = if ($rawRows) { @($inventory) } else { @($inventory.files) }
+            if (@($inventoryRows).Count -ne [long]$source.fileCount -or (-not $rawRows -and [long]$inventory.fileCount -ne [long]$source.fileCount)) {
+                throw "第三方源码数量不符: $($source.directory)"
+            }
+            $allowedFiles[$invRel] = $true
+        }
+        foreach ($file in Get-IG5PackFiles $sourcesRoot) {
+            $rel = Get-IG5RelativePath $sourcesRoot $file.FullName
+            if (-not $allowedFiles.ContainsKey($rel)) { throw "伴随源码目录含未登记文件: third_party/sources/$rel" }
+        }
+        return
+    }
     $seen = @{}
     foreach ($source in $sources.sources) {
         $directory = Resolve-IG5PackPath $sourcesRoot ([string]$source.directory)

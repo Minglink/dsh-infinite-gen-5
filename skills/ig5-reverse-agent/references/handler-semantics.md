@@ -72,4 +72,15 @@ BSR/BSF 等单条机器指令可能解码为内部 p-code 循环。一般需要�
 
 保持代码、表、字节码和上下文的写入来源及失效关系。未知地址写入可能别名到这些区域时，不能沿用文件常量。条件 handler 需要守卫、两侧状态转移及覆盖；rolling key 与 VIP/VSP 迁移必须作为数据流处理。没有全量组合证据时，保存局部摘要与下一处具体缺口，继续目标。
 
+## VM 录制观测、角色、取流与阶段恢复（`ig5_recovery` & `ig5_ir` 进阶）
+
+- **持续 VM 逆向规划与 `case_ref`**：按完整函数合同、运行采集、VM 模型、ISA、字节码程序和业务/覆盖义务规划（见 `../../../docs/VM_RECOVERY_FRAMEWORK.md`）。有封存 case 时单独调用 `ig5_recovery recovery={case_ref:{path,sha256}}`（只读规划入口，不混传其他参数；读取完整 `reportPath`/`reportSha256` 中的 `caseSnapshot`、引用核验和依赖；`executionAuthority=not-inspected`）。
+- **录制观测与存储事件（`observations` / `record_events` / `phase_model`）**：在原审批 `record_trace` 上显式加 `record_events=true` 可记录解码器 store 位置前后字节（共享 1MiB/512步/40秒预算，见 `../../../docs/NATIVE_STORE_EVENTS.md`）。随后单独调用 `ig5_recovery recovery={observations:{recordings:[{id,sha256}],target_sha256,offset:0,limit:32}}`（见 `../../../docs/VM_OBSERVATIONS.md`）。需研究代码变化时间关系时显式启用 `phase_model:true`（见 `../../../docs/VM_PHASE_MODEL.md`）；已有 context 时显式传 `phase_context_ref:{id,sha256}` 并给齐完整有序原录制清单，不把 `observationEpoch` 当全局 epoch，禁止跨观察点拼接。
+- **寻址角色采样（`roles`）**：调用 `ig5_recovery recovery={roles:{recordings:[{id,sha256}],target_sha256}}` 自动提出寻址/窄加载/间接控制候选（最多128位置、每处首4尾4），不由运行时 PC 猜首选文件地址（见 `../../../docs/VM_ADDRESS_ROLES.md`）。
+- **取流连接与语义核验（`flow`）**：调用 `ig5_recovery recovery={flow:{roles_ref:{id,sha256},target}}`（`target` 为同 SHA 原 PE，走 Java 完整状态与首指令投影，见 `../../../docs/VM_FETCH_FLOW.md`）。可显式加 `semantic_check:true` 获取独立回放见证（`assessed-v1`，仅对所选普通 IR 路径成立）。
+- **重复路径核验与分页（`recurrences`）**：调用 `ig5_recovery recovery={recurrences:{flow_ref:{id,sha256}}}`；首尾采样重复同类主体时可显式设置 `sample_strategy:"distinct-source-targets",pair_offset:0`，按八组合分页读取 `nextPairOffset` 并交 `handlers`，勿预填地址或 opcode 标签。
+- **分发主体静态投影（`handlers`）**：调用 `ig5_recovery recovery={handlers:{recurrences_ref:{id,sha256},target}}` 自动选择观测到的分发主体做 Java 静态投影，核对全部 16 末态 GPR、全部有序 STORE、相对控制两后继与 `partial` 原因（见 `../../../docs/VM_FETCH_FLOW.md#recorded-handler-bodies`）。
+- **候选路径发现与 Java 解码后备（`discover` / `projection_decoder`）**：无逐条地址清单时先用 `ig5_ir level=discover`（可选 `follow_direct_calls=true` 进入规范 `E8` callee，RET 始终停，规范零位移见 `../../../docs/CALL_REL0.md` 与 `../../../docs/PATH_DISCOVERY.md`），再把 `candidatePath` 交显式 `projection_decoder="java"` 的 `project`（见 `../../../docs/JAVA_PROJECTION.md`）。若带 `analysisFailure` 报告路径和 SHA，先核对失败阶段回执（`failed-unverified` 不算通过）。
+- **保存标志映像与过渡链合成（`opaque-status` / `transition-chain`）**：当 VM handler 通过 `PUSHFQ` 保存状态到虚拟栈时，单段 `project` 可选 `projection_mode="opaque-status"`（核对 `knownFlags`、`knownMask`/`unknownMask`、`freshInputBits`/`effectiveUnknownBits`；`handler250` 研究 67 个初始字节中仅 1 个新增、4 个表字节复用，见 `../../../docs/OPAQUE_STATUS_PROJECTION.md`）。多段 `compose` 遇到 flat 深度限制可选 `representation="transition-chain"`（见 `../../../docs/TRANSITION_CHAIN.md`），保留跨段标志映像时配 `template_mode="opaque-status"`（读取 `layers[].flagImages` 实际 STORE 根与 18 个 `state_binding.source` 等式；固定 3.11 的 `136/78` 接点归纳见 `../../../docs/CONTEXT_WRITE_JOIN.md` 与 `../../../docs/OPAQUE_STATUS_COMPOSITION.md`）。
+
 参考架构研究见 [研究与引擎选择](strategy.md)；完整输出、函数返回及业务覆盖的验收区别见 [证据与停止判断](evidence.md)。

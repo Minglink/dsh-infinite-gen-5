@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([switch]$KeepFixture)
 $ErrorActionPreference = 'Stop'
 $sourceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -56,13 +56,13 @@ try {
     Put (Join-Path $fixtureRoot 'optional-invalid\mergen\manifest.json') '{"files":[]}'
     Expect-Failure { Assert-IG5RuntimeExtensions (Join-Path $fixtureRoot 'optional-invalid') } 'manifest pin mismatch'
     Pass 'optional runtimes cannot replace fixed manifests with self-authenticated inventories'
-    foreach ($pair in @(@('1.0.0','1.0.0'), @('1.1.0','1.1.0'), @('1.0.0','1.1.0'), @('1.0.0','1.2.0'), @('1.2.0','1.2.0'), @('1.0.0','1.3.0'), @('1.3.0','1.3.0'))) {
+    foreach ($pair in @(@('1.0.0','1.0.0'), @('1.1.0','1.1.0'), @('1.0.0','1.1.0'), @('1.0.0','1.2.0'), @('1.2.0','1.2.0'), @('1.0.0','1.3.0'), @('1.3.0','1.3.0'), @('1.4.0','1.4.0'))) {
         Check (Test-IG5RuntimeVersion $pair[0] $pair[1]) "Expected asset $($pair[0]) to support plugin $($pair[1])"
     }
-    foreach ($pair in @(@('0.9.0','1.1.0'), @('1.2.0','1.1.0'), @('1.1.0','1.0.0'), @('1.0.0','0.9.0'), @('1.1.0','1.2.0'), @('1.0.0','1.2.1'), @('1.0.0','1.1.1'), @('1.0.0','1.1.0-beta.1'), @('','1.1.0'), @('1.0.0 ','1.1.0'))) {
+    foreach ($pair in @(@('0.9.0','1.1.0'), @('1.2.0','1.1.0'), @('1.1.0','1.0.0'), @('1.0.0','0.9.0'), @('1.1.0','1.2.0'), @('1.0.0','1.2.1'), @('1.0.0','1.1.1'), @('1.0.0','1.1.0-beta.1'), @('1.0.0','1.4.0'), @('','1.1.0'), @('1.0.0 ','1.1.0'))) {
         Check (-not (Test-IG5RuntimeVersion $pair[0] $pair[1])) "Unexpected version reuse: $($pair[0]) -> $($pair[1])"
     }
-    Pass 'native runtime reuse is exact 1.0.0 -> 1.1.0/1.2.0/1.3.0 only, with normal exact-version matches'
+    Pass 'native runtime reuse is exact 1.0.0 -> 1.1.0/1.2.0/1.3.0 only, with normal exact-version matches including 1.4.0'
 
     $descriptorFile = Join-Path $sourceRoot 'scripts\distribution.json'
     $descriptorHash = Get-IG5Hash $descriptorFile
@@ -146,6 +146,34 @@ try {
     Check ($bootstrap -match '\$release\.pluginVersion -ne \$Descriptor\.pluginVersion') 'donor outer release must still match its sealed descriptor'
     Check ((Get-IG5Hash $descriptorFile) -ceq $descriptorHash) 'test changed source distribution pins'
     Pass 'install/package/bootstrap retain version and donor identity checks without changing the pinned descriptor'
+
+    # Phase 4 (v1.4.0): portable release exclusions & companion compliance sources validation.
+    $sampleSpecific = @(Get-IG5SampleSpecificFiles $sourceRoot)
+    Check ($sampleSpecific.Count -ge 15) 'sample-specific.json list must load dynamically'
+    Check (-not (Test-IG5ExcludedPath 'archive/old.js')) 'dev scan keeps archive/'
+    Check (Test-IG5ExcludedPath 'archive/old.js' -PortableRelease -SampleSpecificFiles $sampleSpecific) 'portable release excludes archive/'
+    Check (Test-IG5ExcludedPath 'docs/review/ledger.json' -PortableRelease -SampleSpecificFiles $sampleSpecific) 'portable release excludes docs/review/'
+    Check (Test-IG5ExcludedPath 'scripts/test_audit_regressions.mjs' -PortableRelease -SampleSpecificFiles $sampleSpecific) 'portable release excludes scripts/test_*'
+    Check (Test-IG5ExcludedPath 'scripts/accept_foo.mjs' -PortableRelease -SampleSpecificFiles $sampleSpecific) 'portable release excludes scripts/accept_*'
+    Check (Test-IG5ExcludedPath 'scripts/prove_handler17_semantics.py' -PortableRelease -SampleSpecificFiles $sampleSpecific) 'portable release excludes sample-specific.json scripts'
+    Check (-not (Test-IG5ExcludedPath 'scripts/build_slim_donor.ps1' -PortableRelease -SampleSpecificFiles $sampleSpecific)) 'portable release keeps runtime/build scripts'
+    Check (-not (Test-IG5ExcludedPath 'third_party/sources/ghidra-master/archive/x.c' -PortableRelease -SampleSpecificFiles $sampleSpecific)) 'upstream source paths unaffected by portable dev filter'
+
+    $v14Fixture = Join-Path $fixtureRoot 'v14-companion'
+    Put (Join-Path $v14Fixture 'package.json') '{"name":"dsh-infinite-gen-5","version":"1.4.0"}'
+    Put (Join-Path $v14Fixture 'THIRD_PARTY_NOTICES.txt') 'notices'
+    Put (Join-Path $v14Fixture 'LICENSE') 'license'
+    Put (Join-Path $v14Fixture 'third_party\sources\provenance\demo.files.json') '[{"path":"a.c","bytes":1,"sha256":"0000000000000000000000000000000000000000000000000000000000000000"}]'
+    Put (Join-Path $v14Fixture 'third_party\sources\manifest.json') '{"schemaVersion":1,"sources":[{"directory":"demo","fileInventory":"provenance/demo.files.json","fileCount":1}]}'
+    $mSha = Get-IG5Hash (Join-Path $v14Fixture 'third_party\sources\manifest.json')
+    $pSha = Get-IG5Hash (Join-Path $v14Fixture 'third_party\sources\provenance\demo.files.json')
+    $compJson = @{ schemaVersion=1; pluginVersion='1.4.0'; archiveName='IG5-1.4.0-sources-compliance.zip'; archiveBytes=12345; archiveSha256=('a'*64); sourceManifestSha256=$mSha; provenanceSha256=@{'provenance/demo.files.json'=$pSha} } | ConvertTo-Json -Depth 6
+    Put (Join-Path $v14Fixture 'third_party\sources\companion-sources.json') $compJson
+    Assert-IG5SourceAssets $v14Fixture '1.4.0'
+    Expect-Failure { Assert-IG5SourceAssets $v14Fixture '1.3.0' } '安装源缺少文件'
+    Put (Join-Path $v14Fixture 'third_party\sources\companion-sources.json') ($compJson.Replace($pSha, ('b'*64)))
+    Expect-Failure { Assert-IG5SourceAssets $v14Fixture '1.4.0' } '伴随源码溯源清单 SHA-256 不符'
+    Pass 'v1.4.0 portable dev-test exclusions and companion compliance sources validation pass with tamper rejection'
     Write-Output "CAPTURE PACK REGRESSIONS PASSED ($passed scenarios; placeholder source fixture, no native engine/profile changes)"
 } finally {
     if ($KeepFixture) { Write-Output "FIXTURE_ROOT=$fixtureRoot" }

@@ -1,0 +1,51 @@
+{
+  "schema": "ig5-vendor-provenance-v2",
+  "package": "rea-agents",
+  "version": "6.4.0",
+  "license": "MIT",
+  "copyright": "Copyright (c) 2026 morluto",
+  "packageIntegrity": "sha512-c0rIl7uxYSwYqB0YmHFv/2EPO98EZWZNizK/4IvOJBidLu3nEjre0McEbOH5/LSvAuMuTRmImjOqbFUGPeT+AA==",
+  "pinnedFiles": {
+    "package.json": {
+      "bytes": 19795,
+      "sha256": "faafbb7a9a4a340ec9b91a5acf79567fd537401dc8d98da9b0ea6d26a9853ca1"
+    },
+    "LICENSE": {
+      "bytes": 1064,
+      "sha256": "798f9e4d18e49b30bf2f12696c8ced73dc4e1413da375a333d01281543a1ea8b"
+    },
+    "release-manifest.json": {
+      "bytes": 1186543,
+      "sha256": "564b1ac6e260bf81a7d2ef8743fdb9352a99d97991e8b0b8cc0f45bae96ac678"
+    },
+    "scripts/rea.mjs": {
+      "bytes": 3786,
+      "sha256": "3554288a08c455fa419dad662d73710fb17debe94b9e71dd1282761117c5981e"
+    },
+    "rea.mjs": {
+      "bytes": 3786,
+      "sha256": "3554288a08c455fa419dad662d73710fb17debe94b9e71dd1282761117c5981e"
+    },
+    "dist/cli.js": {
+      "bytes": 5373,
+      "sha256": "de0b36933b83e904a3689b367f5a047898f73bc9cc118ff58cf50ce7adfd443e"
+    },
+    "dist/cliCommandNames.js": {
+      "bytes": 8480,
+      "sha256": "2904d9aeee7b669bf0c9aa2d8a54698b2f5d172901242bd3d024afb50e374c10"
+    },
+    "dist/composition/javascriptAnalysisWorkerProcess.js": {
+      "bytes": 3224,
+      "sha256": "53140aa10c4c8d30eb2e1a68504569907d7ad740253e3cf37c200773cce51848"
+    }
+  },
+  "pinnedDependencies": {
+    "@babel/parser": "8.0.4",
+    "@babel/types": "8.0.4",
+    "@electron/asar": "4.2.0",
+    "incur": "0.6.1",
+    "parse5": "8.0.1",
+    "zod": "4.4.3"
+  },
+  "scopeNote": "Static non-executing JavaScript/Electron application reconstruction invokes rea-agents@6.4.0 after multi-file dist/ + release-manifest + dependency version verification. Active Windows Electron & multi-process observation uses IG5's own Win32 Job Object supervisor (worker/win32_job_supervisor.py) and non-cooperative BrowserWindow DOM/IPC observer."
+}

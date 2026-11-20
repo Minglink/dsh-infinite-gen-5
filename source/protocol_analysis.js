@@ -253,6 +253,117 @@ export function decodeFrames(input, options = {}) {
   return result;
 }
 
+function hasStandardMediaOrTextMagic(buffer) {
+  if (buffer.length < 4) return false;
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return true; // PNG
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return true; // JPEG
+  if (buffer.subarray(0, 4).equals(Buffer.from('GIF8', 'ascii'))) return true; // GIF
+  if (buffer.length >= 12 && buffer.subarray(0, 4).equals(Buffer.from('RIFF', 'ascii')) && buffer.subarray(8, 12).equals(Buffer.from('WEBP', 'ascii'))) return true; // WebP
+  if (buffer.subarray(0, 4).equals(Buffer.from('%PDF', 'ascii'))) return true; // PDF
+  if (buffer[0] === 0x50 && buffer[1] === 0x4b && (buffer[2] === 0x03 || buffer[2] === 0x05)) return true; // ZIP
+  if (buffer[0] === 0x1f && buffer[1] === 0x8b) return true; // GZIP
+  const head = buffer.subarray(0, Math.min(buffer.length, 32));
+  const allPrintableText = head.every(b => b === 9 || b === 10 || b === 13 || (b >= 32 && b <= 126));
+  if (allPrintableText) {
+    const trimmed = head.toString('ascii').trimStart();
+    if (/^(?:\{|\[|<|HTTP\/|GET |POST |PUT |DELETE |HEAD )/.test(trimmed)) return true;
+  }
+  return false;
+}
+
+function scanProtobufVarintWire(buffer, maxFields = 64) {
+  if (buffer.length < 2 || buffer.length > 65536) return null;
+  let pos = 0;
+  let fields = 0;
+  const wireCounts = { varint: 0, fixed64: 0, lengthDelimited: 0, fixed32: 0 };
+  const readVarint64 = () => {
+    let val = 0n;
+    for (let i = 0; i < 10; i++) {
+      if (pos >= buffer.length) return null;
+      const b = buffer[pos++];
+      if (i === 9 && b > 1) return null;
+      if (i > 0 && b === 0) return null; // non-canonical overlong varint
+      val |= BigInt(b & 0x7f) << BigInt(i * 7);
+      if (!(b & 0x80)) return val;
+    }
+    return null;
+  };
+  while (pos < buffer.length && fields < maxFields) {
+    const tag = readVarint64();
+    if (tag === null || tag <= 0n || tag > 0x7fffffffn) return null;
+    const wireType = Number(tag & 7n);
+    const fieldNumber = Number(tag >> 3n);
+    if (fieldNumber < 1 || fieldNumber > 2047) return null;
+    if (wireType === 0) {
+      if (readVarint64() === null) return null;
+      wireCounts.varint++;
+    } else if (wireType === 1) {
+      if (pos + 8 > buffer.length) return null;
+      pos += 8;
+      wireCounts.fixed64++;
+    } else if (wireType === 2) {
+      const len = readVarint64();
+      if (len === null || len > BigInt(buffer.length - pos)) return null;
+      pos += Number(len);
+      wireCounts.lengthDelimited++;
+    } else if (wireType === 5) {
+      if (pos + 4 > buffer.length) return null;
+      pos += 4;
+      wireCounts.fixed32++;
+    } else {
+      return null;
+    }
+    fields++;
+  }
+  if (pos !== buffer.length || fields < 2) return null;
+  // Require at least one non-printable byte so ordinary ASCII text isn't misclassified as Protobuf
+  const hasBinaryByte = buffer.subarray(0, Math.min(buffer.length, 64)).some(b => b < 9 || (b > 13 && b < 32) || b > 126);
+  if (!hasBinaryByte) return null;
+  return { fields, wireCounts };
+}
+
+/**
+ * Read-only heuristic check for binary framing disguised under non-binary extensions/MIME types:
+ * flags payloads lacking standard image/document/text magic that match either a 20B fixed header + 4B BE/LE length
+ * envelope or valid Protobuf wire-format key/value framing.
+ */
+export function payloadDisguiseCheck(input) {
+  const buf = Buffer.isBuffer(input) ? input : Buffer.from(input || []);
+  const hasKnownMagic = hasStandardMediaOrTextMagic(buf);
+  const hints = [];
+  if (!hasKnownMagic && buf.length >= 24) {
+    for (const endianOrder of ['big', 'little']) {
+      const declared = endianOrder === 'big' ? buf.readUInt32BE(20) : buf.readUInt32LE(20);
+      if (declared > 0 && (declared === buf.length - 24 || declared === buf.length)) {
+        hints.push({
+          kind: 'fixed-20b-header-plus-u32-length',
+          headerBytes: 24,
+          lengthOffset: 20,
+          lengthEndian: endianOrder,
+          declaredLength: declared,
+          relation: declared === buf.length ? 'total-byte-length' : 'body-bytes-after-24b-header',
+        });
+      }
+    }
+  }
+  if (!hasKnownMagic) {
+    const pb = scanProtobufVarintWire(buf);
+    if (pb) {
+      hints.push({
+        kind: 'protobuf-varint-wire-candidate',
+        fieldCount: pb.fields,
+        wireCounts: pb.wireCounts,
+      });
+    }
+  }
+  return {
+    missingStandardMediaOrTextMagic: !hasKnownMagic && buf.length > 0,
+    suspectedBinaryEnvelope: hints.length > 0,
+    candidates: hints,
+    note: 'Heuristic structural hint only; does not prove Content-Type spoofing or protocol identity.',
+  };
+}
+
 export function inspectBytes(input, options = {}) {
   const budget = limits(options), buffer = inputBuffer(input, budget);
   const counts = new Uint32Array(256);
@@ -260,7 +371,8 @@ export function inspectBytes(input, options = {}) {
   let entropy = 0;
   for (const n of counts) if (n) { const probability = n / buffer.length; entropy -= probability * Math.log2(probability); }
   const result = { ...base('inspect', buffer, budget), entropyBitsPerByte: entropy,
-    observations: [], strings: [], interpretation: 'Observations are byte evidence; they do not identify encryption, a protocol, or a complete format.' };
+    observations: [], strings: [], payloadDisguise: payloadDisguiseCheck(buffer),
+    interpretation: 'Observations are byte evidence; they do not identify encryption, a protocol, or a complete format.' };
   for (const size of [1, 2, 4]) if (buffer.length >= size) for (const order of size === 1 ? ['big'] : ['big', 'little']) {
     const value = Number(readUnsigned(buffer, 0, size, order));
     if (value === buffer.length || value === buffer.length - size)

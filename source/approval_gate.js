@@ -10,6 +10,7 @@ export const IG5_WRITE_TOOLS = new Set([
   'ig5_switch_repair', 'ig5_emulate',
   'ig5_sync',
   'ig5_capture_control',
+  'ig5_app_observe',
 ]);
 
 // 审批人必须能看到全部载荷。展示内容不截断；超过此上限的操作直接拒绝（失败即关闭），要求拆分后重试。
@@ -41,8 +42,12 @@ export function describeOperation(name, args) {
   return { detail, sha256, complete: detail.length <= APPROVAL_DISPLAY_LIMIT };
 }
 
-export function installApprovalGate(ctx, cfg) {
+export function installApprovalGate(ctx, cfg, options = {}) {
   ctx.on('tools/pre-execute', async (exec, next) => {
+    if (typeof options.beforePreExecute === 'function') {
+      const intercept = await options.beforePreExecute(exec);
+      if (intercept) return intercept;
+    }
     if (!IG5_WRITE_TOOLS.has(exec?.name)) return next();
     const args = exec?.arguments ?? {};
     const destination = args.guest_profile !== undefined ? ` guest=${args.guest_profile} binding=${args.guest_binding_sha256 || '[missing]'}` : '';
@@ -60,7 +65,28 @@ export function installApprovalGate(ctx, cfg) {
     };
     // Resolve the public approval seam here. Some host builds turn a rejected
     // `ask` into an allow; a plugin-owned deny must remain a deny.
-    if (exec?.signal?.aborted) return { kind: 'cancel' };
+    let isOwnerCleanup = false;
+    try {
+      if (typeof options.isAuthorizedOwnerCleanup === 'function') {
+        isOwnerCleanup = options.isAuthorizedOwnerCleanup(exec) === true;
+      } else {
+        const coord = options.coordination || ctx.get?.('ig5Coordination');
+        if (typeof coord?.hasActiveOwnerCleanup === 'function') {
+          const cleanArgs = args && typeof args === 'object' && args.research !== undefined
+            ? (() => { const copy = { ...args }; delete copy.research; return copy; })()
+            : args;
+          isOwnerCleanup = coord.hasActiveOwnerCleanup(exec?.agent, exec?.name, cleanArgs, {
+            allowLocalFallback: exec?.agent?.session === undefined,
+          }) === true;
+        }
+      }
+    } catch {
+      isOwnerCleanup = false;
+    }
+    const approvalSignal = isOwnerCleanup && exec?.signal?.aborted
+      ? AbortSignal.timeout(10_000)
+      : exec?.signal;
+    if (!isOwnerCleanup && exec?.signal?.aborted) return { kind: 'cancel' };
     let approval;
     try { approval = ctx.get('approval'); } catch { /* uncomposed host */ }
     if (!exec?.agent || typeof approval?.request !== 'function')
@@ -68,12 +94,12 @@ export function installApprovalGate(ctx, cfg) {
     let outcome;
     try {
       outcome = await approval.request({ agent: exec.agent, toolName: exec.name,
-        callId: exec.callId, ...request, signal: exec.signal });
+        callId: exec.callId, ...request, signal: approvalSignal });
     } catch {
-      if (exec?.signal?.aborted) return { kind: 'cancel' };
+      if (approvalSignal?.aborted) return { kind: 'cancel' };
       return { kind: 'deny', reason: `IG5 ${exec.name} approval could not be confirmed; operation was not dispatched.` };
     }
-    if (exec?.signal?.aborted || outcome === 'cancelled') return { kind: 'cancel' };
+    if (approvalSignal?.aborted || outcome === 'cancelled') return { kind: 'cancel' };
     if (outcome !== 'allowed-once')
       return { kind: 'deny', reason: `IG5 ${exec.name} approval was ${outcome === 'rejected' ? 'rejected' : 'unavailable'}; operation was not dispatched.` };
     return next();
