@@ -180,6 +180,25 @@
 4. **先规则、后留出集独立验真**：通过 `ig5_workspace` 管理调查任务，先预提交可执行数学规则（`executableRule`），再跑未知留出输入（`isHoldout=true`），调用 `assess` 确认 `satisfied` 且资源已 `stop`/`close`。
 5. **子代理协作（可选）**：长周期复杂任务可开启共享预算 `ig5_profile collaboration={action:"start",max_calls:20}`，按 `handoff → claim → evidence → submit → review` 闭环派发子代理。详见 [调查工作流](docs/INVESTIGATION_WORKFLOW.md) 与 [子代理工作流](docs/SUBAGENT_WORKFLOW.md)。
 
+### 🔑 如何开启 IG5 写/调试类工具审批（动态调试必看）
+
+IG5 的 **14 个写/调试/仿真/观测工具**（`ig5_dbg`、`ig5_emulate`、`ig5_app_observe`、`ig5_patch_bytes`、`ig5_rename`、`ig5_run_idapython` 等）采用安全闭合门禁，**必须收到宿主明确的单次批准（`allowed-once`）才会执行**。
+
+如果你的 DeepSeek Harness 当前会话处于 **「完全权限（`danger-full-access`，审批策略为 `never`）」**，DSH 不会弹出审批卡片，从而导致所有 IG5 写/调试类工具被直接拒绝。请按以下任一方式开启审批（**无需进逆向工作台，立即对当前会话生效**）：
+
+1. **斜杠命令（推荐，最快）**：在对话框直接发送：
+   ```text
+   /permission workspace-write
+   ```
+   （或直接输入 `/permission` 弹出权限选择器，选择 **「工作区内修改」**）
+2. **界面按钮切换**：点击输入框旁的**权限档位按钮**，从「完全权限」切换为 **「工作区内修改（`workspace-write`）」**（对应审批策略 `ask`）。
+
+切换后，模型调用 `ig5_dbg` 等工具时，会话内会弹出 **「等待审批」** 卡片：点 **「允许一次」**（或按 `Enter`）即可放行，按 `Esc` 拒绝。
+
+> [!TIP]
+> - **设为新会话默认**：如希望以后新建会话默认可弹审批，进入 DSH **设置 → 通用 → 权限默认值**，改为 **「工作区内修改」**（仅影响新会话）。
+> - **调试结束后切回**：如需恢复无打扰模式，在对话框输入 `/permission danger-full-access` 即可切回。
+
 ## ⌨️ 常用指令与工具
 
 ### 斜杠命令
@@ -264,6 +283,9 @@ Windows x64 完整支持（安装包内置全部运行时）；macOS Apple Silic
 
 **IG5 和 DeepSeek 官方是什么关系？**
 完全独立的第三方开源项目，与 DeepSeek 官方或其关联主体无隶属、无商业合作、无官方背书。IG5 通过 DSH 插件机制扩展宿主能力，DSH 本身不随 IG5 分发。
+
+**为什么 `ig5_dbg` / 写入类工具直接被拒绝、不弹审批框？**
+因为 DeepSeek Harness 的「完全权限（`danger-full-access`）」把审批策略设为了 `never`（关闭弹窗），而 IG5 的 14 个写/调试工具强制要求宿主返回明确的单次批准（`allowed-once`）。解决方法：在当前会话直接输入 `/permission workspace-write`（或在输入框旁把权限档位切到 **「工作区内修改」**），即可弹出「等待审批 → 允许一次」卡片。详见上方[如何开启 IG5 写/调试类工具审批](#-如何开启-ig5-写调试类工具审批动态调试必看)。
 
 **为什么 IG5 要做 14 个审批门？**
 安全模型设计。所有修改字节、执行样本、仿真、重放、采集控制入口都必须经宿主显式审批（`allowed-once`），配合 Undo、审计流水与 SHA-256 哈希清单，让 AI 驱动的逆向操作在授权范围内可审计、可控、可回溯——这是 IG5 与"裸工具包"类插件的核心差异。
