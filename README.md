@@ -396,7 +396,7 @@ dsh-infinite-gen-5/
 
 > 📌 **非盈利开源公益项目，严禁任何主体用于商业售卖、付费倒卖或黑灰产牟利，仅供技术研究交流。**
 
-- 🔴 红队安全交流 11 群：`1043279187`
+- 🔴 红队安全交流 QQ 群：`1108766989`
 - 📺 腾讯频道技术交流社区：`pd86424753`
 - 🌐 技术研究论坛：[OpenOrigin](https://openorigin.link/)
 - 🛒 插件生态市场：[DeepSeek Harness Hub](https://deepseek.stream/)（生态入口不代表官方背书）

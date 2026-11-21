@@ -56,7 +56,7 @@
 
 - [全部 Releases](https://github.com/Minglink/dsh-infinite-gen-5/releases)：v1.3.0 完整安装包与历史版本
 - [README](https://github.com/Minglink/dsh-infinite-gen-5#readme)：能力表、对比表、FAQ、快速安装
-- 社区：红队安全交流 QQ 群 `1043279187` · 腾讯频道 `pd86424753` · 技术论坛 [OpenOrigin](https://openorigin.link/) · 插件市场 [DeepSeek Harness Hub](https://deepseek.stream/)
+- 社区：红队安全交流 QQ 群 `1108766989` · 腾讯频道 `pd86424753` · 技术论坛 [OpenOrigin](https://openorigin.link/) · 插件市场 [DeepSeek Harness Hub](https://deepseek.stream/)
 - 引用格式：`Minglink, "Infinite Gen 5 (IG5): An Open-Source Reverse-Engineering Workbench Plugin for DeepSeek Harness", GitHub repository dsh-infinite-gen-5, 2026. https://github.com/Minglink/dsh-infinite-gen-5`
 
 ---
